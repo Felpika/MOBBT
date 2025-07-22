@@ -87,7 +87,7 @@ def gerar_grafico_ettj(df):
         df_data = df_prefixado[df_prefixado['Data Base'] == data_base].sort_values('Data Vencimento')
         df_data['Dias Uteis'] = np.busday_count(df_data['Data Base'].values.astype('M8[D]'), df_data['Data Vencimento'].values.astype('M8[D]'))
         line_style = dict(dash='dash') if not legenda.startswith('Hoje') else {}
-        fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'] * 100, mode='lines+markers', name=legenda, line=line_style))
+        fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
 
     fig.update_layout(title_text='Curva de Juros (ETTJ) - Tesouro Prefixado', title_x=0.5,
                       xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)',
