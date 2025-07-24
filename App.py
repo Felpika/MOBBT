@@ -67,6 +67,7 @@ def gerar_grafico_ettj(df):
     # <-- DICIONÁRIO ATUALIZADO PARA INCLUIR TODAS AS OPÇÕES
     targets = {
         f'Hoje ({data_recente.strftime("%d/%m/%Y")})': data_recente,
+        '1 dia Atrás': data_recente - pd.DateOffset(days=1),
         '1 Semana Atrás': data_recente - pd.DateOffset(weeks=1),
         '1 Mês Atrás': data_recente - pd.DateOffset(months=1),
         '3 Meses Atrás': data_recente - pd.DateOffset(months=3),
