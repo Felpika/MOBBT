@@ -259,7 +259,7 @@ def calcular_variacao_commodities(dados_por_categoria):
     return df_results
 
 def gerar_dashboard_commodities(dados_preco_por_categoria):
-    """Cria um único dashboard com subplots, botões de período e zoom padrão de 1 ano."""
+    """Cria um único dashboard com subplots, botões de período e escala do eixo Y dinâmica."""
     if not dados_preco_por_categoria:
         return go.Figure().update_layout(title_text="Nenhuma commodity pôde ser carregada.")
 
@@ -293,10 +293,13 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
         else:
             start_date = end_date - timedelta(days=days)
         
+        # Argumentos para o botão: atualiza o range do eixo X e força o auto-range do eixo Y
         update_args = {}
         for i in range(1, total_subplots + 1):
-            axis_name = f'xaxis{i}' if i > 1 else 'xaxis'
-            update_args[f'{axis_name}.range'] = [start_date, end_date]
+            xaxis_name = f'xaxis{i}' if i > 1 else 'xaxis'
+            yaxis_name = f'yaxis{i}' if i > 1 else 'yaxis'
+            update_args[f'{xaxis_name}.range'] = [start_date, end_date]
+            update_args[f'{yaxis_name}.autorange'] = True # Força o eixo Y a reajustar a escala
 
         buttons.append(dict(method='relayout', label=label, args=[update_args]))
 
@@ -315,13 +318,36 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
         ]
     )
     
+    # Define a visão inicial (1 ano) com a escala do eixo Y ajustada manualmente
     start_date_1y = end_date - timedelta(days=365)
-    for i in range(1, total_subplots + 1):
-        axis_name = f'xaxis{i}' if i > 1 else 'xaxis'
-        fig.layout[axis_name].range = [start_date_1y, end_date]
+    
+    idx = 0
+    for df_cat in dados_preco_por_categoria.values():
+        for commodity_name in df_cat.columns:
+            i = idx + 1
+            xaxis_name = f'xaxis{i}' if i > 1 else 'xaxis'
+            yaxis_name = f'yaxis{i}' if i > 1 else 'yaxis'
+
+            # Define o range inicial do eixo X
+            fig.layout[xaxis_name].range = [start_date_1y, end_date]
+
+            # Filtra os dados no range inicial para calcular a escala ideal do eixo Y
+            series = df_cat[commodity_name]
+            filtered_series = series[(series.index >= start_date_1y) & (series.index <= end_date)].dropna()
+
+            if not filtered_series.empty:
+                min_y = filtered_series.min()
+                max_y = filtered_series.max()
+                # Adiciona um "respiro" (padding) de 5% acima e abaixo para melhor visualização
+                padding = (max_y - min_y) * 0.05
+                fig.layout[yaxis_name].range = [min_y - padding, max_y + padding]
+            else:
+                # Caso não haja dados no período, usa o auto-range padrão
+                fig.layout[yaxis_name].autorange = True
+            
+            idx += 1
 
     return fig
-
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
 
 st.title("📊 MOBBT")
