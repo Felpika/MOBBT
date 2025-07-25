@@ -14,6 +14,7 @@ from fredapi import Fred
 st.set_page_config(layout="wide", page_title="MOBBT")
 
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
+# (Funções inalteradas)
 @st.cache_data(ttl=3600*4)
 def obter_dados_tesouro():
     url = 'https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv'
@@ -151,49 +152,20 @@ def carregar_dados_commodities():
     return dados_por_categoria
 
 def calcular_variacao_commodities(dados_por_categoria):
-    """Calcula a variação de preços em diferentes períodos para todas as commodities."""
-    all_series = []
-    for df_cat in dados_por_categoria.values():
-        for col in df_cat.columns:
-            all_series.append(df_cat[col].dropna())
-
-    if not all_series:
-        return pd.DataFrame()
-
-    df_full = pd.concat(all_series, axis=1)
-    df_full.sort_index(inplace=True)
-
-    if df_full.empty:
-        return pd.DataFrame()
-
-    # --- CORREÇÃO APLICADA AQUI ---
-    latest_date = df_full.index.max()
-    latest_prices = df_full.loc[latest_date]
-    # --- FIM DA CORREÇÃO ---
-
-    periods = {
-        '1 Dia': 1, '1 Semana': 7, '1 Mês': 30,
-        '3 Meses': 91, '6 Meses': 182, '1 Ano': 365
-    }
-
+    all_series = [s for df in dados_por_categoria.values() for s in [df[col].dropna() for col in df.columns]]
+    if not all_series: return pd.DataFrame()
+    df_full = pd.concat(all_series, axis=1); df_full.sort_index(inplace=True)
+    if df_full.empty: return pd.DataFrame()
+    latest_date, latest_prices = df_full.index.max(), df_full.loc[df_full.index.max()]
+    periods = {'1 Dia': 1, '1 Semana': 7, '1 Mês': 30, '3 Meses': 91, '6 Meses': 182, '1 Ano': 365}
     results = []
-    for commodity_name in df_full.columns:
-        res = {'Commodity': commodity_name, 'Preço Atual': latest_prices[commodity_name]}
-        commodity_series = df_full[commodity_name].dropna()
-
-        for period_label, days_ago in periods.items():
-            past_date = latest_date - timedelta(days=days_ago)
-            past_price = commodity_series.asof(past_date)
-
-            if pd.notna(past_price) and past_price > 0:
-                variation = ((latest_prices[commodity_name] - past_price) / past_price)
-            else:
-                variation = np.nan
-            res[f'Variação {period_label}'] = variation
+    for name in df_full.columns:
+        res = {'Commodity': name, 'Preço Atual': latest_prices[name]}; series = df_full[name].dropna()
+        for label, days in periods.items():
+            past_date = latest_date - timedelta(days=days); past_price = series.asof(past_date)
+            res[f'Variação {label}'] = ((latest_prices[name] - past_price) / past_price) if pd.notna(past_price) and past_price > 0 else np.nan
         results.append(res)
-
-    df_results = pd.DataFrame(results).set_index('Commodity')
-    return df_results
+    return pd.DataFrame(results).set_index('Commodity')
 
 def colorir_negativo_positivo(val):
     if pd.isna(val) or val == 0: return ''
@@ -248,18 +220,65 @@ def carregar_dados_fred(api_key, tickers_dict):
     if not lista_series: return pd.DataFrame()
     return pd.concat(lista_series, axis=1).ffill()
 
+# --- FUNÇÃO CORRIGIDA ---
 def gerar_grafico_fred(df, ticker, titulo):
+    """Gera um gráfico interativo com Plotly para uma série de dados do FRED com escala Y dinâmica."""
     if ticker not in df.columns or df[ticker].isnull().all():
         return go.Figure().update_layout(title_text=f"Dados para {ticker} não encontrados.")
+
     fig = px.line(df, y=ticker, title=titulo, template='plotly_dark')
+    
     if ticker == 'T10Y2Y':
         fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Inversão", annotation_position="bottom right")
+    
     end_date = df.index.max()
-    buttons = [{'method': 'relayout', 'label': label, 'args': [{'xaxis.range': [end_date - timedelta(days=days), end_date]}]} for label, days in {'6M': 182, '1A': 365, '2A': 730, '5A': 1825}.items()]
-    buttons.append({'method': 'relayout', 'label': 'Máx', 'args': [{'xaxis.range': [df.index.min(), end_date]}]})
-    fig.update_layout(title_x=0.5, yaxis_title="Pontos Percentuais (%)", xaxis_title="Data", showlegend=False,
-                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
-    fig.update_xaxes(range=[end_date - timedelta(days=365), end_date])
+    buttons = []
+    periods = {'6M': 182, '1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
+
+    for label, days in periods.items():
+        if days == 'max':
+            start_date = df.index.min()
+        else:
+            start_date = end_date - timedelta(days=days)
+        
+        buttons.append(dict(
+            method='relayout',
+            label=label,
+            args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]
+        ))
+
+    fig.update_layout(
+        title_x=0.5,
+        yaxis_title="Pontos Percentuais (%)",
+        xaxis_title="Data",
+        showlegend=False,
+        updatemenus=[
+            dict(
+                type="buttons",
+                direction="right",
+                showactive=True,
+                x=1, xanchor="right", y=1.05, yanchor="bottom",
+                buttons=buttons
+            )
+        ]
+    )
+    
+    # Define a visão inicial com a escala Y correta
+    start_date_1y = end_date - timedelta(days=365)
+    filtered_series = df.loc[start_date_1y:end_date, ticker].dropna()
+
+    y_range = None
+    if not filtered_series.empty:
+        min_y = filtered_series.min()
+        max_y = filtered_series.max()
+        padding = (max_y - min_y) * 0.10 if (max_y - min_y) > 0 else 0.5
+        y_range = [min_y - padding, max_y + padding]
+
+    fig.update_layout(
+        xaxis_range=[start_date_1y, end_date],
+        yaxis_range=y_range
+    )
+    
     return fig
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
