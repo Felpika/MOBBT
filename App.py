@@ -311,40 +311,39 @@ with tab3:
         if not df_variacao.empty:
             cols_variacao = [col for col in df_variacao.columns if 'Variação' in col]
             format_dict = {'Preço Atual': '{:,.2f}'}; format_dict.update({col: '{:+.2%}' for col in cols_variacao})
+            # --- AJUSTE NA CHAMADA DO GRÁFICO ---
+            config={'modeBarButtonsToRemove': ['autoscale']}
             st.dataframe(df_variacao.style.format(format_dict, na_rep="-").applymap(colorir_negativo_positivo, subset=cols_variacao), use_container_width=True)
         else: st.warning("Não foi possível calcular a variação de preços.")
         st.markdown("---")
-        st.plotly_chart(gerar_dashboard_commodities(dados_commodities_categorizados), use_container_width=True)
+        fig_commodities = gerar_dashboard_commodities(dados_commodities_categorizados)
+        st.plotly_chart(fig_commodities, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
     else: st.warning("Não foi possível carregar os dados de Commodities.")
 
-# --- CONTEÚDO DA ABA 4: INDICADORES INTERNACIONAIS (ATUALIZADO) ---
+# --- CONTEÚDO DA ABA 4: INDICADORES INTERNACIONAIS ---
 with tab4:
     st.header("Monitor de Indicadores Internacionais (FRED)")
-
     FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
-    
-    # Dicionário de indicadores a serem exibidos
     INDICADORES_FRED = {
         'T10Y2Y': 'Spread da Curva de Juros dos EUA (10 Anos vs 2 Anos)',
         'BAMLH0A0HYM2': 'Spread de Crédito High Yield dos EUA (ICE BofA)',
     }
-    
     df_fred = carregar_dados_fred(FRED_API_KEY, INDICADORES_FRED)
+    config_fred = {'modeBarButtonsToRemove': ['autoscale']} # Config para remover o botão
 
     if not df_fred.empty:
-        # Gráfico 1: Spread da Curva de Juros
+        # Gráfico 1
         if 'T10Y2Y' in df_fred.columns:
             st.info("O **Spread da Curva de Juros dos EUA (T10Y2Y)** é um dos indicadores mais observados para prever recessões. Quando o valor fica negativo (inversão da curva), historicamente tem sido um sinal de que uma recessão pode ocorrer nos próximos 6 a 18 meses.")
             fig_t10y2y = gerar_grafico_fred(df_fred, 'T10Y2Y', INDICADORES_FRED['T10Y2Y'])
-            st.plotly_chart(fig_t10y2y, use_container_width=True)
+            st.plotly_chart(fig_t10y2y, use_container_width=True, config=config_fred)
         
         st.markdown("---")
 
-        # Gráfico 2: Spread de Crédito High Yield
+        # Gráfico 2
         if 'BAMLH0A0HYM2' in df_fred.columns:
-            st.info("O **Spread de Crédito High Yield** mede o prêmio de risco exigido pelo mercado para investir em títulos de empresas com maior risco de crédito (também chamados de 'junk bonds'). **Spreads crescentes** indicam aversão ao risco (medo) e podem sinalizar uma desaceleração econômica. **Spreads caindo** indicam apetite por risco (otimismo).")
+            st.info("O **Spread de Crédito High Yield** mede o prêmio de risco exigido pelo mercado para investir em títulos de empresas com maior risco de crédito. **Spreads crescentes** indicam aversão ao risco (medo) e podem sinalizar uma desaceleração econômica. **Spreads caindo** indicam apetite por risco (otimismo).")
             fig_hy = gerar_grafico_fred(df_fred, 'BAMLH0A0HYM2', INDICADORES_FRED['BAMLH0A0HYM2'])
-            st.plotly_chart(fig_hy, use_container_width=True)
-            
+            st.plotly_chart(fig_hy, use_container_width=True, config=config_fred)
     else:
         st.warning("Não foi possível carregar dados do FRED. Verifique a chave da API ou a conexão com a internet.")
