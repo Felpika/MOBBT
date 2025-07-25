@@ -1,4 +1,4 @@
-# app.py (Versão com Melhorias na Aba Commodities)
+# app.py (Versão com Cores na Tabela de Variação)
 
 import streamlit as st
 import pandas as pd
@@ -258,6 +258,13 @@ def calcular_variacao_commodities(dados_por_categoria):
     df_results = pd.DataFrame(results).set_index('Commodity')
     return df_results
 
+def colorir_negativo_positivo(val):
+    """Aplica cor verde para valores positivos e vermelho para negativos."""
+    if pd.isna(val) or val == 0:
+        return ''
+    color = '#4CAF50' if val > 0 else '#F44336' # Verde e Vermelho
+    return f'color: {color}'
+
 def gerar_dashboard_commodities(dados_preco_por_categoria):
     """Cria um único dashboard com subplots, botões de período e escala do eixo Y dinâmica."""
     if not dados_preco_por_categoria:
@@ -293,13 +300,12 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
         else:
             start_date = end_date - timedelta(days=days)
         
-        # Argumentos para o botão: atualiza o range do eixo X e força o auto-range do eixo Y
         update_args = {}
         for i in range(1, total_subplots + 1):
             xaxis_name = f'xaxis{i}' if i > 1 else 'xaxis'
             yaxis_name = f'yaxis{i}' if i > 1 else 'yaxis'
             update_args[f'{xaxis_name}.range'] = [start_date, end_date]
-            update_args[f'{yaxis_name}.autorange'] = True # Força o eixo Y a reajustar a escala
+            update_args[f'{yaxis_name}.autorange'] = True 
 
         buttons.append(dict(method='relayout', label=label, args=[update_args]))
 
@@ -318,7 +324,6 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
         ]
     )
     
-    # Define a visão inicial (1 ano) com a escala do eixo Y ajustada manualmente
     start_date_1y = end_date - timedelta(days=365)
     
     idx = 0
@@ -328,26 +333,23 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
             xaxis_name = f'xaxis{i}' if i > 1 else 'xaxis'
             yaxis_name = f'yaxis{i}' if i > 1 else 'yaxis'
 
-            # Define o range inicial do eixo X
             fig.layout[xaxis_name].range = [start_date_1y, end_date]
 
-            # Filtra os dados no range inicial para calcular a escala ideal do eixo Y
             series = df_cat[commodity_name]
             filtered_series = series[(series.index >= start_date_1y) & (series.index <= end_date)].dropna()
 
             if not filtered_series.empty:
                 min_y = filtered_series.min()
                 max_y = filtered_series.max()
-                # Adiciona um "respiro" (padding) de 5% acima e abaixo para melhor visualização
                 padding = (max_y - min_y) * 0.05
                 fig.layout[yaxis_name].range = [min_y - padding, max_y + padding]
             else:
-                # Caso não haja dados no período, usa o auto-range padrão
                 fig.layout[yaxis_name].autorange = True
             
             idx += 1
 
     return fig
+
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
 
 st.title("📊 MOBBT")
@@ -415,16 +417,18 @@ with tab3:
         df_variacao = calcular_variacao_commodities(dados_commodities_categorizados)
         
         if not df_variacao.empty:
-            format_dict = {
-                'Preço Atual': '{:,.2f}',
-                'Variação 1 Dia': '{:+.2%}',
-                'Variação 1 Semana': '{:+.2%}',
-                'Variação 1 Mês': '{:+.2%}',
-                'Variação 3 Meses': '{:+.2%}',
-                'Variação 6 Meses': '{:+.2%}',
-                'Variação 1 Ano': '{:+.2%}',
-            }
-            st.dataframe(df_variacao.style.format(format_dict, na_rep="-"), use_container_width=True)
+            # Define as colunas de variação para aplicar a formatação e as cores
+            cols_variacao = [col for col in df_variacao.columns if 'Variação' in col]
+            
+            # Cria o dicionário de formatação dinamicamente
+            format_dict = {'Preço Atual': '{:,.2f}'}
+            for col in cols_variacao:
+                format_dict[col] = '{:+.2%}'
+
+            # Aplica a formatação de números e a de cores
+            st.dataframe(df_variacao.style.format(format_dict, na_rep="-")
+                                           .applymap(colorir_negativo_positivo, subset=cols_variacao), 
+                         use_container_width=True)
         else:
             st.warning("Não foi possível calcular a variação de preços.")
 
