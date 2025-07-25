@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import os
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
-st.set_page_config(layout="wide", page_title="Dashboard Financeiro Consolidado")
+st.set_page_config(layout="wide", page_title="MOBBT")
 
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO (COM CACHE EM ARQUIVO) ---
 
