@@ -14,7 +14,6 @@ from fredapi import Fred
 st.set_page_config(layout="wide", page_title="MOBBT")
 
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
-# (Funções inalteradas)
 @st.cache_data(ttl=3600*4)
 def obter_dados_tesouro():
     url = 'https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv'
@@ -156,7 +155,8 @@ def calcular_variacao_commodities(dados_por_categoria):
     if not all_series: return pd.DataFrame()
     df_full = pd.concat(all_series, axis=1); df_full.sort_index(inplace=True)
     if df_full.empty: return pd.DataFrame()
-    latest_date, latest_prices = df_full.index.max(), df_full.loc[df_full.index.max()]
+    latest_date = df_full.index.max()
+    latest_prices = df_full.loc[latest_date]
     periods = {'1 Dia': 1, '1 Semana': 7, '1 Mês': 30, '3 Meses': 91, '6 Meses': 182, '1 Ano': 365}
     results = []
     for name in df_full.columns:
@@ -220,65 +220,28 @@ def carregar_dados_fred(api_key, tickers_dict):
     if not lista_series: return pd.DataFrame()
     return pd.concat(lista_series, axis=1).ffill()
 
-# --- FUNÇÃO CORRIGIDA ---
 def gerar_grafico_fred(df, ticker, titulo):
-    """Gera um gráfico interativo com Plotly para uma série de dados do FRED com escala Y dinâmica."""
     if ticker not in df.columns or df[ticker].isnull().all():
         return go.Figure().update_layout(title_text=f"Dados para {ticker} não encontrados.")
-
     fig = px.line(df, y=ticker, title=titulo, template='plotly_dark')
-    
     if ticker == 'T10Y2Y':
         fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Inversão", annotation_position="bottom right")
-    
     end_date = df.index.max()
     buttons = []
     periods = {'6M': 182, '1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
-
     for label, days in periods.items():
-        if days == 'max':
-            start_date = df.index.min()
-        else:
-            start_date = end_date - timedelta(days=days)
-        
-        buttons.append(dict(
-            method='relayout',
-            label=label,
-            args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]
-        ))
-
-    fig.update_layout(
-        title_x=0.5,
-        yaxis_title="Pontos Percentuais (%)",
-        xaxis_title="Data",
-        showlegend=False,
-        updatemenus=[
-            dict(
-                type="buttons",
-                direction="right",
-                showactive=True,
-                x=1, xanchor="right", y=1.05, yanchor="bottom",
-                buttons=buttons
-            )
-        ]
-    )
-    
-    # Define a visão inicial com a escala Y correta
+        start_date = df.index.min() if days == 'max' else end_date - timedelta(days=days)
+        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
+    fig.update_layout(title_x=0.5, yaxis_title="Pontos Percentuais (%)", xaxis_title="Data", showlegend=False,
+                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
     start_date_1y = end_date - timedelta(days=365)
     filtered_series = df.loc[start_date_1y:end_date, ticker].dropna()
-
     y_range = None
     if not filtered_series.empty:
-        min_y = filtered_series.min()
-        max_y = filtered_series.max()
+        min_y, max_y = filtered_series.min(), filtered_series.max()
         padding = (max_y - min_y) * 0.10 if (max_y - min_y) > 0 else 0.5
         y_range = [min_y - padding, max_y + padding]
-
-    fig.update_layout(
-        xaxis_range=[start_date_1y, end_date],
-        yaxis_range=y_range
-    )
-    
+    fig.update_layout(xaxis_range=[start_date_1y, end_date], yaxis_range=y_range)
     return fig
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
@@ -354,18 +317,34 @@ with tab3:
         st.plotly_chart(gerar_dashboard_commodities(dados_commodities_categorizados), use_container_width=True)
     else: st.warning("Não foi possível carregar os dados de Commodities.")
 
-# --- CONTEÚDO DA ABA 4: INDICADORES INTERNACIONAIS ---
+# --- CONTEÚDO DA ABA 4: INDICADORES INTERNACIONAIS (ATUALIZADO) ---
 with tab4:
     st.header("Monitor de Indicadores Internacionais (FRED)")
+
     FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
+    
+    # Dicionário de indicadores a serem exibidos
     INDICADORES_FRED = {
         'T10Y2Y': 'Spread da Curva de Juros dos EUA (10 Anos vs 2 Anos)',
+        'BAMLH0A0HYM2': 'Spread de Crédito High Yield dos EUA (ICE BofA)',
     }
+    
     df_fred = carregar_dados_fred(FRED_API_KEY, INDICADORES_FRED)
+
     if not df_fred.empty:
-        st.info("O **Spread da Curva de Juros dos EUA (T10Y2Y)** é um dos indicadores mais observados para prever recessões. Quando o valor fica negativo (inversão da curva), historicamente tem sido um sinal de que uma recessão pode ocorrer nos próximos 6 a 18 meses.")
-        for ticker, titulo in INDICADORES_FRED.items():
-            fig_fred = gerar_grafico_fred(df_fred, ticker, titulo)
-            st.plotly_chart(fig_fred, use_container_width=True)
+        # Gráfico 1: Spread da Curva de Juros
+        if 'T10Y2Y' in df_fred.columns:
+            st.info("O **Spread da Curva de Juros dos EUA (T10Y2Y)** é um dos indicadores mais observados para prever recessões. Quando o valor fica negativo (inversão da curva), historicamente tem sido um sinal de que uma recessão pode ocorrer nos próximos 6 a 18 meses.")
+            fig_t10y2y = gerar_grafico_fred(df_fred, 'T10Y2Y', INDICADORES_FRED['T10Y2Y'])
+            st.plotly_chart(fig_t10y2y, use_container_width=True)
+        
+        st.markdown("---")
+
+        # Gráfico 2: Spread de Crédito High Yield
+        if 'BAMLH0A0HYM2' in df_fred.columns:
+            st.info("O **Spread de Crédito High Yield** mede o prêmio de risco exigido pelo mercado para investir em títulos de empresas com maior risco de crédito (também chamados de 'junk bonds'). **Spreads crescentes** indicam aversão ao risco (medo) e podem sinalizar uma desaceleração econômica. **Spreads caindo** indicam apetite por risco (otimismo).")
+            fig_hy = gerar_grafico_fred(df_fred, 'BAMLH0A0HYM2', INDICADORES_FRED['BAMLH0A0HYM2'])
+            st.plotly_chart(fig_hy, use_container_width=True)
+            
     else:
         st.warning("Não foi possível carregar dados do FRED. Verifique a chave da API ou a conexão com a internet.")
