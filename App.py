@@ -221,28 +221,55 @@ def carregar_dados_fred(api_key, tickers_dict):
     if not lista_series: return pd.DataFrame()
     return pd.concat(lista_series, axis=1).ffill()
 
+# --- FUNÇÃO CORRIGIDA ---
 def gerar_grafico_fred(df, ticker, titulo):
+    """Gera um gráfico interativo com Plotly para uma série de dados do FRED com escala Y dinâmica."""
     if ticker not in df.columns or df[ticker].isnull().all():
         return go.Figure().update_layout(title_text=f"Dados para {ticker} não encontrados.")
+
     fig = px.line(df, y=ticker, title=titulo, template='plotly_dark')
+    
     if ticker == 'T10Y2Y':
         fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Inversão", annotation_position="bottom right")
+    
     end_date = df.index.max()
     buttons = []
     periods = {'6M': 182, '1A': 365, '2A': 730, '5A': 1825, '10A': 3650, 'Máx': 'max'}
+
     for label, days in periods.items():
         start_date = df.index.min() if days == 'max' else end_date - timedelta(days=days)
-        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
-    fig.update_layout(title_x=0.5, yaxis_title="Pontos Percentuais (%)", xaxis_title="Data", showlegend=False,
-                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
+        buttons.append(dict(
+            method='relayout',
+            label=label,
+            args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]
+        ))
+        
+    fig.update_layout(
+        title_x=0.5,
+        yaxis_title="Pontos Percentuais (%)",
+        xaxis_title="Data",
+        showlegend=False,
+        updatemenus=[dict(
+            type="buttons",
+            direction="right",
+            showactive=True,
+            x=1, xanchor="right", y=1.05, yanchor="bottom",
+            buttons=buttons
+        )]
+    )
+    
+    # Define a visão inicial com a escala Y correta usando update_xaxes e update_yaxes
     start_date_1y = end_date - timedelta(days=365)
     filtered_series = df.loc[start_date_1y:end_date, ticker].dropna()
-    y_range = None
+    
+    fig.update_xaxes(range=[start_date_1y, end_date])
+
     if not filtered_series.empty:
-        min_y, max_y = filtered_series.min(), filtered_series.max()
+        min_y = filtered_series.min()
+        max_y = filtered_series.max()
         padding = (max_y - min_y) * 0.10 if (max_y - min_y) > 0 else 0.5
-        y_range = [min_y - padding, max_y + padding]
-    fig.update_layout(xaxis_range=[start_date_1y, end_date], yaxis_range=y_range)
+        fig.update_yaxes(range=[min_y - padding, max_y + padding])
+    
     return fig
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
@@ -336,20 +363,15 @@ with tab4:
             st.info("O **Spread da Curva de Juros dos EUA (T10Y2Y)** é um dos indicadores mais observados para prever recessões. Quando o valor fica negativo (inversão da curva), historicamente tem sido um sinal de que uma recessão pode ocorrer nos próximos 6 a 18 meses.")
             fig_t10y2y = gerar_grafico_fred(df_fred, 'T10Y2Y', INDICADORES_FRED['T10Y2Y'])
             st.plotly_chart(fig_t10y2y, use_container_width=True, config=config_fred)
-        
         st.markdown("---")
-
         if 'BAMLH0A0HYM2' in df_fred.columns:
             st.info("O **Spread de Crédito High Yield** mede o prêmio de risco exigido pelo mercado para investir em títulos de empresas com maior risco de crédito. **Spreads crescentes** indicam aversão ao risco (medo) e podem sinalizar uma desaceleração econômica. **Spreads caindo** indicam apetite por risco (otimismo).")
             fig_hy = gerar_grafico_fred(df_fred, 'BAMLH0A0HYM2', INDICADORES_FRED['BAMLH0A0HYM2'])
             st.plotly_chart(fig_hy, use_container_width=True, config=config_fred)
-            
         st.markdown("---")
-        
         if 'DGS10' in df_fred.columns:
             st.info("A **taxa de juros do título americano de 10 anos (DGS10)** é uma referência para o custo do crédito global. **Juros em alta** podem indicar expectativas de crescimento econômico e inflação mais fortes. **Juros em queda** geralmente sinalizam uma busca por segurança ('flight to safety') ou expectativas de desaceleração.")
             fig_dgs10 = gerar_grafico_fred(df_fred, 'DGS10', INDICADORES_FRED['DGS10'])
             st.plotly_chart(fig_dgs10, use_container_width=True, config=config_fred)
-            
     else:
         st.warning("Não foi possível carregar dados do FRED. Verifique a chave da API ou a conexão com a internet.")
