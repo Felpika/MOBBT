@@ -54,7 +54,6 @@ def calcular_inflacao_implicita(df):
     """Calcula a inflação implícita comparando títulos Prefixados e IPCA+."""
     df_recente = df[df['Data Base'] == df['Data Base'].max()].copy()
 
-    # Prioriza títulos semestrais por terem mais liquidez, mas usa o principal se não houver
     tipos_ipca = ['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+']
     df_ipca_raw = df_recente[df_recente['Tipo Titulo'].isin(tipos_ipca)]
 
@@ -66,16 +65,13 @@ def calcular_inflacao_implicita(df):
 
     inflacao_implicita = []
     for venc_prefixado, row_prefixado in df_prefixados.iterrows():
-        # Encontra o Tesouro IPCA+ com o vencimento mais próximo
         venc_ipca_proximo = min(df_ipca.index, key=lambda d: abs(d - venc_prefixado))
 
-        # Define uma tolerância para o par ser considerado válido (ex: 1 ano e meio)
         if abs((venc_ipca_proximo - venc_prefixado).days) < 550:
             taxa_prefixada = row_prefixado['Taxa Compra Manha']
             row_ipca = df_ipca.loc[venc_ipca_proximo]
             taxa_ipca = row_ipca['Taxa Compra Manha']
 
-            # Fórmula de Fisher: ((1 + prefixada) / (1 + real)) - 1
             breakeven = (((1 + taxa_prefixada / 100) / (1 + taxa_ipca / 100)) - 1) * 100
 
             inflacao_implicita.append({
@@ -90,26 +86,39 @@ def calcular_inflacao_implicita(df):
 
     return pd.DataFrame(inflacao_implicita).sort_values('Vencimento do Prefixo').set_index('Vencimento do Prefixo')
 
-# 1.4 - NOVA FUNÇÃO PARA ANÁLISE DE SPREAD (INCLINAÇÃO DA CURVA)
+# 1.4 - FUNÇÃO DE SPREAD CORRIGIDA E ROBUSTA
 @st.cache_data
 def gerar_grafico_spread_juros(df):
-    """Calcula e plota o spread entre o juro prefixado mais longo e o mais curto."""
+    """Calcula e plota o spread entre o juro prefixado mais longo e o mais curto *atualmente negociados*."""
     df_prefixado = df[df['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
     if df_prefixado.empty:
-        return go.Figure()
+        return go.Figure().update_layout(title_text="Não há dados de Tesouro Prefixado.")
 
-    vencimentos = sorted(df_prefixado['Data Vencimento'].unique())
-    if len(vencimentos) < 2:
-        return go.Figure().update_layout(title_text="É necessário no mínimo 2 vencimentos para calcular o spread.")
+    # Filtra para pegar apenas os títulos disponíveis no dia mais recente
+    data_recente = df_prefixado['Data Base'].max()
+    titulos_disponiveis_hoje = df_prefixado[df_prefixado['Data Base'] == data_recente]
+    vencimentos_atuais = sorted(titulos_disponiveis_hoje['Data Vencimento'].unique())
 
-    venc_curto = vencimentos[0]
-    venc_longo = vencimentos[-1]
+    # Verifica se temos pelo menos 2 títulos para comparar
+    if len(vencimentos_atuais) < 2:
+        return go.Figure().update_layout(title_text="Menos de dois Prefixados disponíveis para calcular o spread.")
 
-    df_curto = df_prefixado[df_prefixado['Data Vencimento'] == venc_curto][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
-    df_longo = df_prefixado[df_prefixado['Data Vencimento'] == venc_longo][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
+    # Seleciona o mais curto e o mais longo da lista ATUAL
+    venc_curto = vencimentos_atuais[0]
+    venc_longo = vencimentos_atuais[-1]
 
-    df_spread = pd.merge(df_curto, df_longo, on='Data Base', suffixes=('_curto', '_longo')).dropna()
-    df_spread['Spread'] = (df_spread['Taxa Compra Manha_longo'] - df_spread['Taxa Compra Manha_curto']) * 100 # Em basis points
+    # Pega o histórico completo desses dois títulos selecionados
+    df_curto_hist = df_prefixado[df_prefixado['Data Vencimento'] == venc_curto][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
+    df_longo_hist = df_prefixado[df_prefixado['Data Vencimento'] == venc_longo][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
+
+    # Junta os históricos para os dias em que ambos foram negociados
+    df_spread = pd.merge(df_curto_hist, df_longo_hist, on='Data Base', suffixes=('_curto', '_longo')).dropna()
+
+    if df_spread.empty:
+        return go.Figure().update_layout(title_text=f"Não há histórico comum entre os títulos {pd.to_datetime(venc_longo).year} e {pd.to_datetime(venc_curto).year}.")
+
+    # Calcula o spread em basis points
+    df_spread['Spread'] = (df_spread['Taxa Compra Manha_longo'] - df_spread['Taxa Compra Manha_curto']) * 100
 
     fig = px.area(df_spread, y='Spread', title=f'Spread de Juros: Prefixo {pd.to_datetime(venc_longo).year} vs {pd.to_datetime(venc_curto).year}', template='plotly_dark')
     fig.update_layout(
@@ -119,7 +128,6 @@ def gerar_grafico_spread_juros(df):
         showlegend=False
     )
     return fig
-
 
 def gerar_grafico_ettj_curto_prazo(df):
     """Gera o gráfico da curva de juros (ETTJ) de CURTO PRAZO para títulos prefixados."""
@@ -443,7 +451,6 @@ with tab1:
                 format_func=lambda dt: pd.to_datetime(dt).strftime('%d/%m/%Y'), key='venc_tesouro'
             )
 
-        # Seletor para Taxa ou PU
         metrica_escolhida = st.radio(
             "Analisar por:", ('Taxa de Compra', 'Preço Unitário (PU)'),
             horizontal=True, key='metrica_tesouro',
@@ -460,7 +467,6 @@ with tab1:
         st.markdown("---")
 
         st.subheader("Análises da Curva de Juros")
-        # As duas colunas agora abrigam as análises de spread e inflação implícita
         col_analise1, col_analise2 = st.columns(2)
 
         with col_analise1:
@@ -487,7 +493,6 @@ with tab1:
 
         st.markdown("---")
 
-        # Gráficos da ETTJ mantidos no final
         st.subheader("Estrutura a Termo da Taxa de Juros (ETTJ) - Títulos Prefixados")
         fig_ettj_curto = gerar_grafico_ettj_curto_prazo(df_tesouro)
         st.plotly_chart(fig_ettj_curto, use_container_width=True)
@@ -524,20 +529,16 @@ with tab3:
     dados_commodities_categorizados = carregar_dados_commodities()
 
     if dados_commodities_categorizados:
-        # Tabela de variação exibida primeiro
         st.subheader("Variação Percentual de Preços")
         df_variacao = calcular_variacao_commodities(dados_commodities_categorizados)
 
         if not df_variacao.empty:
-            # Define as colunas de variação para aplicar a formatação e as cores
             cols_variacao = [col for col in df_variacao.columns if 'Variação' in col]
 
-            # Cria o dicionário de formatação dinamicamente
             format_dict = {'Preço Atual': '{:,.2f}'}
             for col in cols_variacao:
                 format_dict[col] = '{:+.2%}'
 
-            # Aplica a formatação de números e a de cores
             st.dataframe(df_variacao.style.format(format_dict, na_rep="-")
                                       .applymap(colorir_negativo_positivo, subset=cols_variacao),
                          use_container_width=True)
@@ -546,7 +547,6 @@ with tab3:
 
         st.markdown("---")
 
-        # Gráficos de preços históricos exibidos depois da tabela
         fig_commodities = gerar_dashboard_commodities(dados_commodities_categorizados)
         st.plotly_chart(fig_commodities, use_container_width=True)
     else:
