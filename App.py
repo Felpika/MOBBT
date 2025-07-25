@@ -1,4 +1,4 @@
-# app.py (Versão com Gráficos ETTJ Divididos)
+# app.py (Versão com Melhorias na Aba Commodities)
 
 import streamlit as st
 import pandas as pd
@@ -188,7 +188,7 @@ def carregar_dados_commodities():
                 if not dado.empty:
                     dados_commodities_raw[nome] = dado['Close']
             except Exception:
-                pass # Ignora falhas silenciosamente
+                pass 
 
     categorized_commodities = {
         'Energia': ['Petróleo Brent', 'Petróleo WTI', 'Óleo de Aquecimento', 'Gás Natural', 'Gasolina RBOB'],
@@ -215,8 +215,51 @@ def carregar_dados_commodities():
 
     return dados_por_categoria
 
+def calcular_variacao_commodities(dados_por_categoria):
+    """Calcula a variação de preços em diferentes períodos para todas as commodities."""
+    all_series = []
+    for df_cat in dados_por_categoria.values():
+        for col in df_cat.columns:
+            all_series.append(df_cat[col].dropna())
+
+    if not all_series:
+        return pd.DataFrame()
+
+    df_full = pd.concat(all_series, axis=1)
+    df_full.sort_index(inplace=True)
+
+    if df_full.empty:
+        return pd.DataFrame()
+
+    latest_date = df_full.index.max()
+    latest_prices = df_full.loc[latest_date]
+
+    periods = {
+        '1 Dia': 1, '1 Semana': 7, '1 Mês': 30,
+        '3 Meses': 91, '6 Meses': 182, '1 Ano': 365
+    }
+
+    results = []
+    for commodity_name in df_full.columns:
+        res = {'Commodity': commodity_name, 'Preço Atual': latest_prices[commodity_name]}
+        commodity_series = df_full[commodity_name].dropna()
+
+        for period_label, days_ago in periods.items():
+            past_date = latest_date - timedelta(days=days_ago)
+            past_price = commodity_series.asof(past_date)
+
+            if pd.notna(past_price) and past_price > 0:
+                variation = ((latest_prices[commodity_name] - past_price) / past_price)
+            else:
+                variation = np.nan
+            res[f'Variação {period_label}'] = variation
+        results.append(res)
+
+    df_results = pd.DataFrame(results).set_index('Commodity')
+    return df_results
+
 def gerar_dashboard_commodities(dados_preco_por_categoria):
-    """Cria um único dashboard com subplots para todas as commodities e botões de período."""
+    """Cria um único dashboard com subplots, botões de período e zoom padrão de 1 ano."""
     if not dados_preco_por_categoria:
         return go.Figure().update_layout(title_text="Nenhuma commodity pôde ser carregada.")
 
@@ -231,7 +274,7 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
     fig = make_subplots(rows=num_rows, cols=num_cols, subplot_titles=all_commodity_names)
     
     idx = 0
-    for categoria, df_cat in dados_preco_por_categoria.items():
+    for df_cat in dados_preco_por_categoria.values():
         for commodity_name in df_cat.columns:
             row = (idx // num_cols) + 1
             col = (idx % num_cols) + 1
@@ -255,11 +298,10 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
             axis_name = f'xaxis{i}' if i > 1 else 'xaxis'
             update_args[f'{axis_name}.range'] = [start_date, end_date]
 
-        buttons.append(dict(
-            method='relayout',
-            label=label,
-            args=[update_args]
-        ))
+        buttons.append(dict(method='relayout', label=label, args=[update_args]))
+
+    period_labels = list(periods.keys())
+    active_button_index = period_labels.index('1A') if '1A' in period_labels else 4
 
     fig.update_layout(
         title_text="Dashboard de Preços Históricos de Commodities",
@@ -268,9 +310,16 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
         showlegend=False,
         updatemenus=[
             dict(type="buttons", direction="right", showactive=True,
-                 x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)
+                 x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons,
+                 active=active_button_index)
         ]
     )
+    
+    start_date_1y = end_date - timedelta(days=365)
+    for i in range(1, total_subplots + 1):
+        axis_name = f'xaxis{i}' if i > 1 else 'xaxis'
+        fig.layout[axis_name].range = [start_date_1y, end_date]
+
     return fig
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
@@ -301,7 +350,6 @@ with tab1:
 
         st.markdown("---")
         
-        # Exibe os dois novos gráficos da ETTJ
         fig_ettj_curto = gerar_grafico_ettj_curto_prazo(df_tesouro)
         st.plotly_chart(fig_ettj_curto, use_container_width=True)
 
@@ -338,5 +386,25 @@ with tab3:
     if dados_commodities_categorizados:
         fig_commodities = gerar_dashboard_commodities(dados_commodities_categorizados)
         st.plotly_chart(fig_commodities, use_container_width=True)
+        
+        st.markdown("---")
+        st.subheader("Variação Percentual de Preços")
+        
+        df_variacao = calcular_variacao_commodities(dados_commodities_categorizados)
+        
+        if not df_variacao.empty:
+            format_dict = {
+                'Preço Atual': '{:,.2f}',
+                'Variação 1 Dia': '{:+.2%}',
+                'Variação 1 Semana': '{:+.2%}',
+                'Variação 1 Mês': '{:+.2%}',
+                'Variação 3 Meses': '{:+.2%}',
+                'Variação 6 Meses': '{:+.2%}',
+                'Variação 1 Ano': '{:+.2%}',
+            }
+            st.dataframe(df_variacao.style.format(format_dict, na_rep="-")),
+            use_container_width=True
+        else:
+            st.warning("Não foi possível calcular a variação de preços.")
     else:
         st.warning("Não foi possível carregar os dados de Commodities.")
