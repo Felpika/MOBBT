@@ -1,4 +1,4 @@
-# app.py (Versão Consolidada e Aprimorada)
+# app.py (Versão com Gráficos ETTJ Divididos)
 
 import streamlit as st
 import pandas as pd
@@ -46,9 +46,7 @@ def obter_dados_tesouro(cache_file='tesouro_data.parquet', max_age_hours=4):
 
 def gerar_grafico_historico_tesouro(df, tipo, vencimento):
     """Gera o gráfico de histórico de taxas para um título específico."""
-    # Filtra os dados e ordena pela Data Base para corrigir o "rabisco"
-    df_filtrado = df[(df['Tipo Titulo'] == tipo) & (df['Data Vencimento'] == vencimento)].sort_values('Data Base') # <-- LINHA CORRIGIDA
-
+    df_filtrado = df[(df['Tipo Titulo'] == tipo) & (df['Data Vencimento'] == vencimento)].sort_values('Data Base')
     fig = px.line(df_filtrado, x='Data Base', y='Taxa Compra Manha',
                   title=f'Histórico da Taxa: {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})',
                   template='plotly_dark')
@@ -133,6 +131,7 @@ def gerar_grafico_ettj_longo_prazo(df):
                       template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
+
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS (EXPANDIDO E ROBUSTO) ---
 
 @st.cache_data(ttl=3600*4) # Cache de 4 horas
@@ -187,10 +186,9 @@ def carregar_dados_commodities():
             try:
                 dado = yf.download(ticker, period='max', auto_adjust=True, progress=False)
                 if not dado.empty:
-                    # Armazena a série de preços de fechamento
                     dados_commodities_raw[nome] = dado['Close']
             except Exception:
-                pass # Ignora falhas silenciosamente para não poluir a UI
+                pass # Ignora falhas silenciosamente
 
     categorized_commodities = {
         'Energia': ['Petróleo Brent', 'Petróleo WTI', 'Óleo de Aquecimento', 'Gás Natural', 'Gasolina RBOB'],
@@ -211,9 +209,8 @@ def carregar_dados_commodities():
         }
         
         if series_da_categoria:
-            # <-- LINHA CORRIGIDA: Usando pd.concat para maior robustez
             df_cat = pd.concat(series_da_categoria, axis=1)
-            df_cat.columns = series_da_categoria.keys() # Garante que os nomes das colunas estão corretos
+            df_cat.columns = series_da_categoria.keys()
             dados_por_categoria[categoria] = df_cat
 
     return dados_por_categoria
@@ -253,8 +250,6 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
         else:
             start_date = end_date - timedelta(days=days)
         
-        # --- LÓGICA DE ATUALIZAÇÃO CORRIGIDA AQUI ---
-        # Cria um dicionário de argumentos para atualizar TODOS os eixos X
         update_args = {}
         for i in range(1, total_subplots + 1):
             axis_name = f'xaxis{i}' if i > 1 else 'xaxis'
@@ -263,10 +258,8 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
         buttons.append(dict(
             method='relayout',
             label=label,
-            # Usa o dicionário que contém as atualizações para todos os eixos
             args=[update_args]
         ))
-        # --- FIM DA LÓGICA CORRIGIDA ---
 
     fig.update_layout(
         title_text="Dashboard de Preços Históricos de Commodities",
@@ -306,8 +299,14 @@ with tab1:
             fig_historico = gerar_grafico_historico_tesouro(df_tesouro, tipo_selecionado, pd.to_datetime(vencimento_selecionado))
             st.plotly_chart(fig_historico, use_container_width=True)
 
-        fig_ettj = gerar_grafico_ettj(df_tesouro)
-        st.plotly_chart(fig_ettj, use_container_width=True)
+        st.markdown("---")
+        
+        # Exibe os dois novos gráficos da ETTJ
+        fig_ettj_curto = gerar_grafico_ettj_curto_prazo(df_tesouro)
+        st.plotly_chart(fig_ettj_curto, use_container_width=True)
+
+        fig_ettj_longo = gerar_grafico_ettj_longo_prazo(df_tesouro)
+        st.plotly_chart(fig_ettj_longo, use_container_width=True)
     else:
         st.warning("Não foi possível carregar os dados do Tesouro.")
 
