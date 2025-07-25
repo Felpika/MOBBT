@@ -8,13 +8,12 @@ import yfinance as yf
 from bcb import sgs
 from datetime import datetime, timedelta
 import os
-from fredapi import Fred # <-- Adicionada nova biblioteca
+from fredapi import Fred
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="MOBBT")
 
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
-# (As funções deste bloco permanecem inalteradas)
 @st.cache_data(ttl=3600*4)
 def obter_dados_tesouro():
     url = 'https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv'
@@ -119,7 +118,6 @@ def gerar_grafico_ettj_longo_prazo(df):
     return fig
 
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS ---
-# (As funções deste bloco permanecem inalteradas)
 @st.cache_data(ttl=3600*4)
 def carregar_dados_bcb():
     SERIES_CONFIG = {'Spread Bancário': {'id': 20783}, 'Inadimplência': {'id': 21082}, 'Crédito/PIB': {'id': 20622}, 'Juros Médio': {'id': 20714}, 'Confiança Consumidor': {'id': 4393}, 'IPCA': {'id': 16122}, 'Atraso 15-90d Total': {'id': 21006}, 'Atraso 15-90d Agro': {'id': 21069}, 'Inadimplência Crédito Rural': {'id': 21146}}
@@ -133,7 +131,6 @@ def carregar_dados_bcb():
     return df_full, config_sucesso
 
 # --- BLOCO 3: LÓGICA DO DASHBOARD DE COMMODITIES ---
-# (As funções deste bloco permanecem inalteradas)
 @st.cache_data(ttl=3600*4)
 def carregar_dados_commodities():
     commodities_map = {'Petróleo Brent': 'BZ=F', 'Cacau': 'CC=F', 'Petróleo WTI': 'CL=F', 'Algodão': 'CT=F', 'Ouro': 'GC=F', 'Cobre': 'HG=F', 'Óleo de Aquecimento': 'HO=F', 'Café': 'KC=F', 'Trigo (KC HRW)': 'KE=F', 'Madeira': 'LBS=F', 'Gado Bovino': 'LE=F', 'Gás Natural': 'NG=F', 'Suco de Laranja': 'OJ=F', 'Paládio': 'PA=F', 'Platina': 'PL=F', 'Gasolina RBOB': 'RB=F', 'Açúcar': 'SB=F', 'Prata': 'SI=F', 'Milho': 'ZC=F', 'Óleo de Soja': 'ZL=F', 'Aveia': 'ZO=F', 'Arroz': 'ZR=F', 'Soja': 'ZS=F'}
@@ -154,20 +151,49 @@ def carregar_dados_commodities():
     return dados_por_categoria
 
 def calcular_variacao_commodities(dados_por_categoria):
-    all_series = [s for df in dados_por_categoria.values() for s in [df[col].dropna() for col in df.columns]]
-    if not all_series: return pd.DataFrame()
-    df_full = pd.concat(all_series, axis=1); df_full.sort_index(inplace=True)
-    if df_full.empty: return pd.DataFrame()
-    latest_date, latest_prices = df_full.index.max(), df_full.loc[latest_date]
-    periods = {'1 Dia': 1, '1 Semana': 7, '1 Mês': 30, '3 Meses': 91, '6 Meses': 182, '1 Ano': 365}
+    """Calcula a variação de preços em diferentes períodos para todas as commodities."""
+    all_series = []
+    for df_cat in dados_por_categoria.values():
+        for col in df_cat.columns:
+            all_series.append(df_cat[col].dropna())
+
+    if not all_series:
+        return pd.DataFrame()
+
+    df_full = pd.concat(all_series, axis=1)
+    df_full.sort_index(inplace=True)
+
+    if df_full.empty:
+        return pd.DataFrame()
+
+    # --- CORREÇÃO APLICADA AQUI ---
+    latest_date = df_full.index.max()
+    latest_prices = df_full.loc[latest_date]
+    # --- FIM DA CORREÇÃO ---
+
+    periods = {
+        '1 Dia': 1, '1 Semana': 7, '1 Mês': 30,
+        '3 Meses': 91, '6 Meses': 182, '1 Ano': 365
+    }
+
     results = []
-    for name in df_full.columns:
-        res = {'Commodity': name, 'Preço Atual': latest_prices[name]}; series = df_full[name].dropna()
-        for label, days in periods.items():
-            past_date = latest_date - timedelta(days=days); past_price = series.asof(past_date)
-            res[f'Variação {label}'] = ((latest_prices[name] - past_price) / past_price) if pd.notna(past_price) and past_price > 0 else np.nan
+    for commodity_name in df_full.columns:
+        res = {'Commodity': commodity_name, 'Preço Atual': latest_prices[commodity_name]}
+        commodity_series = df_full[commodity_name].dropna()
+
+        for period_label, days_ago in periods.items():
+            past_date = latest_date - timedelta(days=days_ago)
+            past_price = commodity_series.asof(past_date)
+
+            if pd.notna(past_price) and past_price > 0:
+                variation = ((latest_prices[commodity_name] - past_price) / past_price)
+            else:
+                variation = np.nan
+            res[f'Variação {period_label}'] = variation
         results.append(res)
-    return pd.DataFrame(results).set_index('Commodity')
+
+    df_results = pd.DataFrame(results).set_index('Commodity')
+    return df_results
 
 def colorir_negativo_positivo(val):
     if pd.isna(val) or val == 0: return ''
@@ -209,43 +235,31 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
         idx += len(df_cat.columns)
     return fig
 
-# --- BLOCO 4: LÓGICA DO DASHBOARD DE INDICADORES INTERNACIONAIS (NOVO) ---
-
-@st.cache_data(ttl=3600*4) # Cache de 4 horas
+# --- BLOCO 4: LÓGICA DO DASHBOARD DE INDICADORES INTERNACIONAIS ---
+@st.cache_data(ttl=3600*4)
 def carregar_dados_fred(api_key, tickers_dict):
-    """Busca uma ou mais séries do FRED e as retorna em um único DataFrame."""
     fred = Fred(api_key=api_key)
     lista_series = []
     st.info("Carregando dados do FRED... (Cache de 4h)")
     for ticker in tickers_dict.keys():
         try:
-            serie = fred.get_series(ticker)
-            serie.name = ticker
-            lista_series.append(serie)
-        except Exception as e:
-            st.warning(f"Não foi possível carregar o ticker '{ticker}' do FRED: {e}")
+            serie = fred.get_series(ticker); serie.name = ticker; lista_series.append(serie)
+        except Exception as e: st.warning(f"Não foi possível carregar o ticker '{ticker}' do FRED: {e}")
     if not lista_series: return pd.DataFrame()
-    df_fred = pd.concat(lista_series, axis=1).ffill()
-    return df_fred
+    return pd.concat(lista_series, axis=1).ffill()
 
 def gerar_grafico_fred(df, ticker, titulo):
-    """Gera um gráfico interativo com Plotly para uma série de dados do FRED."""
     if ticker not in df.columns or df[ticker].isnull().all():
         return go.Figure().update_layout(title_text=f"Dados para {ticker} não encontrados.")
-
     fig = px.line(df, y=ticker, title=titulo, template='plotly_dark')
     if ticker == 'T10Y2Y':
         fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Inversão", annotation_position="bottom right")
-    
     end_date = df.index.max()
     buttons = [{'method': 'relayout', 'label': label, 'args': [{'xaxis.range': [end_date - timedelta(days=days), end_date]}]} for label, days in {'6M': 182, '1A': 365, '2A': 730, '5A': 1825}.items()]
     buttons.append({'method': 'relayout', 'label': 'Máx', 'args': [{'xaxis.range': [df.index.min(), end_date]}]})
-    
     fig.update_layout(title_x=0.5, yaxis_title="Pontos Percentuais (%)", xaxis_title="Data", showlegend=False,
                       updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
-    
-    start_date_1y = end_date - timedelta(days=365)
-    fig.update_xaxes(range=[start_date_1y, end_date])
+    fig.update_xaxes(range=[end_date - timedelta(days=365), end_date])
     return fig
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
@@ -321,26 +335,16 @@ with tab3:
         st.plotly_chart(gerar_dashboard_commodities(dados_commodities_categorizados), use_container_width=True)
     else: st.warning("Não foi possível carregar os dados de Commodities.")
 
-# --- CONTEÚDO DA ABA 4: INDICADORES INTERNACIONAIS (NOVO) ---
+# --- CONTEÚDO DA ABA 4: INDICADORES INTERNACIONAIS ---
 with tab4:
     st.header("Monitor de Indicadores Internacionais (FRED)")
-
-    # IMPORTANTE: Para uso em produção, recomenda-se usar o st.secrets para armazenar a chave.
-    # Ex: FRED_API_KEY = st.secrets["fred_api_key"]
     FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
-    
     INDICADORES_FRED = {
         'T10Y2Y': 'Spread da Curva de Juros dos EUA (10 Anos vs 2 Anos)',
-        # Adicione mais tickers aqui para expandir o dashboard no futuro
-        # 'FEDFUNDS': 'Taxa de Juros de Referência (FED)',
-        # 'DGS10': 'Juros do Título Americano de 10 Anos',
     }
-    
     df_fred = carregar_dados_fred(FRED_API_KEY, INDICADORES_FRED)
-
     if not df_fred.empty:
         st.info("O **Spread da Curva de Juros dos EUA (T10Y2Y)** é um dos indicadores mais observados para prever recessões. Quando o valor fica negativo (inversão da curva), historicamente tem sido um sinal de que uma recessão pode ocorrer nos próximos 6 a 18 meses.")
-        
         for ticker, titulo in INDICADORES_FRED.items():
             fig_fred = gerar_grafico_fred(df_fred, ticker, titulo)
             st.plotly_chart(fig_fred, use_container_width=True)
