@@ -487,7 +487,7 @@ with tab1:
                 st.warning("Não há pares de títulos disponíveis hoje para calcular a inflação implícita.")
 
         with col_analise2:
-            st.info("O **Spread de Juros** mostra a diferença entre as taxas de um título longo e um curto. Spread positivo (curva inclinada para cima): indica que os investidores exigem uma taxa maior para emprestar dinheiro por mais tempo, o que geralmente sinaliza expectativas de crescimento econômico e inflação no futuro. É um sinal típico de otimismo com a economia. Spread negativo (curva invertida): ocorre quando os juros de curto prazo são maiores que os de longo prazo. Isso pode indicar expectativas de recessão ou desaceleração econômica, pois os investidores buscam segurança nos títulos longos.")
+            st.info("O **Spread de Juros** mostra a diferença entre as taxas de um título longo e um curto. **Spread positivo (curva inclinada para cima)**: indica que os investidores exigem uma taxa maior para emprestar dinheiro por mais tempo, o que geralmente sinaliza expectativas de crescimento econômico e inflação no futuro. É um sinal típico de otimismo com a economia. **Spread negativo (curva invertida)**: ocorre quando os juros de curto prazo são maiores que os de longo prazo. Isso pode indicar expectativas de recessão ou desaceleração econômica, pois os investidores buscam segurança nos títulos longos.")
             fig_spread = gerar_grafico_spread_juros(df_tesouro)
             st.plotly_chart(fig_spread, use_container_width=True)
 
