@@ -55,8 +55,8 @@ def gerar_grafico_historico_tesouro(df, tipo, vencimento):
     fig.update_layout(title_x=0.5, yaxis_title="Taxa de Compra", xaxis_title="Data")
     return fig
 
-def gerar_grafico_ettj(df):
-    """Gera o gráfico da curva de juros (ETTJ) para títulos prefixados com lógica aprimorada."""
+def gerar_grafico_ettj_curto_prazo(df):
+    """Gera o gráfico da curva de juros (ETTJ) de CURTO PRAZO para títulos prefixados."""
     df_prefixado = df[df['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
     if df_prefixado.empty:
         return go.Figure().update_layout(title_text="Não há dados para 'Tesouro Prefixado'.")
@@ -64,10 +64,47 @@ def gerar_grafico_ettj(df):
     datas_disponiveis = sorted(df_prefixado['Data Base'].unique())
     data_recente = datas_disponiveis[-1]
 
-    # <-- DICIONÁRIO ATUALIZADO PARA INCLUIR TODAS AS OPÇÕES
     targets = {
         f'Hoje ({data_recente.strftime("%d/%m/%Y")})': data_recente,
         '1 dia Atrás': data_recente - pd.DateOffset(days=1),
+        '2 dias Atrás': data_recente - pd.DateOffset(days=2),
+        '3 dias Atrás': data_recente - pd.DateOffset(days=3),
+        '4 dias Atrás': data_recente - pd.DateOffset(days=4),
+        '5 dias Atrás': data_recente - pd.DateOffset(days=5),
+    }
+
+    datas_para_plotar = {}
+    for legenda_base, data_alvo in targets.items():
+        datas_validas = [d for d in datas_disponiveis if d <= data_alvo]
+        if datas_validas:
+            data_real = max(datas_validas)
+            if data_real not in datas_para_plotar.values():
+                legenda_final = f'{" ".join(legenda_base.split(" ")[:2])} ({data_real.strftime("%d/%m/%Y")})' if 'Atrás' in legenda_base else legenda_base
+                datas_para_plotar[legenda_final] = data_real
+
+    fig = go.Figure()
+    for legenda, data_base in datas_para_plotar.items():
+        df_data = df_prefixado[df_prefixado['Data Base'] == data_base].sort_values('Data Vencimento')
+        df_data['Dias Uteis'] = np.busday_count(df_data['Data Base'].values.astype('M8[D]'), df_data['Data Vencimento'].values.astype('M8[D]'))
+        line_style = dict(dash='dash') if not legenda.startswith('Hoje') else {}
+        fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
+
+    fig.update_layout(title_text='Curva de Juros (ETTJ) - Curto Prazo (últimos 5 dias)', title_x=0.5,
+                      xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)',
+                      template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    return fig
+
+def gerar_grafico_ettj_longo_prazo(df):
+    """Gera o gráfico da curva de juros (ETTJ) de LONGO PRAZO para títulos prefixados."""
+    df_prefixado = df[df['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
+    if df_prefixado.empty:
+        return go.Figure().update_layout(title_text="Não há dados para 'Tesouro Prefixado'.")
+
+    datas_disponiveis = sorted(df_prefixado['Data Base'].unique())
+    data_recente = datas_disponiveis[-1]
+
+    targets = {
+        f'Hoje ({data_recente.strftime("%d/%m/%Y")})': data_recente,
         '1 Semana Atrás': data_recente - pd.DateOffset(weeks=1),
         '1 Mês Atrás': data_recente - pd.DateOffset(months=1),
         '3 Meses Atrás': data_recente - pd.DateOffset(months=3),
@@ -80,8 +117,9 @@ def gerar_grafico_ettj(df):
         datas_validas = [d for d in datas_disponiveis if d <= data_alvo]
         if datas_validas:
             data_real = max(datas_validas)
-            legenda_final = f'{legenda_base.split(" ")[0]} {legenda_base.split(" ")[1]} ({data_real.strftime("%d/%m/%Y")})' if not legenda_base.startswith('Hoje') else legenda_base
-            datas_para_plotar[legenda_final] = data_real
+            if data_real not in datas_para_plotar.values():
+                 legenda_final = f'{" ".join(legenda_base.split(" ")[:2])} ({data_real.strftime("%d/%m/%Y")})' if not legenda_base.startswith('Hoje') else legenda_base
+                 datas_para_plotar[legenda_final] = data_real
 
     fig = go.Figure()
     for legenda, data_base in datas_para_plotar.items():
@@ -90,11 +128,10 @@ def gerar_grafico_ettj(df):
         line_style = dict(dash='dash') if not legenda.startswith('Hoje') else {}
         fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
 
-    fig.update_layout(title_text='Curva de Juros (ETTJ) - Tesouro Prefixado', title_x=0.5,
+    fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0.5,
                       xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)',
                       template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
-
 
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS (EXPANDIDO E ROBUSTO) ---
 
