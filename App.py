@@ -410,12 +410,8 @@ with tab3:
     dados_commodities_categorizados = carregar_dados_commodities()
 
     if dados_commodities_categorizados:
-        fig_commodities = gerar_dashboard_commodities(dados_commodities_categorizados)
-        st.plotly_chart(fig_commodities, use_container_width=True)
-        
-        st.markdown("---")
+        # Tabela de variação exibida primeiro
         st.subheader("Variação Percentual de Preços")
-        
         df_variacao = calcular_variacao_commodities(dados_commodities_categorizados)
         
         if not df_variacao.empty:
@@ -428,9 +424,14 @@ with tab3:
                 'Variação 6 Meses': '{:+.2%}',
                 'Variação 1 Ano': '{:+.2%}',
             }
-            st.dataframe(df_variacao.style.format(format_dict, na_rep="-")),
-            use_container_width=True
+            st.dataframe(df_variacao.style.format(format_dict, na_rep="-"), use_container_width=True)
         else:
             st.warning("Não foi possível calcular a variação de preços.")
+
+        st.markdown("---")
+        
+        # Gráficos de preços históricos exibidos depois da tabela
+        fig_commodities = gerar_dashboard_commodities(dados_commodities_categorizados)
+        st.plotly_chart(fig_commodities, use_container_width=True)
     else:
         st.warning("Não foi possível carregar os dados de Commodities.")
