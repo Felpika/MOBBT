@@ -183,7 +183,9 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
             row, col = (idx // num_cols) + 1, (idx % num_cols) + 1
             fig.add_trace(go.Scatter(x=df_cat.index, y=df_cat[commodity_name], mode='lines', name=commodity_name), row=row, col=col)
             idx += 1
-    end_date = datetime.now(); buttons = []; periods = {'1M': 30, '3M': 91, '6M': 182, 'YTD': 'ytd', '1A': 365, '5A': 365*5, 'Máx': 'max'}
+    end_date = datetime.now(); buttons = []
+    # --- ADICIONADO FILTRO '10A' ---
+    periods = {'1M': 30, '3M': 91, '6M': 182, 'YTD': 'ytd', '1A': 365, '5A': 365*5, '10A': 3650, 'Máx': 'max'}
     for label, days in periods.items():
         if days == 'ytd': start_date = datetime(end_date.year, 1, 1)
         elif days == 'max': start_date = min([df.index.min() for df in dados_preco_por_categoria.values() if not df.empty])
@@ -228,7 +230,8 @@ def gerar_grafico_fred(df, ticker, titulo):
         fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Inversão", annotation_position="bottom right")
     end_date = df.index.max()
     buttons = []
-    periods = {'6M': 182, '1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
+    # --- ADICIONADO FILTRO '10A' ---
+    periods = {'6M': 182, '1A': 365, '2A': 730, '5A': 1825, '10A': 3650, 'Máx': 'max'}
     for label, days in periods.items():
         start_date = df.index.min() if days == 'max' else end_date - timedelta(days=days)
         buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
@@ -311,8 +314,6 @@ with tab3:
         if not df_variacao.empty:
             cols_variacao = [col for col in df_variacao.columns if 'Variação' in col]
             format_dict = {'Preço Atual': '{:,.2f}'}; format_dict.update({col: '{:+.2%}' for col in cols_variacao})
-            # --- AJUSTE NA CHAMADA DO GRÁFICO ---
-            config={'modeBarButtonsToRemove': ['autoscale']}
             st.dataframe(df_variacao.style.format(format_dict, na_rep="-").applymap(colorir_negativo_positivo, subset=cols_variacao), use_container_width=True)
         else: st.warning("Não foi possível calcular a variação de preços.")
         st.markdown("---")
@@ -329,18 +330,14 @@ with tab4:
         'BAMLH0A0HYM2': 'Spread de Crédito High Yield dos EUA (ICE BofA)',
     }
     df_fred = carregar_dados_fred(FRED_API_KEY, INDICADORES_FRED)
-    config_fred = {'modeBarButtonsToRemove': ['autoscale']} # Config para remover o botão
+    config_fred = {'modeBarButtonsToRemove': ['autoscale']}
 
     if not df_fred.empty:
-        # Gráfico 1
         if 'T10Y2Y' in df_fred.columns:
             st.info("O **Spread da Curva de Juros dos EUA (T10Y2Y)** é um dos indicadores mais observados para prever recessões. Quando o valor fica negativo (inversão da curva), historicamente tem sido um sinal de que uma recessão pode ocorrer nos próximos 6 a 18 meses.")
             fig_t10y2y = gerar_grafico_fred(df_fred, 'T10Y2Y', INDICADORES_FRED['T10Y2Y'])
             st.plotly_chart(fig_t10y2y, use_container_width=True, config=config_fred)
-        
         st.markdown("---")
-
-        # Gráfico 2
         if 'BAMLH0A0HYM2' in df_fred.columns:
             st.info("O **Spread de Crédito High Yield** mede o prêmio de risco exigido pelo mercado para investir em títulos de empresas com maior risco de crédito. **Spreads crescentes** indicam aversão ao risco (medo) e podem sinalizar uma desaceleração econômica. **Spreads caindo** indicam apetite por risco (otimismo).")
             fig_hy = gerar_grafico_fred(df_fred, 'BAMLH0A0HYM2', INDICADORES_FRED['BAMLH0A0HYM2'])
