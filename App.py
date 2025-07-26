@@ -54,43 +54,28 @@ def calcular_inflacao_implicita(df):
     if not inflacao_implicita: return pd.DataFrame()
     return pd.DataFrame(inflacao_implicita).sort_values('Vencimento do Prefixo').set_index('Vencimento do Prefixo')
 
-# --- FUNÇÃO MODIFICADA ---
 @st.cache_data
 def gerar_grafico_spread_juros(df):
-    """
-    Calcula e plota o spread entre os títulos NTN-F com vencimentos
-    mais próximos de 10 e 2 anos.
-    """
     df_ntnf = df[df['Tipo Titulo'] == 'Tesouro Prefixado com Juros Semestrais'].copy()
     if df_ntnf.empty:
         return go.Figure().update_layout(title_text="Não há dados de Tesouro Prefixado com Juros Semestrais.")
-
     data_recente = df_ntnf['Data Base'].max()
     titulos_disponiveis_hoje = df_ntnf[df_ntnf['Data Base'] == data_recente]
     vencimentos_atuais = sorted(titulos_disponiveis_hoje['Data Vencimento'].unique())
-
     if len(vencimentos_atuais) < 2:
         return go.Figure().update_layout(title_text="Menos de duas NTN-Fs disponíveis para calcular o spread.")
-
     target_2y = data_recente + pd.DateOffset(years=2)
     target_10y = data_recente + pd.DateOffset(years=10)
-
     venc_curto = min(vencimentos_atuais, key=lambda d: abs(d - target_2y))
     venc_longo = min(vencimentos_atuais, key=lambda d: abs(d - target_10y))
-
     if venc_curto == venc_longo:
         return go.Figure().update_layout(title_text="Não foi possível encontrar vértices de 2 e 10 anos distintos.")
-
     df_curto_hist = df_ntnf[df_ntnf['Data Vencimento'] == venc_curto][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
     df_longo_hist = df_ntnf[df_ntnf['Data Vencimento'] == venc_longo][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
-
     df_spread = pd.merge(df_curto_hist, df_longo_hist, on='Data Base', suffixes=('_curto', '_longo')).dropna()
-
     if df_spread.empty:
         return go.Figure().update_layout(title_text=f"Não há histórico comum entre as NTN-Fs {pd.to_datetime(venc_longo).year} e {pd.to_datetime(venc_curto).year}.")
-
     df_spread['Spread'] = (df_spread['Taxa Compra Manha_longo'] - df_spread['Taxa Compra Manha_curto']) * 100
-    
     fig = px.area(
         df_spread, y='Spread',
         title=f'Spread de Juros: NTN-F ~10 Anos ({pd.to_datetime(venc_longo).year}) vs ~2 Anos ({pd.to_datetime(venc_curto).year})',
@@ -278,24 +263,19 @@ st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d
 
 tab1, tab2, tab3, tab4 = st.tabs(["Tesouro Direto", "Indicadores Econômicos (BCB)", "Commodities", "Indicadores Internacionais"])
 
-# --- CONTEÚDO DA ABA 1: TESOURO DIRETO ---
+# --- CONTEÚDO DA ABA 1: TESOURO DIRETO (ORDEM ATUALIZADA) ---
 with tab1:
     st.header("Análise de Títulos do Tesouro Direto")
     df_tesouro = obter_dados_tesouro()
     if not df_tesouro.empty:
-        st.subheader("Análise Histórica de Título Individual")
-        col1, col2 = st.columns(2)
-        with col1:
-            tipos_disponiveis = sorted(df_tesouro['Tipo Titulo'].unique())
-            tipo_selecionado = st.selectbox("Selecione o Tipo de Título", tipos_disponiveis, key='tipo_tesouro')
-        with col2:
-            vencimentos_disponiveis = sorted(df_tesouro[df_tesouro['Tipo Titulo'] == tipo_selecionado]['Data Vencimento'].unique())
-            vencimento_selecionado = st.selectbox("Selecione a Data de Vencimento", vencimentos_disponiveis, format_func=lambda dt: pd.to_datetime(dt).strftime('%d/%m/%Y'), key='venc_tesouro')
-        metrica_escolhida = st.radio("Analisar por:", ('Taxa de Compra', 'Preço Unitário (PU)'), horizontal=True, key='metrica_tesouro', help="**Taxa de Compra:** Rentabilidade anual. **Preço Unitário:** Valor do título (efeito da marcação a mercado).")
-        coluna_metrica = 'Taxa Compra Manha' if metrica_escolhida == 'Taxa de Compra' else 'PU Compra Manha'
-        if vencimento_selecionado:
-            st.plotly_chart(gerar_grafico_historico_tesouro(df_tesouro, tipo_selecionado, pd.to_datetime(vencimento_selecionado), metrica=coluna_metrica), use_container_width=True)
+        # 1. ETTJ
+        st.subheader("Estrutura a Termo da Taxa de Juros (ETTJ) - Títulos Prefixados")
+        st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
+        st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
+        
         st.markdown("---")
+
+        # 2. Análises da Curva
         st.subheader("Análises da Curva de Juros")
         col_analise1, col_analise2 = st.columns(2)
         with col_analise1:
@@ -309,10 +289,22 @@ with tab1:
         with col_analise2:
             st.info("O **Spread de Juros** mostra a diferença entre as taxas de um título longo e um curto. Positivo indica otimismo; negativo (invertido) pode sinalizar recessão.")
             st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True)
+            
         st.markdown("---")
-        st.subheader("Estrutura a Termo da Taxa de Juros (ETTJ) - Títulos Prefixados")
-        st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
-        st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
+
+        # 3. Análise Individual
+        st.subheader("Análise Histórica de Título Individual")
+        col1, col2 = st.columns(2)
+        with col1:
+            tipos_disponiveis = sorted(df_tesouro['Tipo Titulo'].unique())
+            tipo_selecionado = st.selectbox("Selecione o Tipo de Título", tipos_disponiveis, key='tipo_tesouro')
+        with col2:
+            vencimentos_disponiveis = sorted(df_tesouro[df_tesouro['Tipo Titulo'] == tipo_selecionado]['Data Vencimento'].unique())
+            vencimento_selecionado = st.selectbox("Selecione a Data de Vencimento", vencimentos_disponiveis, format_func=lambda dt: pd.to_datetime(dt).strftime('%d/%m/%Y'), key='venc_tesouro')
+        metrica_escolhida = st.radio("Analisar por:", ('Taxa de Compra', 'Preço Unitário (PU)'), horizontal=True, key='metrica_tesouro', help="**Taxa de Compra:** Rentabilidade anual. **Preço Unitário:** Valor do título (efeito da marcação a mercado).")
+        coluna_metrica = 'Taxa Compra Manha' if metrica_escolhida == 'Taxa de Compra' else 'PU Compra Manha'
+        if vencimento_selecionado:
+            st.plotly_chart(gerar_grafico_historico_tesouro(df_tesouro, tipo_selecionado, pd.to_datetime(vencimento_selecionado), metrica=coluna_metrica), use_container_width=True)
     else: st.warning("Não foi possível carregar os dados do Tesouro.")
 
 # --- CONTEÚDO DA ABA 2: INDICADORES ECONÔMICOS ---
