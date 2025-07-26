@@ -54,20 +54,48 @@ def calcular_inflacao_implicita(df):
     if not inflacao_implicita: return pd.DataFrame()
     return pd.DataFrame(inflacao_implicita).sort_values('Vencimento do Prefixo').set_index('Vencimento do Prefixo')
 
+# --- FUNÇÃO MODIFICADA ---
 @st.cache_data
 def gerar_grafico_spread_juros(df):
-    df_prefixado = df[df['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
-    if df_prefixado.empty: return go.Figure().update_layout(title_text="Não há dados de Tesouro Prefixado.")
-    data_recente = df_prefixado['Data Base'].max()
-    vencimentos_atuais = sorted(df_prefixado[df_prefixado['Data Base'] == data_recente]['Data Vencimento'].unique())
-    if len(vencimentos_atuais) < 2: return go.Figure().update_layout(title_text="Menos de dois Prefixados disponíveis.")
-    venc_curto, venc_longo = vencimentos_atuais[0], vencimentos_atuais[-1]
-    df_curto_hist = df_prefixado[df_prefixado['Data Vencimento'] == venc_curto][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
-    df_longo_hist = df_prefixado[df_prefixado['Data Vencimento'] == venc_longo][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
+    """
+    Calcula e plota o spread entre os títulos NTN-F com vencimentos
+    mais próximos de 10 e 2 anos.
+    """
+    df_ntnf = df[df['Tipo Titulo'] == 'Tesouro Prefixado com Juros Semestrais'].copy()
+    if df_ntnf.empty:
+        return go.Figure().update_layout(title_text="Não há dados de Tesouro Prefixado com Juros Semestrais.")
+
+    data_recente = df_ntnf['Data Base'].max()
+    titulos_disponiveis_hoje = df_ntnf[df_ntnf['Data Base'] == data_recente]
+    vencimentos_atuais = sorted(titulos_disponiveis_hoje['Data Vencimento'].unique())
+
+    if len(vencimentos_atuais) < 2:
+        return go.Figure().update_layout(title_text="Menos de duas NTN-Fs disponíveis para calcular o spread.")
+
+    target_2y = data_recente + pd.DateOffset(years=2)
+    target_10y = data_recente + pd.DateOffset(years=10)
+
+    venc_curto = min(vencimentos_atuais, key=lambda d: abs(d - target_2y))
+    venc_longo = min(vencimentos_atuais, key=lambda d: abs(d - target_10y))
+
+    if venc_curto == venc_longo:
+        return go.Figure().update_layout(title_text="Não foi possível encontrar vértices de 2 e 10 anos distintos.")
+
+    df_curto_hist = df_ntnf[df_ntnf['Data Vencimento'] == venc_curto][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
+    df_longo_hist = df_ntnf[df_ntnf['Data Vencimento'] == venc_longo][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
+
     df_spread = pd.merge(df_curto_hist, df_longo_hist, on='Data Base', suffixes=('_curto', '_longo')).dropna()
-    if df_spread.empty: return go.Figure().update_layout(title_text=f"Não há histórico comum entre os títulos.")
+
+    if df_spread.empty:
+        return go.Figure().update_layout(title_text=f"Não há histórico comum entre as NTN-Fs {pd.to_datetime(venc_longo).year} e {pd.to_datetime(venc_curto).year}.")
+
     df_spread['Spread'] = (df_spread['Taxa Compra Manha_longo'] - df_spread['Taxa Compra Manha_curto']) * 100
-    fig = px.area(df_spread, y='Spread', title=f'Spread de Juros: Prefixo {pd.to_datetime(venc_longo).year} vs {pd.to_datetime(venc_curto).year}', template='plotly_dark')
+    
+    fig = px.area(
+        df_spread, y='Spread',
+        title=f'Spread de Juros: NTN-F ~10 Anos ({pd.to_datetime(venc_longo).year}) vs ~2 Anos ({pd.to_datetime(venc_curto).year})',
+        template='plotly_dark'
+    )
     fig.update_layout(title_x=0.5, yaxis_title="Diferença (Basis Points)", xaxis_title="Data", showlegend=False)
     return fig
 
@@ -221,55 +249,27 @@ def carregar_dados_fred(api_key, tickers_dict):
     if not lista_series: return pd.DataFrame()
     return pd.concat(lista_series, axis=1).ffill()
 
-# --- FUNÇÃO CORRIGIDA ---
 def gerar_grafico_fred(df, ticker, titulo):
-    """Gera um gráfico interativo com Plotly para uma série de dados do FRED com escala Y dinâmica."""
     if ticker not in df.columns or df[ticker].isnull().all():
         return go.Figure().update_layout(title_text=f"Dados para {ticker} não encontrados.")
-
     fig = px.line(df, y=ticker, title=titulo, template='plotly_dark')
-    
     if ticker == 'T10Y2Y':
         fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Inversão", annotation_position="bottom right")
-    
     end_date = df.index.max()
     buttons = []
     periods = {'6M': 182, '1A': 365, '2A': 730, '5A': 1825, '10A': 3650, 'Máx': 'max'}
-
     for label, days in periods.items():
         start_date = df.index.min() if days == 'max' else end_date - timedelta(days=days)
-        buttons.append(dict(
-            method='relayout',
-            label=label,
-            args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]
-        ))
-        
-    fig.update_layout(
-        title_x=0.5,
-        yaxis_title="Pontos Percentuais (%)",
-        xaxis_title="Data",
-        showlegend=False,
-        updatemenus=[dict(
-            type="buttons",
-            direction="right",
-            showactive=True,
-            x=1, xanchor="right", y=1.05, yanchor="bottom",
-            buttons=buttons
-        )]
-    )
-    
-    # Define a visão inicial com a escala Y correta usando update_xaxes e update_yaxes
+        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
+    fig.update_layout(title_x=0.5, yaxis_title="Pontos Percentuais (%)", xaxis_title="Data", showlegend=False,
+                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
     start_date_1y = end_date - timedelta(days=365)
     filtered_series = df.loc[start_date_1y:end_date, ticker].dropna()
-    
     fig.update_xaxes(range=[start_date_1y, end_date])
-
     if not filtered_series.empty:
-        min_y = filtered_series.min()
-        max_y = filtered_series.max()
+        min_y, max_y = filtered_series.min(), filtered_series.max()
         padding = (max_y - min_y) * 0.10 if (max_y - min_y) > 0 else 0.5
         fig.update_yaxes(range=[min_y - padding, max_y + padding])
-    
     return fig
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
