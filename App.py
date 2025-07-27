@@ -257,25 +257,86 @@ def gerar_grafico_fred(df, ticker, titulo):
         fig.update_yaxes(range=[min_y - padding, max_y + padding])
     return fig
 
+# --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR (NOVO) ---
+@st.cache_data
+def carregar_dados_acoes(tickers, period="max"):
+    """Busca dados históricos para uma lista de tickers."""
+    try:
+        data = yf.download(tickers, period=period, auto_adjust=True)['Close']
+        if isinstance(data, pd.Series): # Se baixar só um ticker, vira Series. Converte pra DataFrame.
+            data = data.to_frame(tickers[0])
+        return data.dropna()
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data
+def calcular_metricas_ratio(data, ticker_a, ticker_b, window=252):
+    """Calcula o ratio bruto entre dois ativos e adiciona métricas."""
+    ratio = data[ticker_a] / data[ticker_b]
+    df_metrics = pd.DataFrame({'Ratio': ratio})
+    
+    # Métricas dinâmicas (móveis)
+    df_metrics['Rolling_Mean'] = ratio.rolling(window=window).mean()
+    rolling_std = ratio.rolling(window=window).std()
+    
+    # Métricas estáticas (período total)
+    static_median = ratio.median()
+    static_std = ratio.std()
+    
+    # Adiciona bandas ao DataFrame
+    df_metrics['Static_Median'] = static_median
+    df_metrics['Upper_Band_2x_Rolling'] = df_metrics['Rolling_Mean'] + (2 * rolling_std)
+    df_metrics['Lower_Band_2x_Rolling'] = df_metrics['Rolling_Mean'] - (2 * rolling_std)
+    df_metrics['Upper_Band_1x_Static'] = static_median + (1 * static_std)
+    df_metrics['Lower_Band_1x_Static'] = static_median - (1 * static_std)
+    df_metrics['Upper_Band_2x_Static'] = static_median + (2 * static_std)
+    df_metrics['Lower_Band_2x_Static'] = static_median - (2 * static_std)
+    
+    return df_metrics
+
+def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
+    """Plota o ratio com métricas usando Plotly."""
+    fig = go.Figure()
+
+    # Linhas estáticas (horizontais)
+    static_median_val = df_metrics['Static_Median'].iloc[-1]
+    fig.add_hline(y=static_median_val, line_color='red', line_dash='dash', annotation_text=f'Mediana Estática ({static_median_val:.2f})')
+    fig.add_hline(y=df_metrics['Upper_Band_1x_Static'].iloc[-1], line_color='crimson', line_dash='dot', annotation_text='+1 DP Estático')
+    fig.add_hline(y=df_metrics['Lower_Band_1x_Static'].iloc[-1], line_color='crimson', line_dash='dot', annotation_text='-1 DP Estático')
+    fig.add_hline(y=df_metrics['Upper_Band_2x_Static'].iloc[-1], line_color='darkviolet', line_dash='dot', annotation_text='+2 DP Estático')
+    fig.add_hline(y=df_metrics['Lower_Band_2x_Static'].iloc[-1], line_color='darkviolet', line_dash='dot', annotation_text='-2 DP Estático')
+
+    # Bandas de Bollinger (Móveis)
+    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Upper_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Superior'))
+    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Lower_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Inferior', fill='tonexty', fillcolor='rgba(128,128,128,0.2)'))
+
+    # Linhas principais
+    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Rolling_Mean'], mode='lines', line_color='darkorange', line_dash='dash', name=f'Média Móvel ({window}d)'))
+    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Ratio'], mode='lines', line_color='navy', name='Ratio Atual', line_width=2))
+
+    fig.update_layout(
+        title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}',
+        template='plotly_dark',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    return fig
+
+
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
 st.title("📊 MOBBT")
 st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
-tab1, tab2, tab3, tab4 = st.tabs(["Tesouro Direto", "Indicadores Econômicos (BCB)", "Commodities", "Indicadores Internacionais"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Tesouro Direto", "Indicadores Econômicos (BCB)", "Commodities", "Indicadores Internacionais", "Ações BR"])
 
-# --- CONTEÚDO DA ABA 1: TESOURO DIRETO (ORDEM ATUALIZADA) ---
+# --- CONTEÚDO DA ABA 1: TESOURO DIRETO ---
 with tab1:
     st.header("Análise de Títulos do Tesouro Direto")
     df_tesouro = obter_dados_tesouro()
     if not df_tesouro.empty:
-        # 1. ETTJ
         st.subheader("Estrutura a Termo da Taxa de Juros (ETTJ) - Títulos Prefixados")
         st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
         st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
-        
         st.markdown("---")
-
-        # 2. Análises da Curva
         st.subheader("Análises da Curva de Juros")
         col_analise1, col_analise2 = st.columns(2)
         with col_analise1:
@@ -289,10 +350,7 @@ with tab1:
         with col_analise2:
             st.info("O **Spread de Juros** mostra a diferença entre as taxas de um título longo e um curto. Positivo indica otimismo; negativo (invertido) pode sinalizar recessão.")
             st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True)
-            
         st.markdown("---")
-
-        # 3. Análise Individual
         st.subheader("Análise Histórica de Título Individual")
         col1, col2 = st.columns(2)
         with col1:
@@ -367,3 +425,34 @@ with tab4:
             st.plotly_chart(fig_dgs10, use_container_width=True, config=config_fred)
     else:
         st.warning("Não foi possível carregar dados do FRED. Verifique a chave da API ou a conexão com a internet.")
+
+# --- CONTEÚDO DA ABA 5: AÇÕES BR (NOVO) ---
+with tab5:
+    st.header("Análise de Ratio de Ativos (Long & Short)")
+    st.info(
+        "Esta ferramenta calcula o ratio entre o preço de dois ativos. "
+        "**Interpretação:** Quando o ratio está alto (acima das médias), o Ativo A está caro em relação ao Ativo B. "
+        "Quando está baixo, o Ativo A está barato em relação ao Ativo B. As bandas mostram desvios padrão que podem indicar pontos de reversão à média."
+    )
+
+    col1, col2, col3 = st.columns([0.4, 0.4, 0.2])
+    with col1:
+        ticker_a = st.text_input("Ticker do Ativo A (Numerador)", "SMAL11.SA")
+    with col2:
+        ticker_b = st.text_input("Ticker do Ativo B (Denominador)", "BOVA11.SA")
+    with col3:
+        window_size = st.number_input("Janela Móvel (dias)", min_value=20, max_value=500, value=252)
+
+    if st.button("Analisar Ratio", use_container_width=True):
+        if ticker_a and ticker_b:
+            with st.spinner(f"Buscando e processando dados para {ticker_a} e {ticker_b}..."):
+                close_prices = carregar_dados_acoes([ticker_a, ticker_b], period="max")
+                
+                if close_prices.empty or close_prices.shape[1] < 2:
+                     st.error(f"Não foi possível obter dados para ambos os tickers. Verifique os códigos (ex: PETR4.SA) e tente novamente.")
+                else:
+                    ratio_analysis = calcular_metricas_ratio(close_prices, ticker_a, ticker_b, window=window_size)
+                    fig_ratio = gerar_grafico_ratio(ratio_analysis, ticker_a, ticker_b, window=window_size)
+                    st.plotly_chart(fig_ratio, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
+        else:
+            st.warning("Por favor, insira os dois tickers.")
