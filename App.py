@@ -316,7 +316,7 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     return fig
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
-st.title("📊 MOBBT")
+st.title("MOBBT")
 st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Tesouro Direto", "Indicadores Econômicos (BCB)", "Commodities", "Indicadores Internacionais", "Ações BR"])
@@ -421,7 +421,7 @@ with tab4:
 
 # --- CONTEÚDO DA ABA 5: AÇÕES BR (LÓGICA ATUALIZADA) ---
 with tab5:
-    st.header("Análise de Ratio de Ativos (Long & Short)")
+    st.header("Análise de Ratio de Ativos")
     st.info(
         "Esta ferramenta calcula o ratio entre o preço de dois ativos. "
         "**Interpretação:** Quando o ratio está alto (acima das médias), o Ativo A está caro em relação ao Ativo B. "
