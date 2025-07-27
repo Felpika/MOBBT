@@ -257,13 +257,13 @@ def gerar_grafico_fred(df, ticker, titulo):
         fig.update_yaxes(range=[min_y - padding, max_y + padding])
     return fig
 
-# --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR (NOVO) ---
+# --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR ---
 @st.cache_data
 def carregar_dados_acoes(tickers, period="max"):
     """Busca dados históricos para uma lista de tickers."""
     try:
         data = yf.download(tickers, period=period, auto_adjust=True)['Close']
-        if isinstance(data, pd.Series): # Se baixar só um ticker, vira Series. Converte pra DataFrame.
+        if isinstance(data, pd.Series): 
             data = data.to_frame(tickers[0])
         return data.dropna()
     except Exception:
@@ -274,16 +274,10 @@ def calcular_metricas_ratio(data, ticker_a, ticker_b, window=252):
     """Calcula o ratio bruto entre dois ativos e adiciona métricas."""
     ratio = data[ticker_a] / data[ticker_b]
     df_metrics = pd.DataFrame({'Ratio': ratio})
-    
-    # Métricas dinâmicas (móveis)
     df_metrics['Rolling_Mean'] = ratio.rolling(window=window).mean()
     rolling_std = ratio.rolling(window=window).std()
-    
-    # Métricas estáticas (período total)
     static_median = ratio.median()
     static_std = ratio.std()
-    
-    # Adiciona bandas ao DataFrame
     df_metrics['Static_Median'] = static_median
     df_metrics['Upper_Band_2x_Rolling'] = df_metrics['Rolling_Mean'] + (2 * rolling_std)
     df_metrics['Lower_Band_2x_Rolling'] = df_metrics['Rolling_Mean'] - (2 * rolling_std)
@@ -291,28 +285,28 @@ def calcular_metricas_ratio(data, ticker_a, ticker_b, window=252):
     df_metrics['Lower_Band_1x_Static'] = static_median - (1 * static_std)
     df_metrics['Upper_Band_2x_Static'] = static_median + (2 * static_std)
     df_metrics['Lower_Band_2x_Static'] = static_median - (2 * static_std)
-    
     return df_metrics
 
+# --- FUNÇÃO ATUALIZADA COM NOVAS CORES ---
 def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
-    """Plota o ratio com métricas usando Plotly."""
+    """Plota o ratio com métricas usando Plotly e um esquema de cores aprimorado."""
     fig = go.Figure()
 
-    # Linhas estáticas (horizontais)
+    # Linhas estáticas (horizontais) com cores mais claras e distintas
     static_median_val = df_metrics['Static_Median'].iloc[-1]
-    fig.add_hline(y=static_median_val, line_color='red', line_dash='dash', annotation_text=f'Mediana Estática ({static_median_val:.2f})')
-    fig.add_hline(y=df_metrics['Upper_Band_1x_Static'].iloc[-1], line_color='crimson', line_dash='dot', annotation_text='+1 DP Estático')
-    fig.add_hline(y=df_metrics['Lower_Band_1x_Static'].iloc[-1], line_color='crimson', line_dash='dot', annotation_text='-1 DP Estático')
-    fig.add_hline(y=df_metrics['Upper_Band_2x_Static'].iloc[-1], line_color='darkviolet', line_dash='dot', annotation_text='+2 DP Estático')
-    fig.add_hline(y=df_metrics['Lower_Band_2x_Static'].iloc[-1], line_color='darkviolet', line_dash='dot', annotation_text='-2 DP Estático')
+    fig.add_hline(y=static_median_val, line_color='red', line_dash='dash', annotation_text=f'Mediana ({static_median_val:.2f})')
+    fig.add_hline(y=df_metrics['Upper_Band_1x_Static'].iloc[-1], line_color='#2ca02c', line_dash='dot', annotation_text='+1 DP Estático') # Verde
+    fig.add_hline(y=df_metrics['Lower_Band_1x_Static'].iloc[-1], line_color='#2ca02c', line_dash='dot', annotation_text='-1 DP Estático') # Verde
+    fig.add_hline(y=df_metrics['Upper_Band_2x_Static'].iloc[-1], line_color='#d62728', line_dash='dot', annotation_text='+2 DP Estático') # Vermelho escuro
+    fig.add_hline(y=df_metrics['Lower_Band_2x_Static'].iloc[-1], line_color='#d62728', line_dash='dot', annotation_text='-2 DP Estático') # Vermelho escuro
 
-    # Bandas de Bollinger (Móveis)
-    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Upper_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Superior'))
-    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Lower_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Inferior', fill='tonexty', fillcolor='rgba(128,128,128,0.2)'))
+    # Bandas de Bollinger (Móveis) com preenchimento mais sutil
+    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Upper_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Superior', showlegend=False))
+    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Lower_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Inferior', fill='tonexty', fillcolor='rgba(128,128,128,0.1)', showlegend=False))
 
-    # Linhas principais
-    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Rolling_Mean'], mode='lines', line_color='darkorange', line_dash='dash', name=f'Média Móvel ({window}d)'))
-    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Ratio'], mode='lines', line_color='navy', name='Ratio Atual', line_width=2))
+    # Linhas principais com mais destaque
+    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Rolling_Mean'], mode='lines', line_color='orange', line_dash='dash', name=f'Média Móvel ({window}d)'))
+    fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Ratio'], mode='lines', line_color='#636EFA', name='Ratio Atual', line_width=2.5))
 
     fig.update_layout(
         title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}',
@@ -320,7 +314,6 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     return fig
-
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
 st.title("📊 MOBBT")
@@ -426,7 +419,7 @@ with tab4:
     else:
         st.warning("Não foi possível carregar dados do FRED. Verifique a chave da API ou a conexão com a internet.")
 
-# --- CONTEÚDO DA ABA 5: AÇÕES BR (NOVO) ---
+# --- CONTEÚDO DA ABA 5: AÇÕES BR (LÓGICA ATUALIZADA) ---
 with tab5:
     st.header("Análise de Ratio de Ativos (Long & Short)")
     st.info(
@@ -435,24 +428,36 @@ with tab5:
         "Quando está baixo, o Ativo A está barato em relação ao Ativo B. As bandas mostram desvios padrão que podem indicar pontos de reversão à média."
     )
 
+    # Define uma função para rodar a análise, que será chamada no início e no clique do botão
+    def executar_analise_ratio():
+        st.session_state.spinner_placeholder.info(f"Buscando e processando dados para {st.session_state.ticker_a_key} e {st.session_state.ticker_b_key}...")
+        close_prices = carregar_dados_acoes([st.session_state.ticker_a_key, st.session_state.ticker_b_key], period="max")
+        
+        if close_prices.empty or close_prices.shape[1] < 2:
+            st.session_state.spinner_placeholder.error(f"Não foi possível obter dados para ambos os tickers. Verifique os códigos (ex: PETR4.SA) e tente novamente.")
+            st.session_state.fig_ratio = None
+        else:
+            ratio_analysis = calcular_metricas_ratio(close_prices, st.session_state.ticker_a_key, st.session_state.ticker_b_key, window=st.session_state.window_size_key)
+            st.session_state.fig_ratio = gerar_grafico_ratio(ratio_analysis, st.session_state.ticker_a_key, st.session_state.ticker_b_key, window=st.session_state.window_size_key)
+            st.session_state.spinner_placeholder.empty() # Limpa a mensagem de spinner/erro
+
     col1, col2, col3 = st.columns([0.4, 0.4, 0.2])
     with col1:
-        ticker_a = st.text_input("Ticker do Ativo A (Numerador)", "SMAL11.SA")
+        st.text_input("Ticker do Ativo A (Numerador)", "SMAL11.SA", key="ticker_a_key")
     with col2:
-        ticker_b = st.text_input("Ticker do Ativo B (Denominador)", "BOVA11.SA")
+        st.text_input("Ticker do Ativo B (Denominador)", "BOVA11.SA", key="ticker_b_key")
     with col3:
-        window_size = st.number_input("Janela Móvel (dias)", min_value=20, max_value=500, value=252)
+        st.number_input("Janela Móvel (dias)", min_value=20, max_value=500, value=252, key="window_size_key")
 
-    if st.button("Analisar Ratio", use_container_width=True):
-        if ticker_a and ticker_b:
-            with st.spinner(f"Buscando e processando dados para {ticker_a} e {ticker_b}..."):
-                close_prices = carregar_dados_acoes([ticker_a, ticker_b], period="max")
-                
-                if close_prices.empty or close_prices.shape[1] < 2:
-                     st.error(f"Não foi possível obter dados para ambos os tickers. Verifique os códigos (ex: PETR4.SA) e tente novamente.")
-                else:
-                    ratio_analysis = calcular_metricas_ratio(close_prices, ticker_a, ticker_b, window=window_size)
-                    fig_ratio = gerar_grafico_ratio(ratio_analysis, ticker_a, ticker_b, window=window_size)
-                    st.plotly_chart(fig_ratio, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
-        else:
-            st.warning("Por favor, insira os dois tickers.")
+    st.button("Analisar Ratio", on_click=executar_analise_ratio, use_container_width=True)
+    
+    # Placeholder para mensagens de carregamento e erro
+    st.session_state.spinner_placeholder = st.empty()
+
+    # Executa a análise na primeira vez que a página é carregada
+    if 'fig_ratio' not in st.session_state:
+        executar_analise_ratio()
+
+    # Exibe o gráfico se ele existir no estado da sessão
+    if st.session_state.get('fig_ratio'):
+        st.plotly_chart(st.session_state.fig_ratio, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
