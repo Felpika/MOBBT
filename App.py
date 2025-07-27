@@ -287,7 +287,6 @@ def calcular_metricas_ratio(data, ticker_a, ticker_b, window=252):
     df_metrics['Lower_Band_2x_Static'] = static_median - (2 * static_std)
     return df_metrics
 
-# --- NOVA FUNÇÃO PARA CALCULAR KPIs ---
 def calcular_kpis_ratio(df_metrics):
     """Calcula os principais indicadores (KPIs) para a série de ratio."""
     if 'Ratio' not in df_metrics or df_metrics['Ratio'].dropna().empty:
@@ -307,19 +306,33 @@ def calcular_kpis_ratio(df_metrics):
         kpis["variacao_para_media"] = np.inf
     return kpis
 
+# --- FUNÇÃO ATUALIZADA COM LEGENDAS À ESQUERDA ---
 def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
-    """Plota o ratio com métricas usando Plotly e um esquema de cores aprimorado."""
+    """Plota o ratio com métricas usando Plotly e legendas à esquerda."""
     fig = go.Figure()
+
     static_median_val = df_metrics['Static_Median'].iloc[-1]
-    fig.add_hline(y=static_median_val, line_color='red', line_dash='dash', annotation_text=f'Mediana ({static_median_val:.2f})')
-    fig.add_hline(y=df_metrics['Upper_Band_1x_Static'].iloc[-1], line_color='#2ca02c', line_dash='dot', annotation_text='+1 DP Estático')
-    fig.add_hline(y=df_metrics['Lower_Band_1x_Static'].iloc[-1], line_color='#2ca02c', line_dash='dot', annotation_text='-1 DP Estático')
-    fig.add_hline(y=df_metrics['Upper_Band_2x_Static'].iloc[-1], line_color='#d62728', line_dash='dot', annotation_text='+2 DP Estático')
-    fig.add_hline(y=df_metrics['Lower_Band_2x_Static'].iloc[-1], line_color='#d62728', line_dash='dot', annotation_text='-2 DP Estático')
+    fig.add_hline(y=static_median_val, line_color='red', line_dash='dash', 
+                  annotation_text=f'Mediana ({static_median_val:.2f})', 
+                  annotation_position="top left")
+    fig.add_hline(y=df_metrics['Upper_Band_1x_Static'].iloc[-1], line_color='#2ca02c', line_dash='dot', 
+                  annotation_text='+1 DP Estático', 
+                  annotation_position="top left")
+    fig.add_hline(y=df_metrics['Lower_Band_1x_Static'].iloc[-1], line_color='#2ca02c', line_dash='dot', 
+                  annotation_text='-1 DP Estático', 
+                  annotation_position="top left")
+    fig.add_hline(y=df_metrics['Upper_Band_2x_Static'].iloc[-1], line_color='#d62728', line_dash='dot', 
+                  annotation_text='+2 DP Estático', 
+                  annotation_position="top left")
+    fig.add_hline(y=df_metrics['Lower_Band_2x_Static'].iloc[-1], line_color='#d62728', line_dash='dot', 
+                  annotation_text='-2 DP Estático', 
+                  annotation_position="top left")
+
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Upper_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Superior', showlegend=False))
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Lower_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Inferior', fill='tonexty', fillcolor='rgba(128,128,128,0.1)', showlegend=False))
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Rolling_Mean'], mode='lines', line_color='orange', line_dash='dash', name=f'Média Móvel ({window}d)'))
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Ratio'], mode='lines', line_color='#636EFA', name='Ratio Atual', line_width=2.5))
+
     fig.update_layout(
         title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}',
         template='plotly_dark',
@@ -431,7 +444,7 @@ with tab4:
     else:
         st.warning("Não foi possível carregar dados do FRED. Verifique a chave da API ou a conexão com a internet.")
 
-# --- CONTEÚDO DA ABA 5: AÇÕES BR (LÓGICA ATUALIZADA COM KPIs) ---
+# --- CONTEÚDO DA ABA 5: AÇÕES BR ---
 with tab5:
     st.header("Análise de Ratio de Ativos (Long & Short)")
     st.info(
