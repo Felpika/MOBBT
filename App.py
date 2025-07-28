@@ -28,27 +28,19 @@ def obter_dados_tesouro():
         st.error(f"Erro ao baixar dados do Tesouro: {e}")
         return pd.DataFrame()
 
-# --- FUNÇÃO ATUALIZADA PARA USAR NTN-B (IPCA+) ---
 @st.cache_data
 def calcular_juro_10a_br(df_tesouro):
-    """Extrai a série temporal da taxa do título NTN-B com vencimento mais próximo de 10 anos."""
     df_ntnb = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro IPCA+ com Juros Semestrais'].copy()
-    if df_ntnb.empty:
-        return pd.Series(dtype=float)
-
+    if df_ntnb.empty: return pd.Series(dtype=float)
     resultados = {}
-    datas_unicas = df_ntnb['Data Base'].unique()
-
-    for data_base in datas_unicas:
+    for data_base in df_ntnb['Data Base'].unique():
         df_dia = df_ntnb[df_ntnb['Data Base'] == data_base]
         vencimentos_do_dia = df_dia['Data Vencimento'].unique()
-        
         if len(vencimentos_do_dia) > 0:
             target_10y = pd.to_datetime(data_base) + pd.DateOffset(years=10)
             venc_10y = min(vencimentos_do_dia, key=lambda d: abs(d - target_10y))
             taxa = df_dia[df_dia['Data Vencimento'] == venc_10y]['Taxa Compra Manha'].iloc[0]
             resultados[data_base] = taxa
-
     return pd.Series(resultados).sort_index()
 
 def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra Manha'):
@@ -56,7 +48,7 @@ def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra M
     titulo = f'Histórico da Taxa de Compra: {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})' if metrica == 'Taxa Compra Manha' else f'Histórico do Preço Unitário (PU): {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})'
     eixo_y = "Taxa de Compra (% a.a.)" if metrica == 'Taxa Compra Manha' else "Preço Unitário (R$)"
     fig = px.line(df_filtrado, x='Data Base', y=metrica, title=titulo, template='plotly_dark')
-    fig.update_layout(title_x=0.5, yaxis_title=eixo_y, xaxis_title="Data")
+    fig.update_layout(title_x=0, yaxis_title=eixo_y, xaxis_title="Data") # <--- AJUSTADO
     return fig
 
 @st.cache_data
@@ -80,31 +72,22 @@ def calcular_inflacao_implicita(df):
 @st.cache_data
 def gerar_grafico_spread_juros(df):
     df_ntnf = df[df['Tipo Titulo'] == 'Tesouro Prefixado com Juros Semestrais'].copy()
-    if df_ntnf.empty:
-        return go.Figure().update_layout(title_text="Não há dados de Tesouro Prefixado com Juros Semestrais.")
+    if df_ntnf.empty: return go.Figure().update_layout(title_text="Não há dados de Tesouro Prefixado com Juros Semestrais.")
     data_recente = df_ntnf['Data Base'].max()
     titulos_disponiveis_hoje = df_ntnf[df_ntnf['Data Base'] == data_recente]
     vencimentos_atuais = sorted(titulos_disponiveis_hoje['Data Vencimento'].unique())
-    if len(vencimentos_atuais) < 2:
-        return go.Figure().update_layout(title_text="Menos de duas NTN-Fs disponíveis para calcular o spread.")
-    target_2y = data_recente + pd.DateOffset(years=2)
-    target_10y = data_recente + pd.DateOffset(years=10)
+    if len(vencimentos_atuais) < 2: return go.Figure().update_layout(title_text="Menos de duas NTN-Fs disponíveis.")
+    target_2y, target_10y = data_recente + pd.DateOffset(years=2), data_recente + pd.DateOffset(years=10)
     venc_curto = min(vencimentos_atuais, key=lambda d: abs(d - target_2y))
     venc_longo = min(vencimentos_atuais, key=lambda d: abs(d - target_10y))
-    if venc_curto == venc_longo:
-        return go.Figure().update_layout(title_text="Não foi possível encontrar vértices de 2 e 10 anos distintos.")
+    if venc_curto == venc_longo: return go.Figure().update_layout(title_text="Não foi possível encontrar vértices de 2 e 10 anos distintos.")
     df_curto_hist = df_ntnf[df_ntnf['Data Vencimento'] == venc_curto][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
     df_longo_hist = df_ntnf[df_ntnf['Data Vencimento'] == venc_longo][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
     df_spread = pd.merge(df_curto_hist, df_longo_hist, on='Data Base', suffixes=('_curto', '_longo')).dropna()
-    if df_spread.empty:
-        return go.Figure().update_layout(title_text=f"Não há histórico comum entre as NTN-Fs {pd.to_datetime(venc_longo).year} e {pd.to_datetime(venc_curto).year}.")
+    if df_spread.empty: return go.Figure().update_layout(title_text=f"Não há histórico comum entre as NTN-Fs.")
     df_spread['Spread'] = (df_spread['Taxa Compra Manha_longo'] - df_spread['Taxa Compra Manha_curto']) * 100
-    fig = px.area(
-        df_spread, y='Spread',
-        title=f'Spread de Juros: NTN-F ~10 Anos ({pd.to_datetime(venc_longo).year}) vs ~2 Anos ({pd.to_datetime(venc_curto).year})',
-        template='plotly_dark'
-    )
-    fig.update_layout(title_x=0.5, yaxis_title="Diferença (Basis Points)", xaxis_title="Data", showlegend=False)
+    fig = px.area(df_spread, y='Spread', title=f'Spread de Juros: NTN-F ~10 Anos ({pd.to_datetime(venc_longo).year}) vs ~2 Anos ({pd.to_datetime(venc_curto).year})', template='plotly_dark')
+    fig.update_layout(title_x=0, yaxis_title="Diferença (Basis Points)", xaxis_title="Data", showlegend=False) # <--- AJUSTADO
     return fig
 
 def gerar_grafico_ettj_curto_prazo(df):
@@ -127,7 +110,7 @@ def gerar_grafico_ettj_curto_prazo(df):
         df_data['Dias Uteis'] = np.busday_count(df_data['Data Base'].values.astype('M8[D]'), df_data['Data Vencimento'].values.astype('M8[D]'))
         line_style = dict(dash='dash') if not legenda.startswith('Hoje') else {}
         fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
-    fig.update_layout(title_text='Curva de Juros (ETTJ) - Curto Prazo (últimos 5 dias)', title_x=0.5, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    fig.update_layout(title_text='Curva de Juros (ETTJ) - Curto Prazo (últimos 5 dias)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)) # <--- AJUSTADO
     return fig
 
 def gerar_grafico_ettj_longo_prazo(df):
@@ -150,7 +133,7 @@ def gerar_grafico_ettj_longo_prazo(df):
         df_data['Dias Uteis'] = np.busday_count(df_data['Data Base'].values.astype('M8[D]'), df_data['Data Vencimento'].values.astype('M8[D]'))
         line_style = dict(dash='dash') if not legenda.startswith('Hoje') else {}
         fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
-    fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0.5, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)) # <--- AJUSTADO
     return fig
 
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS ---
@@ -230,8 +213,8 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
             update_args[f'xaxis{i if i > 1 else ""}.range'], update_args[f'yaxis{i if i > 1 else ""}.autorange'] = [start_date, end_date], True
         buttons.append(dict(method='relayout', label=label, args=[update_args]))
     active_button_index = list(periods.keys()).index('1A') if '1A' in list(periods.keys()) else 4
-    fig.update_layout(title_text="Dashboard de Preços Históricos de Commodities", template="plotly_dark", height=250 * num_rows, showlegend=False,
-                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons, active=active_button_index)])
+    fig.update_layout(title_text="Dashboard de Preços Históricos de Commodities", title_x=0, template="plotly_dark", height=250 * num_rows, showlegend=False,
+                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons, active=active_button_index)]) # <--- AJUSTADO
     start_date_1y = end_date - timedelta(days=365); idx = 0
     for df_cat in dados_preco_por_categoria.values():
         for i, commodity_name in enumerate(df_cat.columns, start=idx):
@@ -269,8 +252,8 @@ def gerar_grafico_fred(df, ticker, titulo):
     for label, days in periods.items():
         start_date = df.index.min() if days == 'max' else end_date - timedelta(days=days)
         buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
-    fig.update_layout(title_x=0.5, yaxis_title="Pontos Percentuais (%)", xaxis_title="Data", showlegend=False,
-                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
+    fig.update_layout(title_x=0, yaxis_title="Pontos Percentuais (%)", xaxis_title="Data", showlegend=False,
+                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)]) # <--- AJUSTADO
     start_date_1y = end_date - timedelta(days=365)
     filtered_series = df.loc[start_date_1y:end_date, ticker].dropna()
     fig.update_xaxes(range=[start_date_1y, end_date])
@@ -283,24 +266,19 @@ def gerar_grafico_fred(df, ticker, titulo):
 def gerar_grafico_spread_br_eua(df_br, df_usa):
     df_br.name = 'BR10Y'
     df_usa = df_usa['DGS10']
-    
     df_merged = pd.merge(df_br, df_usa, left_index=True, right_index=True, how='inner')
     df_merged['Spread'] = df_merged['BR10Y'] - df_merged['DGS10']
-    
     fig = px.line(df_merged, y='Spread', title='Spread de Juros 10 Anos: NTN-B (Brasil) vs. Treasury (EUA)', template='plotly_dark')
-    
     end_date = df_merged.index.max()
     buttons = []
     periods = {'1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
     for label, days in periods.items():
         start_date = df_merged.index.min() if days == 'max' else end_date - timedelta(days=days)
         buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
-
     fig.update_layout(
-        title_x=0.5, yaxis_title="Diferença (Pontos Percentuais)", xaxis_title="Data",
+        title_x=0, yaxis_title="Diferença (Pontos Percentuais)", xaxis_title="Data", # <--- AJUSTADO
         updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)]
     )
-    
     start_date_1y = end_date - timedelta(days=365)
     filtered_series = df_merged.loc[start_date_1y:end_date, 'Spread'].dropna()
     fig.update_xaxes(range=[start_date_1y, end_date])
@@ -308,13 +286,11 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
         min_y, max_y = filtered_series.min(), filtered_series.max()
         padding = (max_y - min_y) * 0.10 if (max_y - min_y) > 0 else 0.5
         fig.update_yaxes(range=[min_y - padding, max_y + padding])
-        
     return fig
 
 # --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR ---
 @st.cache_data
 def carregar_dados_acoes(tickers, period="max"):
-    """Busca dados históricos para uma lista de tickers."""
     try:
         data = yf.download(tickers, period=period, auto_adjust=True)['Close']
         if isinstance(data, pd.Series): 
@@ -325,7 +301,6 @@ def carregar_dados_acoes(tickers, period="max"):
 
 @st.cache_data
 def calcular_metricas_ratio(data, ticker_a, ticker_b, window=252):
-    """Calcula o ratio bruto entre dois ativos e adiciona métricas."""
     ratio = data[ticker_a] / data[ticker_b]
     df_metrics = pd.DataFrame({'Ratio': ratio})
     df_metrics['Rolling_Mean'] = ratio.rolling(window=window).mean()
@@ -342,53 +317,28 @@ def calcular_metricas_ratio(data, ticker_a, ticker_b, window=252):
     return df_metrics
 
 def calcular_kpis_ratio(df_metrics):
-    """Calcula os principais indicadores (KPIs) para a série de ratio."""
-    if 'Ratio' not in df_metrics or df_metrics['Ratio'].dropna().empty:
-        return None
+    if 'Ratio' not in df_metrics or df_metrics['Ratio'].dropna().empty: return None
     ratio_series = df_metrics['Ratio'].dropna()
-    kpis = {
-        "atual": ratio_series.iloc[-1],
-        "media": ratio_series.mean(),
-        "minimo": ratio_series.min(),
-        "data_minimo": ratio_series.idxmin(),
-        "maximo": ratio_series.max(),
-        "data_maximo": ratio_series.idxmax()
-    }
-    if kpis["atual"] > 0:
-        kpis["variacao_para_media"] = (kpis["media"] / kpis["atual"] - 1) * 100
-    else:
-        kpis["variacao_para_media"] = np.inf
+    kpis = {"atual": ratio_series.iloc[-1], "media": ratio_series.mean(), "minimo": ratio_series.min(), "data_minimo": ratio_series.idxmin(), "maximo": ratio_series.max(), "data_maximo": ratio_series.idxmax()}
+    if kpis["atual"] > 0: kpis["variacao_para_media"] = (kpis["media"] / kpis["atual"] - 1) * 100
+    else: kpis["variacao_para_media"] = np.inf
     return kpis
 
 def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
-    """Plota o ratio com métricas usando Plotly e legendas à esquerda."""
     fig = go.Figure()
-
     static_median_val = df_metrics['Static_Median'].iloc[-1]
-    fig.add_hline(y=static_median_val, line_color='red', line_dash='dash', 
-                  annotation_text=f'Mediana ({static_median_val:.2f})', 
-                  annotation_position="top left")
-    fig.add_hline(y=df_metrics['Upper_Band_1x_Static'].iloc[-1], line_color='#2ca02c', line_dash='dot', 
-                  annotation_text='+1 DP Estático', 
-                  annotation_position="top left")
-    fig.add_hline(y=df_metrics['Lower_Band_1x_Static'].iloc[-1], line_color='#2ca02c', line_dash='dot', 
-                  annotation_text='-1 DP Estático', 
-                  annotation_position="top left")
-    fig.add_hline(y=df_metrics['Upper_Band_2x_Static'].iloc[-1], line_color='#d62728', line_dash='dot', 
-                  annotation_text='+2 DP Estático', 
-                  annotation_position="top left")
-    fig.add_hline(y=df_metrics['Lower_Band_2x_Static'].iloc[-1], line_color='#d62728', line_dash='dot', 
-                  annotation_text='-2 DP Estático', 
-                  annotation_position="top left")
-
+    fig.add_hline(y=static_median_val, line_color='red', line_dash='dash', annotation_text=f'Mediana ({static_median_val:.2f})', annotation_position="top left")
+    fig.add_hline(y=df_metrics['Upper_Band_1x_Static'].iloc[-1], line_color='#2ca02c', line_dash='dot', annotation_text='+1 DP Estático', annotation_position="top left")
+    fig.add_hline(y=df_metrics['Lower_Band_1x_Static'].iloc[-1], line_color='#2ca02c', line_dash='dot', annotation_text='-1 DP Estático', annotation_position="top left")
+    fig.add_hline(y=df_metrics['Upper_Band_2x_Static'].iloc[-1], line_color='#d62728', line_dash='dot', annotation_text='+2 DP Estático', annotation_position="top left")
+    fig.add_hline(y=df_metrics['Lower_Band_2x_Static'].iloc[-1], line_color='#d62728', line_dash='dot', annotation_text='-2 DP Estático', annotation_position="top left")
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Upper_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Superior', showlegend=False))
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Lower_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Inferior', fill='tonexty', fillcolor='rgba(128,128,128,0.1)', showlegend=False))
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Rolling_Mean'], mode='lines', line_color='orange', line_dash='dash', name=f'Média Móvel ({window}d)'))
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Ratio'], mode='lines', line_color='#636EFA', name='Ratio Atual', line_width=2.5))
-
     fig.update_layout(
         title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}',
-        template='plotly_dark',
+        template='plotly_dark', title_x=0, # <--- AJUSTADO
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     return fig
@@ -399,7 +349,7 @@ st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Juros BR", "Indicadores Econômicos", "Commodities", "Indicadores Internacionais", "Ações BR"])
 
-# --- CONTEÚDO DA ABA 1: JUROS BR (LÓGICA ATUALIZADA) ---
+# --- CONTEÚDO DA ABA 1: JUROS BR ---
 with tab1:
     st.header("Análise de Títulos do Tesouro Direto")
     df_tesouro = obter_dados_tesouro()
@@ -408,7 +358,6 @@ with tab1:
         st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
         st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
         st.markdown("---")
-
         st.subheader("Análises da Curva de Juros")
         col_analise1, col_analise2 = st.columns(2)
         with col_analise1:
@@ -417,34 +366,25 @@ with tab1:
             if not df_breakeven.empty:
                 st.dataframe(df_breakeven[['Inflação Implícita (% a.a.)']].style.format('{:.2f}%'), use_container_width=True)
                 fig_breakeven = px.bar(df_breakeven, y='Inflação Implícita (% a.a.)', text_auto='.2f', title='Inflação Implícita por Vencimento').update_traces(textposition='outside')
+                fig_breakeven.update_layout(title_x=0) # <--- AJUSTADO
                 st.plotly_chart(fig_breakeven, use_container_width=True)
             else: st.warning("Não há pares de títulos para calcular a inflação implícita.")
         with col_analise2:
             st.info("O **Spread de Juros** mostra a diferença entre as taxas de um título longo e um curto. Positivo indica otimismo; negativo (invertido) pode sinalizar recessão.")
             st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True)
-        
         st.markdown("---")
-
-        # Gráfico Spread BR vs EUA agora fica aqui
         st.subheader("Spread de Juros (Risco-País): Brasil 10 Anos vs. EUA 10 Anos")
         st.info("Este gráfico mostra a diferença entre a taxa da NTN-B de ~10 anos e a do título americano de 10 anos. É uma medida da percepção de risco do Brasil. **Spreads crescentes** indicam maior risco percebido, enquanto **spreads caindo** sugerem maior confiança no país.")
-        
-        # Carrega os dados do FRED necessários aqui
         FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
         df_fred_br_tab = carregar_dados_fred(FRED_API_KEY, {'DGS10': 'Juros 10 Anos EUA'})
-        
         if not df_fred_br_tab.empty:
             df_juro_br = calcular_juro_10a_br(df_tesouro)
             if not df_juro_br.empty:
                 fig_spread_br_eua = gerar_grafico_spread_br_eua(df_juro_br, df_fred_br_tab)
                 st.plotly_chart(fig_spread_br_eua, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
-            else:
-                st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
-        else:
-            st.warning("Não foi possível carregar os dados de juros dos EUA para o comparativo.")
-
+            else: st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
+        else: st.warning("Não foi possível carregar os dados de juros dos EUA para o comparativo.")
         st.markdown("---")
-
         st.subheader("Análise Histórica de Título Individual")
         col1_hist, col2_hist = st.columns(2)
         with col1_hist:
@@ -470,6 +410,7 @@ with tab2:
         st.subheader("Gráficos Individuais"); num_cols_bcb = 3; cols_bcb = st.columns(num_cols_bcb)
         for i, nome_serie in enumerate(df_filtrado_bcb.columns):
             fig_bcb = px.line(df_filtrado_bcb, x=df_filtrado_bcb.index, y=nome_serie, title=nome_serie, template='plotly_dark')
+            fig_bcb.update_layout(title_x=0) # <--- AJUSTADO
             cols_bcb[i % num_cols_bcb].plotly_chart(fig_bcb, use_container_width=True)
     else: st.warning("Não foi possível carregar os dados do BCB.")
 
