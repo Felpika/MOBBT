@@ -341,10 +341,10 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     return fig
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
-st.title("📊 MOBBT")
+st.title("MOBBT")
 st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Tesouro Direto", "Indicadores Econômicos (BCB)", "Commodities", "Indicadores Internacionais", "Ações BR"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Juros BR", "Indicadores Econômicos (BCB)", "Commodities", "Indicadores Internacionais", "Ações BR"])
 
 # --- CONTEÚDO DA ABA 1: TESOURO DIRETO ---
 with tab1:
