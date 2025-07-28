@@ -28,6 +28,29 @@ def obter_dados_tesouro():
         st.error(f"Erro ao baixar dados do Tesouro: {e}")
         return pd.DataFrame()
 
+# --- NOVA FUNÇÃO PARA CALCULAR O JURO DE 10 ANOS DO BRASIL ---
+@st.cache_data
+def calcular_juro_10a_br(df_tesouro):
+    """Extrai a série temporal da taxa do título NTN-F com vencimento mais próximo de 10 anos."""
+    df_ntnf = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro Prefixado com Juros Semestrais'].copy()
+    if df_ntnf.empty:
+        return pd.Series(dtype=float)
+
+    resultados = {}
+    datas_unicas = df_ntnf['Data Base'].unique()
+
+    for data_base in datas_unicas:
+        df_dia = df_ntnf[df_ntnf['Data Base'] == data_base]
+        vencimentos_do_dia = df_dia['Data Vencimento'].unique()
+        
+        if len(vencimentos_do_dia) > 0:
+            target_10y = pd.to_datetime(data_base) + pd.DateOffset(years=10)
+            venc_10y = min(vencimentos_do_dia, key=lambda d: abs(d - target_10y))
+            taxa = df_dia[df_dia['Data Vencimento'] == venc_10y]['Taxa Compra Manha'].iloc[0]
+            resultados[data_base] = taxa
+
+    return pd.Series(resultados).sort_index()
+
 def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra Manha'):
     df_filtrado = df[(df['Tipo Titulo'] == tipo) & (df['Data Vencimento'] == vencimento)].sort_values('Data Base')
     titulo = f'Histórico da Taxa de Compra: {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})' if metrica == 'Taxa Compra Manha' else f'Histórico do Preço Unitário (PU): {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})'
@@ -257,6 +280,39 @@ def gerar_grafico_fred(df, ticker, titulo):
         fig.update_yaxes(range=[min_y - padding, max_y + padding])
     return fig
 
+# --- NOVA FUNÇÃO PARA O SPREAD BR-EUA ---
+def gerar_grafico_spread_br_eua(df_br, df_usa):
+    df_br.name = 'BR10Y'
+    df_usa = df_usa['DGS10']
+    
+    df_merged = pd.merge(df_br, df_usa, left_index=True, right_index=True, how='inner')
+    df_merged['Spread'] = df_merged['BR10Y'] - df_merged['DGS10']
+    
+    fig = px.line(df_merged, y='Spread', title='Spread de Juros 10 Anos: Brasil vs. EUA', template='plotly_dark')
+    
+    end_date = df_merged.index.max()
+    buttons = []
+    periods = {'1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
+    for label, days in periods.items():
+        start_date = df_merged.index.min() if days == 'max' else end_date - timedelta(days=days)
+        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
+
+    fig.update_layout(
+        title_x=0.5, yaxis_title="Diferença (Pontos Percentuais)", xaxis_title="Data",
+        updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)]
+    )
+    
+    # Visão padrão de 1 ano com escala Y ajustada
+    start_date_1y = end_date - timedelta(days=365)
+    filtered_series = df_merged.loc[start_date_1y:end_date, 'Spread'].dropna()
+    fig.update_xaxes(range=[start_date_1y, end_date])
+    if not filtered_series.empty:
+        min_y, max_y = filtered_series.min(), filtered_series.max()
+        padding = (max_y - min_y) * 0.10 if (max_y - min_y) > 0 else 0.5
+        fig.update_yaxes(range=[min_y - padding, max_y + padding])
+        
+    return fig
+
 # --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR ---
 @st.cache_data
 def carregar_dados_acoes(tickers, period="max"):
@@ -306,7 +362,6 @@ def calcular_kpis_ratio(df_metrics):
         kpis["variacao_para_media"] = np.inf
     return kpis
 
-# --- FUNÇÃO ATUALIZADA COM LEGENDAS À ESQUERDA ---
 def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     """Plota o ratio com métricas usando Plotly e legendas à esquerda."""
     fig = go.Figure()
@@ -344,7 +399,7 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
 st.title("MOBBT")
 st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Juros BR", "Indicadores Econômicos (BCB)", "Commodities", "Indicadores Internacionais", "Ações BR"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Juros BR", "Indicadores Econômicos", "Commodities", "Indicadores Internacionais", "Ações BR"])
 
 # --- CONTEÚDO DA ABA 1: TESOURO DIRETO ---
 with tab1:
@@ -427,6 +482,18 @@ with tab4:
     config_fred = {'modeBarButtonsToRemove': ['autoscale']}
 
     if not df_fred.empty:
+        # Gráfico Spread BR vs EUA
+        st.subheader("Spread de Juros (Risco-País): Brasil 10 Anos vs. EUA 10 Anos")
+        st.info("Este gráfico mostra a diferença entre a taxa de juros da NTN-F de ~10 anos e a do título americano de 10 anos. É uma medida da percepção de risco do Brasil. **Spreads crescentes** indicam maior risco percebido, enquanto **spreads caindo** sugerem maior confiança no país.")
+        df_juro_br = calcular_juro_10a_br(df_tesouro)
+        if not df_juro_br.empty:
+            fig_spread_br_eua = gerar_grafico_spread_br_eua(df_juro_br, df_fred)
+            st.plotly_chart(fig_spread_br_eua, use_container_width=True, config=config_fred)
+        else:
+            st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
+        st.markdown("---")
+
+        # Outros gráficos internacionais
         if 'T10Y2Y' in df_fred.columns:
             st.info("O **Spread da Curva de Juros dos EUA (T10Y2Y)** é um dos indicadores mais observados para prever recessões. Quando o valor fica negativo (inversão da curva), historicamente tem sido um sinal de que uma recessão pode ocorrer nos próximos 6 a 18 meses.")
             fig_t10y2y = gerar_grafico_fred(df_fred, 'T10Y2Y', INDICADORES_FRED['T10Y2Y'])
