@@ -505,7 +505,7 @@ def obter_tickers_cvm_amplitude():
         return None
 
 @st.cache_data(ttl=86400) # Cache de 1 dia
-def obter_precos_historicos_amplitude(tickers, anos_historico=10):
+def obter_precos_historicos_amplitude(tickers, anos_historico=15):
     """Baixa os dados históricos de preços usando yfinance e o cache do Streamlit."""
     st.info(f"Buscando {anos_historico} anos de dados de preços para {len(tickers)} ativos... (Pode ser MUITO lento na primeira execução do dia)")
     tickers_sa = [ticker + ".SA" for ticker in tickers]
