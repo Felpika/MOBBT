@@ -12,6 +12,7 @@ from fredapi import Fred
 import requests
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import io # Adicionado para a nova funcionalidade
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="MOBBT")
@@ -19,6 +20,7 @@ st.set_page_config(layout="wide", page_title="MOBBT")
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
 @st.cache_data(ttl=3600*4)
 def obter_dados_tesouro():
+    # ... (código existente inalterado)
     url = 'https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv'
     st.info("Carregando dados do Tesouro Direto... (Cache de 4h)")
     try:
@@ -33,6 +35,7 @@ def obter_dados_tesouro():
 
 @st.cache_data
 def calcular_juro_10a_br(df_tesouro):
+    # ... (código existente inalterado)
     df_ntnb = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro IPCA+ com Juros Semestrais'].copy()
     if df_ntnb.empty: return pd.Series(dtype=float)
     resultados = {}
@@ -47,6 +50,7 @@ def calcular_juro_10a_br(df_tesouro):
     return pd.Series(resultados).sort_index()
 
 def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra Manha'):
+    # ... (código existente inalterado)
     df_filtrado = df[(df['Tipo Titulo'] == tipo) & (df['Data Vencimento'] == vencimento)].sort_values('Data Base')
     titulo = f'Histórico da Taxa de Compra: {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})' if metrica == 'Taxa Compra Manha' else f'Histórico do Preço Unitário (PU): {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})'
     eixo_y = "Taxa de Compra (% a.a.)" if metrica == 'Taxa Compra Manha' else "Preço Unitário (R$)"
@@ -56,6 +60,7 @@ def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra M
 
 @st.cache_data
 def calcular_inflacao_implicita(df):
+    # ... (código existente inalterado)
     df_recente = df[df['Data Base'] == df['Data Base'].max()].copy()
     tipos_ipca = ['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+']
     df_ipca_raw = df_recente[df_recente['Tipo Titulo'].isin(tipos_ipca)]
@@ -74,6 +79,7 @@ def calcular_inflacao_implicita(df):
 
 @st.cache_data
 def gerar_grafico_spread_juros(df):
+    # ... (código existente inalterado)
     df_ntnf = df[df['Tipo Titulo'] == 'Tesouro Prefixado com Juros Semestrais'].copy()
     if df_ntnf.empty: return go.Figure().update_layout(title_text="Não há dados de Tesouro Prefixado com Juros Semestrais.")
     data_recente = df_ntnf['Data Base'].max()
@@ -94,6 +100,7 @@ def gerar_grafico_spread_juros(df):
     return fig
 
 def gerar_grafico_ettj_curto_prazo(df):
+    # ... (código existente inalterado)
     df_prefixado = df[df['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
     if df_prefixado.empty: return go.Figure().update_layout(title_text="Não há dados para 'Tesouro Prefixado'.")
     datas_disponiveis = sorted(df_prefixado['Data Base'].unique())
@@ -117,6 +124,7 @@ def gerar_grafico_ettj_curto_prazo(df):
     return fig
 
 def gerar_grafico_ettj_longo_prazo(df):
+    # ... (código existente inalterado)
     df_prefixado = df[df['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
     if df_prefixado.empty: return go.Figure().update_layout(title_text="Não há dados para 'Tesouro Prefixado'.")
     datas_disponiveis = sorted(df_prefixado['Data Base'].unique())
@@ -128,8 +136,8 @@ def gerar_grafico_ettj_longo_prazo(df):
         if datas_validas:
             data_real = max(datas_validas)
             if data_real not in datas_para_plotar.values():
-                 legenda_final = f'{" ".join(legenda_base.split(" ")[:2])} ({data_real.strftime("%d/%m/%Y")})' if not legenda_base.startswith('Hoje') else legenda_base
-                 datas_para_plotar[legenda_final] = data_real
+                legenda_final = f'{" ".join(legenda_base.split(" ")[:2])} ({data_real.strftime("%d/%m/%Y")})' if not legenda_base.startswith('Hoje') else legenda_base
+                datas_para_plotar[legenda_final] = data_real
     fig = go.Figure()
     for legenda, data_base in datas_para_plotar.items():
         df_data = df_prefixado[df_prefixado['Data Base'] == data_base].sort_values('Data Vencimento')
@@ -142,6 +150,7 @@ def gerar_grafico_ettj_longo_prazo(df):
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS ---
 @st.cache_data(ttl=3600*4)
 def carregar_dados_bcb():
+    # ... (código existente inalterado)
     SERIES_CONFIG = {'Spread Bancário': {'id': 20783}, 'Inadimplência': {'id': 21082}, 'Crédito/PIB': {'id': 20622}, 'Juros Médio': {'id': 20714}, 'Confiança Consumidor': {'id': 4393}, 'IPCA': {'id': 16122}, 'Atraso 15-90d Total': {'id': 21006}, 'Atraso 15-90d Agro': {'id': 21069}, 'Inadimplência Crédito Rural': {'id': 21146}}
     lista_dfs_sucesso, config_sucesso = [], {}
     for name, config in SERIES_CONFIG.items():
@@ -155,6 +164,7 @@ def carregar_dados_bcb():
 # --- BLOCO 3: LÓGICA DO DASHBOARD DE COMMODITIES ---
 @st.cache_data(ttl=3600*4)
 def carregar_dados_commodities():
+    # ... (código existente inalterado)
     commodities_map = {'Petróleo Brent': 'BZ=F', 'Cacau': 'CC=F', 'Petróleo WTI': 'CL=F', 'Algodão': 'CT=F', 'Ouro': 'GC=F', 'Cobre': 'HG=F', 'Óleo de Aquecimento': 'HO=F', 'Café': 'KC=F', 'Trigo (KC HRW)': 'KE=F', 'Madeira': 'LBS=F', 'Gado Bovino': 'LE=F', 'Gás Natural': 'NG=F', 'Suco de Laranja': 'OJ=F', 'Paládio': 'PA=F', 'Platina': 'PL=F', 'Gasolina RBOB': 'RB=F', 'Açúcar': 'SB=F', 'Prata': 'SI=F', 'Milho': 'ZC=F', 'Óleo de Soja': 'ZL=F', 'Aveia': 'ZO=F', 'Arroz': 'ZR=F', 'Soja': 'ZS=F'}
     dados_commodities_raw = {}
     with st.spinner("Baixando dados históricos de commodities... (cache de 4h)"):
@@ -173,6 +183,7 @@ def carregar_dados_commodities():
     return dados_por_categoria
 
 def calcular_variacao_commodities(dados_por_categoria):
+    # ... (código existente inalterado)
     all_series = [s for df in dados_por_categoria.values() for s in [df[col].dropna() for col in df.columns]]
     if not all_series: return pd.DataFrame()
     df_full = pd.concat(all_series, axis=1); df_full.sort_index(inplace=True)
@@ -190,10 +201,12 @@ def calcular_variacao_commodities(dados_por_categoria):
     return pd.DataFrame(results).set_index('Commodity')
 
 def colorir_negativo_positivo(val):
+    # ... (código existente inalterado)
     if pd.isna(val) or val == 0: return ''
     return f"color: {'#4CAF50' if val > 0 else '#F44336'}"
 
 def gerar_dashboard_commodities(dados_preco_por_categoria):
+    # ... (código existente inalterado)
     all_commodity_names = [name for df in dados_preco_por_categoria.values() for name in df.columns]
     total_subplots = len(all_commodity_names)
     if total_subplots == 0: return go.Figure().update_layout(title_text="Nenhum dado de commodity disponível.")
@@ -217,7 +230,7 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
         buttons.append(dict(method='relayout', label=label, args=[update_args]))
     active_button_index = list(periods.keys()).index('1A') if '1A' in list(periods.keys()) else 4
     fig.update_layout(title_text="Dashboard de Preços Históricos de Commodities", title_x=0, template="plotly_dark", height=250 * num_rows, showlegend=False,
-                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons, active=active_button_index)])
+                        updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons, active=active_button_index)])
     start_date_1y = end_date - timedelta(days=365); idx = 0
     for df_cat in dados_preco_por_categoria.values():
         for i, commodity_name in enumerate(df_cat.columns, start=idx):
@@ -233,6 +246,7 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
 # --- BLOCO 4: LÓGICA DO DASHBOARD DE INDICADORES INTERNACIONAIS ---
 @st.cache_data(ttl=3600*4)
 def carregar_dados_fred(api_key, tickers_dict):
+    # ... (código existente inalterado)
     fred = Fred(api_key=api_key)
     lista_series = []
     st.info("Carregando dados do FRED... (Cache de 4h)")
@@ -244,6 +258,7 @@ def carregar_dados_fred(api_key, tickers_dict):
     return pd.concat(lista_series, axis=1).ffill()
 
 def gerar_grafico_fred(df, ticker, titulo):
+    # ... (código existente inalterado)
     if ticker not in df.columns or df[ticker].isnull().all():
         return go.Figure().update_layout(title_text=f"Dados para {ticker} não encontrados.")
     fig = px.line(df, y=ticker, title=titulo, template='plotly_dark')
@@ -256,7 +271,7 @@ def gerar_grafico_fred(df, ticker, titulo):
         start_date = df.index.min() if days == 'max' else end_date - timedelta(days=days)
         buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
     fig.update_layout(title_x=0, yaxis_title="Pontos Percentuais (%)", xaxis_title="Data", showlegend=False,
-                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
+                        updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
     start_date_1y = end_date - timedelta(days=365)
     filtered_series = df.loc[start_date_1y:end_date, ticker].dropna()
     fig.update_xaxes(range=[start_date_1y, end_date])
@@ -267,6 +282,7 @@ def gerar_grafico_fred(df, ticker, titulo):
     return fig
 
 def gerar_grafico_spread_br_eua(df_br, df_usa):
+    # ... (código existente inalterado)
     df_br.name = 'BR10Y'
     df_usa = df_usa['DGS10']
     df_merged = pd.merge(df_br, df_usa, left_index=True, right_index=True, how='inner')
@@ -294,6 +310,7 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
 # --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR ---
 @st.cache_data(ttl=3600*24)
 def executar_analise_insiders():
+    # ... (código existente inalterado)
     """Função principal que orquestra o download e processamento dos dados de insiders."""
     ANO_ATUAL = datetime.now().year
     URL_MOVIMENTACOES = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/VLMO/DADOS/vlmo_cia_aberta_{ANO_ATUAL}.zip"
@@ -371,8 +388,8 @@ def executar_analise_insiders():
     
     return df_final_controladores, df_final_outros, ultimo_mes
 
-# --- FUNÇÃO ATUALIZADA PARA RETORNAR DOIS GRÁFICOS ---
 def gerar_graficos_insiders_plotly(df_dados, top_n=10):
+    # ... (código existente inalterado)
     if df_dados.empty: return None, None
 
     # Gráfico 1: Volume
@@ -407,6 +424,7 @@ def gerar_graficos_insiders_plotly(df_dados, top_n=10):
 
 @st.cache_data
 def carregar_dados_acoes(tickers, period="max"):
+    # ... (código existente inalterado)
     try:
         data = yf.download(tickers, period=period, auto_adjust=True)['Close']
         if isinstance(data, pd.Series): 
@@ -417,6 +435,7 @@ def carregar_dados_acoes(tickers, period="max"):
 
 @st.cache_data
 def calcular_metricas_ratio(data, ticker_a, ticker_b, window=252):
+    # ... (código existente inalterado)
     ratio = data[ticker_a] / data[ticker_b]
     df_metrics = pd.DataFrame({'Ratio': ratio})
     df_metrics['Rolling_Mean'] = ratio.rolling(window=window).mean()
@@ -433,6 +452,7 @@ def calcular_metricas_ratio(data, ticker_a, ticker_b, window=252):
     return df_metrics
 
 def calcular_kpis_ratio(df_metrics):
+    # ... (código existente inalterado)
     if 'Ratio' not in df_metrics or df_metrics['Ratio'].dropna().empty: return None
     ratio_series = df_metrics['Ratio'].dropna()
     kpis = {"atual": ratio_series.iloc[-1], "media": ratio_series.mean(), "minimo": ratio_series.min(), "data_minimo": ratio_series.idxmin(), "maximo": ratio_series.max(), "data_maximo": ratio_series.idxmax()}
@@ -441,6 +461,7 @@ def calcular_kpis_ratio(df_metrics):
     return kpis
 
 def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
+    # ... (código existente inalterado)
     fig = go.Figure()
     static_median_val = df_metrics['Static_Median'].iloc[-1]
     fig.add_hline(y=static_median_val, line_color='red', line_dash='dash', annotation_text=f'Mediana ({static_median_val:.2f})', annotation_position="top left")
@@ -455,19 +476,19 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     fig.update_layout(title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}', template='plotly_dark', title_x=0, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
-# --- BLOCO 6: LÓGICA DA ANÁLISE DE AMPLITUDE DE MERCADO ---
+# --- INÍCIO DO NOVO BLOCO: LÓGICA DO INDICADOR DE AMPLITUDE ---
 
-@st.cache_data(ttl=3600*24) # Cache de 1 dia
-def carregar_tickers_cvm():
+@st.cache_data(ttl=86400) # Cache de 1 dia
+def obter_tickers_cvm_amplitude():
     """Obtém a lista de tickers da CVM, usando o cache do Streamlit."""
-    ANO_CVM = datetime.now().year
-    url = f'https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ANO_CVM}.zip'
-    nome_arquivo_csv = f'fca_cia_aberta_valor_mobiliario_{ANO_CVM}.csv'
+    st.info("Buscando lista de tickers da CVM... (rápido se em cache diário)")
+    ano = datetime.now().year
+    url = f'https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ano}.zip'
+    nome_arquivo_csv = f'fca_cia_aberta_valor_mobiliario_{ano}.csv'
 
     try:
-        response = requests.get(url, stream=True, timeout=60)
+        response = requests.get(url, stream=True)
         response.raise_for_status()
-        
         with zipfile.ZipFile(io.BytesIO(response.content)) as z:
             with z.open(nome_arquivo_csv) as f:
                 df = pd.read_csv(f, sep=';', encoding='ISO-8859-1', dtype={'Valor_Mobiliario': 'category', 'Mercado': 'category'})
@@ -476,16 +497,18 @@ def carregar_tickers_cvm():
             (df['Valor_Mobiliario'].isin(['Ações Ordinárias', 'Ações Preferenciais'])) &
             (df['Mercado'] == 'Bolsa')
         ]
-        return df_filtrado['Codigo_Negociacao'].dropna().unique().tolist()
-
+        tickers = df_filtrado['Codigo_Negociacao'].dropna().unique().tolist()
+        st.success(f"{len(tickers)} tickers encontrados na CVM.")
+        return tickers
     except Exception as e:
-        st.error(f"ERRO: Não foi possível obter a lista de tickers da CVM. {e}")
+        st.error(f"ERRO: Não foi possível obter os dados da CVM. {e}")
         return None
 
-@st.cache_data(ttl=3600*12) # Cache de 12 horas para os preços
-def carregar_precos_historicos(_tickers, anos_historico=10):
-    """Baixa os dados históricos para uma lista de tickers, otimizado para Streamlit."""
-    tickers_sa = [ticker + ".SA" for ticker in _tickers]
+@st.cache_data(ttl=86400) # Cache de 1 dia
+def obter_precos_historicos_amplitude(tickers, anos_historico=10):
+    """Baixa os dados históricos de preços usando yfinance e o cache do Streamlit."""
+    st.info(f"Buscando {anos_historico} anos de dados de preços para {len(tickers)} ativos... (Pode ser MUITO lento na primeira execução do dia)")
+    tickers_sa = [ticker + ".SA" for ticker in tickers]
     data_final = datetime.now()
     data_inicial = data_final - timedelta(days=anos_historico*365)
     
@@ -493,43 +516,56 @@ def carregar_precos_historicos(_tickers, anos_historico=10):
     
     if not dados_completos.empty:
         precos_fechamento = dados_completos['Close'].astype('float32')
+        st.success("Download dos dados de preços concluído.")
         return precos_fechamento
     else:
-        st.error("ERRO: Falha no download dos dados de preços do Yahoo Finance.")
+        st.error("ERRO: Falha no download dos dados de preços.")
         return pd.DataFrame()
 
-@st.cache_data
-def gerar_grafico_amplitude_plotly(_precos_fechamento):
-    """Calcula e gera o gráfico de amplitude de mercado com Plotly."""
-    mma200 = _precos_fechamento.rolling(window=200).mean()
-    acima_da_media = _precos_fechamento > mma200
-    percentual_acima_media = (acima_da_media.sum(axis=1) / _precos_fechamento.notna().sum(axis=1)) * 100
-    
-    fig = px.line(percentual_acima_media, title='Indicador de Amplitude B3 (% de Ações Acima da MMA de 200 Dias)', template='plotly_dark')
-    
-    # Adiciona linhas de referência
-    fig.add_hline(y=70, line_color='red', line_dash='dash', annotation_text="Sobrecompra (70%)")
-    fig.add_hline(y=50, line_color='gray', line_dash='dash', annotation_text="Central (50%)")
-    fig.add_hline(y=30, line_color='green', line_dash='dash', annotation_text="Sobrevenda (30%)")
+def gerar_grafico_amplitude(precos_fechamento):
+    """Calcula o indicador de amplitude e gera um gráfico Plotly."""
+    if precos_fechamento.empty:
+        return None
 
-    # Adiciona botões de período
-    end_date = percentual_acima_media.index.max()
-    buttons = []
-    periods = {'1A': 365, '3A': 365*3, '5A': 365*5, 'Máx': 'max'}
-    for label, days in periods.items():
-        start_date = percentual_acima_media.index.min() if days == 'max' else end_date - timedelta(days=days)
-        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
+    st.info("Calculando o indicador de amplitude...")
+    mma200 = precos_fechamento.rolling(window=200).mean()
+    acima_da_media = precos_fechamento > mma200
+    
+    # Cálculo robusto que ignora NaNs tanto no numerador quanto no denominador
+    percentual_acima_media = (acima_da_media.sum(axis=1) / precos_fechamento.notna().sum(axis=1)) * 100
+    percentual_acima_media.dropna(inplace=True)
 
+    st.info("Gerando o gráfico de amplitude...")
+    fig = go.Figure()
+
+    # Adicionando as linhas de referência (sobrecompra, sobrevenda)
+    fig.add_hline(y=70, line_color='red', line_dash='dash', annotation_text='Sobrecompra (70%)', annotation_position="bottom right")
+    fig.add_hline(y=50, line_color='gray', line_dash='dash', annotation_text='Linha Central (50%)', annotation_position="bottom right")
+    fig.add_hline(y=30, line_color='green', line_dash='dash', annotation_text='Sobrevenda (30%)', annotation_position="bottom right")
+
+    # Adicionando a linha principal do indicador
+    fig.add_trace(go.Scatter(
+        x=percentual_acima_media.index,
+        y=percentual_acima_media,
+        mode='lines',
+        name='% Acima da MMA 200',
+        line=dict(color='#636EFA', width=2)
+    ))
+
+    # Layout do gráfico
     fig.update_layout(
+        title_text='Indicador de Amplitude B3 (% de Ações Acima da MMA de 200 Dias)',
         title_x=0,
-        yaxis_title="Percentual de Ativos (%)",
-        xaxis_title="Data",
+        yaxis_title='Percentual de Ativos (%)',
+        xaxis_title='Data',
+        template='plotly_dark',
         yaxis_range=[0, 100],
-        showlegend=False,
-        updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)]
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-    fig.update_yaxes(ticksuffix="%")
+    
     return fig
+
+# --- FIM DO NOVO BLOCO ---
 
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
@@ -540,6 +576,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["Juros BR", "Indicadores Econômicos", "
 
 # --- CONTEÚDO DA ABA 1: JUROS BR ---
 with tab1:
+    # ... (código existente inalterado)
     st.header("Análise de Títulos do Tesouro Direto")
     df_tesouro = obter_dados_tesouro()
     if not df_tesouro.empty:
@@ -592,6 +629,7 @@ with tab1:
 
 # --- CONTEÚDO DA ABA 2: INDICADORES ECONÔMICOS ---
 with tab2:
+    # ... (código existente inalterado)
     st.header("Monitor de Indicadores Econômicos do Brasil")
     df_bcb, config_bcb = carregar_dados_bcb()
     if not df_bcb.empty:
@@ -607,6 +645,7 @@ with tab2:
 
 # --- CONTEÚDO DA ABA 3: COMMODITIES ---
 with tab3:
+    # ... (código existente inalterado)
     st.header("Painel de Preços de Commodities")
     dados_commodities_categorizados = carregar_dados_commodities()
     if dados_commodities_categorizados:
@@ -624,6 +663,7 @@ with tab3:
 
 # --- CONTEÚDO DA ABA 4: INDICADORES INTERNACIONAIS ---
 with tab4:
+    # ... (código existente inalterado)
     st.header("Monitor de Indicadores Internacionais (FRED)")
     FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
     INDICADORES_FRED = {
@@ -697,7 +737,7 @@ with tab5:
     
     st.markdown("---")
 
-    # --- Seção 2: Análise de Insiders (LÓGICA ATUALIZADA) ---
+    # --- Seção 2: Análise de Insiders ---
     st.header("Análise de Movimentação de Insiders (CVM)")
     st.info("Analisa as movimentações de compra e venda de ações feitas por pessoas ligadas à empresa (Controladores, Diretores, etc.), com base nos dados públicos da CVM. Grandes volumes de compra podem indicar confiança na empresa.")
     
@@ -736,27 +776,33 @@ with tab5:
                 st.warning("Não foram encontrados dados de movimentação para Demais Insiders no último mês.")
         else:
             st.error("Falha ao processar dados de insiders.")
-    # ... (todo o seu código existente para Análise de Ratio e Insiders fica aqui) ...
 
     st.markdown("---")
 
-    # --- Seção 3: Análise de Amplitude de Mercado (NOVO) ---
-    st.header("Análise de Amplitude de Mercado (Breadth)")
+    # --- Seção 3: Indicador de Amplitude de Mercado (NOVO) ---
+    st.header("Indicador de Amplitude de Mercado (Market Breadth)")
     st.info(
-        "Este indicador mostra o percentual de todas as ações da B3 que estão sendo negociadas acima de sua Média Móvel de 200 dias. "
-        "É um termômetro da saúde do mercado: valores **altos (>70%)** podem indicar euforia ou sobrecompra, enquanto valores **baixos (<30%)** podem indicar pânico ou sobrevenda."
+        "Este indicador mostra a porcentagem de ações da B3 que estão sendo negociadas acima de sua Média Móvel de 200 dias (MMA 200). "
+        "É uma ferramenta para medir a saúde interna do mercado.\n\n"
+        "- **Acima de 70%:** Pode indicar euforia ou condições de sobrecompra no mercado.\n"
+        "- **Abaixo de 30%:** Pode indicar pânico ou condições de sobrevenda, muitas vezes associadas a fundos de mercado."
     )
 
-    if st.button("Analisar Amplitude do Mercado (Lento na 1ª vez)", use_container_width=True):
-        
-        with st.spinner("Passo 1/3: Obtendo lista completa de tickers da CVM..."):
-            lista_de_tickers = carregar_tickers_cvm()
-        
-        if lista_de_tickers:
-            with st.spinner(f"Passo 2/3: Baixando dados históricos para {len(lista_de_tickers)} ações... Por favor, aguarde, isso pode levar vários minutos."):
-                precos = carregar_precos_historicos(lista_de_tickers)
-            
-            if not precos.empty:
-                with st.spinner("Passo 3/3: Calculando indicador e gerando gráfico..."):
-                    fig_amplitude = gerar_grafico_amplitude_plotly(precos)
-                    st.plotly_chart(fig_amplitude, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
+    if st.button("Analisar Amplitude do Mercado (Pode ser lento na 1ª vez)", use_container_width=True):
+        with st.spinner("Executando análise de amplitude... Este processo é demorado, por favor aguarde."):
+            lista_tickers = obter_tickers_cvm_amplitude()
+            if lista_tickers:
+                precos = obter_precos_historicos_amplitude(lista_tickers)
+                if not precos.empty:
+                    fig_amplitude = gerar_grafico_amplitude(precos)
+                    st.session_state.fig_amplitude = fig_amplitude # Salva no estado da sessão
+                else:
+                    st.session_state.fig_amplitude = None
+                    st.error("Não foi possível gerar o gráfico de amplitude pois os dados de preços não foram baixados.")
+            else:
+                st.session_state.fig_amplitude = None
+                st.error("Não foi possível gerar o gráfico de amplitude pois a lista de tickers não foi obtida.")
+    
+    # Exibe o gráfico se ele já foi gerado e está no estado da sessão
+    if 'fig_amplitude' in st.session_state and st.session_state.fig_amplitude is not None:
+        st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
