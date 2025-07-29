@@ -141,6 +141,281 @@ def gerar_grafico_ettj_longo_prazo(df):
 
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS ---
 @st.cache_data(ttl=3600*4)
+def carregar_dados_selic_copom():
+    """Carrega dados da taxa Selic e informações sobre reuniões do COPOM"""
+    try:
+        # Taxa Selic (série 432 do BCB)
+        selic_data = sgs.get({'Selic': 432}, start='2010-01-01')
+        
+        # Simular datas do COPOM (em uma implementação real, isso viria de uma API ou base de dados)
+        # As reuniões do COPOM geralmente ocorrem 8 vezes por ano
+        copom_meetings = [
+            {'data': '2024-01-31', 'decisao': 'Mantida', 'taxa_anterior': 11.75, 'taxa_nova': 11.75},
+            {'data': '2024-03-20', 'decisao': 'Redução', 'taxa_anterior': 11.75, 'taxa_nova': 10.75},
+            {'data': '2024-05-08', 'decisao': 'Redução', 'taxa_anterior': 10.75, 'taxa_nova': 10.50},
+            {'data': '2024-06-19', 'decisao': 'Mantida', 'taxa_anterior': 10.50, 'taxa_nova': 10.50},
+            {'data': '2024-07-31', 'decisao': 'Mantida', 'taxa_anterior': 10.50, 'taxa_nova': 10.50},
+            {'data': '2024-09-18', 'decisao': 'Mantida', 'taxa_anterior': 10.50, 'taxa_nova': 10.50},
+            {'data': '2024-11-06', 'decisao': 'Elevação', 'taxa_anterior': 10.50, 'taxa_nova': 11.25},
+            {'data': '2024-12-11', 'decisao': 'Elevação', 'taxa_anterior': 11.25, 'taxa_nova': 12.25},
+        ]
+        
+        copom_df = pd.DataFrame(copom_meetings)
+        copom_df['data'] = pd.to_datetime(copom_df['data'])
+        
+        return selic_data, copom_df
+    except Exception as e:
+        st.error(f"Erro ao carregar dados Selic/COPOM: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+
+@st.cache_data
+def analisar_impacto_copom(selic_data, copom_df, days_before=5, days_after=10):
+    """Analisa o impacto das decisões do COPOM na curva de juros"""
+    if selic_data.empty or copom_df.empty:
+        return pd.DataFrame()
+    
+    impactos = []
+    
+    for _, reuniao in copom_df.iterrows():
+        data_reuniao = reuniao['data']
+        
+        # Buscar taxa Selic antes e depois da reunião
+        data_antes = data_reuniao - pd.DateOffset(days=days_before)
+        data_depois = data_reuniao + pd.DateOffset(days=days_after)
+        
+        # Pegar a taxa mais próxima antes da reunião
+        selic_antes = selic_data['Selic'].asof(data_antes)
+        selic_depois = selic_data['Selic'].asof(data_depois)
+        
+        if pd.notna(selic_antes) and pd.notna(selic_depois):
+            variacao_selic = selic_depois - selic_antes
+            
+            impactos.append({
+                'Data COPOM': data_reuniao,
+                'Decisão': reuniao['decisao'],
+                'Taxa Anterior': reuniao['taxa_anterior'],
+                'Taxa Nova': reuniao['taxa_nova'],
+                'Mudança Anunciada': reuniao['taxa_nova'] - reuniao['taxa_anterior'],
+                'Selic Antes (5d)': selic_antes,
+                'Selic Depois (10d)': selic_depois,
+                'Variação Real': variacao_selic,
+                'Surpresa': variacao_selic - (reuniao['taxa_nova'] - reuniao['taxa_anterior'])
+            })
+    
+    return pd.DataFrame(impactos)
+
+def gerar_grafico_selic_copom(selic_data, copom_df):
+    """Gera gráfico da taxa Selic com marcações das reuniões do COPOM"""
+    if selic_data.empty:
+        return go.Figure().update_layout(title_text="Dados da Selic não disponíveis")
+    
+    fig = go.Figure()
+    
+    # Linha da taxa Selic
+    fig.add_trace(go.Scatter(
+        x=selic_data.index,
+        y=selic_data['Selic'],
+        mode='lines',
+        name='Taxa Selic',
+        line=dict(color='#1f77b4', width=2)
+    ))
+    
+    # Marcações das reuniões do COPOM
+    if not copom_df.empty:
+        for _, reuniao in copom_df.iterrows():
+            # Cor baseada na decisão
+            cor_decisao = {
+                'Elevação': '#FF4444',
+                'Redução': '#44FF44', 
+                'Mantida': '#FFAA44'
+            }.get(reuniao['decisao'], '#888888')
+            
+            # Encontrar a taxa Selic na data da reunião
+            selic_na_data = selic_data['Selic'].asof(reuniao['data'])
+            
+            if pd.notna(selic_na_data):
+                fig.add_trace(go.Scatter(
+                    x=[reuniao['data']],
+                    y=[selic_na_data],
+                    mode='markers',
+                    name=f"COPOM {reuniao['data'].strftime('%m/%Y')}",
+                    marker=dict(
+                        size=12,
+                        color=cor_decisao,
+                        symbol='diamond',
+                        line=dict(width=2, color='white')
+                    ),
+                    hovertemplate=f"<b>COPOM {reuniao['data'].strftime('%d/%m/%Y')}</b><br>" +
+                                f"Decisão: {reuniao['decisao']}<br>" +
+                                f"Taxa: {reuniao['taxa_anterior']}% → {reuniao['taxa_nova']}%<br>" +
+                                "<extra></extra>",
+                    showlegend=False
+                ))
+    
+    # Configurações do gráfico
+    fig.update_layout(
+        title='Taxa Selic e Reuniões do COPOM',
+        title_x=0,
+        template='plotly_dark',
+        xaxis_title='Data',
+        yaxis_title='Taxa Selic (%)',
+        hovermode='x unified'
+    )
+    
+    return fig
+
+@st.cache_data(ttl=3600*4)
+def carregar_dados_setores_b3():
+    """Carrega dados de performance dos principais setores da B3"""
+    setores_b3 = {
+        'Bancos': ['ITUB4.SA', 'BBDC4.SA', 'BBAS3.SA', 'SANB11.SA', 'BPAC11.SA'],
+        'Mineração': ['VALE3.SA', 'CSNA3.SA', 'USIM5.SA', 'GGBR4.SA'],
+        'Petróleo & Gás': ['PETR4.SA', 'PETR3.SA', 'PRIO3.SA', 'RRRP3.SA'],
+        'Varejo': ['MGLU3.SA', 'LREN3.SA', 'AMER3.SA', 'PCAR3.SA'],
+        'Alimentos': ['JBSS3.SA', 'BEEF3.SA', 'BRF3.SA', 'SMTO3.SA'],
+        'Tecnologia': ['WEGE3.SA', 'TOTS3.SA', 'LWSA3.SA', 'MELI34.SA'],
+        'Utilities': ['ELET3.SA', 'ELET6.SA', 'CMIG4.SA', 'CPFE3.SA'],
+        'Papel & Celulose': ['SUZB3.SA', 'KLBN11.SA', 'FIBR3.SA']
+    }
+    
+    dados_setores = {}
+    
+    with st.spinner("Carregando dados dos setores da B3..."):
+        for setor, tickers in setores_b3.items():
+            try:
+                # Baixar dados dos últimos 2 anos
+                dados_setor = []
+                for ticker in tickers:
+                    try:
+                        dados = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
+                        if not dados.empty and 'Close' in dados.columns:
+                            dados_setor.append(dados['Close'].rename(ticker))
+                    except:
+                        continue
+                
+                if dados_setor:
+                    df_setor = pd.concat(dados_setor, axis=1)
+                    # Calcular índice médio do setor (média simples)
+                    indice_setor = df_setor.mean(axis=1).dropna()
+                    dados_setores[setor] = indice_setor
+                    
+            except Exception as e:
+                continue
+    
+    return dados_setores
+
+@st.cache_data
+def calcular_performance_setores(dados_setores):
+    """Calcula métricas de performance para cada setor"""
+    if not dados_setores:
+        return pd.DataFrame()
+    
+    performance_data = []
+    
+    for setor, serie in dados_setores.items():
+        if len(serie) < 50:  # Dados insuficientes
+            continue
+            
+        try:
+            # Valores atuais e históricos
+            valor_atual = serie.iloc[-1]
+            valor_1mes = serie.iloc[-22] if len(serie) >= 22 else serie.iloc[0]
+            valor_3mes = serie.iloc[-66] if len(serie) >= 66 else serie.iloc[0]
+            valor_6mes = serie.iloc[-132] if len(serie) >= 132 else serie.iloc[0]
+            valor_1ano = serie.iloc[-252] if len(serie) >= 252 else serie.iloc[0]
+            valor_ytd = serie.loc[serie.index >= f'{datetime.now().year}-01-01'].iloc[0] if not serie.loc[serie.index >= f'{datetime.now().year}-01-01'].empty else serie.iloc[0]
+            
+            # Calcular retornos
+            ret_1mes = (valor_atual / valor_1mes - 1) * 100
+            ret_3mes = (valor_atual / valor_3mes - 1) * 100
+            ret_6mes = (valor_atual / valor_6mes - 1) * 100
+            ret_1ano = (valor_atual / valor_1ano - 1) * 100
+            ret_ytd = (valor_atual / valor_ytd - 1) * 100
+            
+            # Volatilidade (últimos 252 dias)
+            retornos_diarios = serie.pct_change().dropna()
+            volatilidade_anual = retornos_diarios.std() * np.sqrt(252) * 100
+            
+            # Máximo e mínimo do ano
+            serie_ano = serie.loc[serie.index >= f'{datetime.now().year}-01-01']
+            if not serie_ano.empty:
+                max_ano = serie_ano.max()
+                min_ano = serie_ano.min()
+                dist_max = (valor_atual / max_ano - 1) * 100
+                dist_min = (valor_atual / min_ano - 1) * 100
+            else:
+                dist_max = dist_min = 0
+            
+            performance_data.append({
+                'Setor': setor,
+                'Valor Atual': valor_atual,
+                '1 Mês (%)': ret_1mes,
+                '3 Meses (%)': ret_3mes,
+                '6 Meses (%)': ret_6mes,
+                '1 Ano (%)': ret_1ano,
+                'YTD (%)': ret_ytd,
+                'Volatilidade (%)': volatilidade_anual,
+                'Dist. Máxima (%)': dist_max,
+                'Dist. Mínima (%)': dist_min
+            })
+            
+        except Exception as e:
+            continue
+    
+    if not performance_data:
+        return pd.DataFrame()
+        
+    df_performance = pd.DataFrame(performance_data)
+    return df_performance.sort_values('YTD (%)', ascending=False)
+
+def gerar_grafico_setores_comparativo(dados_setores, periodo_dias=252):
+    """Gera gráfico comparativo de performance dos setores"""
+    if not dados_setores:
+        return go.Figure().update_layout(title_text="Nenhum dado de setor disponível")
+    
+    fig = go.Figure()
+    
+    # Data de início para normalização
+    data_inicio = datetime.now() - timedelta(days=periodo_dias)
+    
+    cores = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
+    
+    for i, (setor, serie) in enumerate(dados_setores.items()):
+        # Filtrar para o período desejado
+        serie_periodo = serie.loc[serie.index >= data_inicio]
+        
+        if len(serie_periodo) < 10:  # Dados insuficientes
+            continue
+            
+        # Normalizar para base 100
+        serie_normalizada = (serie_periodo / serie_periodo.iloc[0]) * 100
+        
+        fig.add_trace(go.Scatter(
+            x=serie_periodo.index,
+            y=serie_normalizada,
+            mode='lines',
+            name=setor,
+            line=dict(width=2, color=cores[i % len(cores)]),
+            hovertemplate=f'<b>{setor}</b><br>Data: %{{x}}<br>Performance: %{{y:.1f}}<extra></extra>'
+        ))
+    
+    # Linha de referência (base 100)
+    fig.add_hline(y=100, line_dash="dash", line_color="gray", 
+                  annotation_text="Base 100", annotation_position="bottom right")
+    
+    fig.update_layout(
+        title=f'Performance Comparativa dos Setores B3 (Base 100 - {periodo_dias} dias)',
+        title_x=0,
+        template='plotly_dark',
+        xaxis_title='Data',
+        yaxis_title='Performance Indexada (Base 100)',
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        hovermode='x unified'
+    )
+    
+    return fig
+
+@st.cache_data(ttl=3600*4)
 def carregar_dados_bcb():
     SERIES_CONFIG = {'Spread Bancário': {'id': 20783}, 'Inadimplência': {'id': 21082}, 'Crédito/PIB': {'id': 20622}, 'Juros Médio': {'id': 20714}, 'Confiança Consumidor': {'id': 4393}, 'IPCA': {'id': 16122}, 'Atraso 15-90d Total': {'id': 21006}, 'Atraso 15-90d Agro': {'id': 21069}, 'Inadimplência Crédito Rural': {'id': 21146}}
     lista_dfs_sucesso, config_sucesso = [], {}
@@ -917,6 +1192,162 @@ with tab1:
 # --- CONTEÚDO DA ABA 2: INDICADORES ECONÔMICOS ---
 with tab2:
     st.header("Monitor de Indicadores Econômicos do Brasil")
+    
+    # --- Seção COPOM e Selic ---
+    st.subheader("🏛️ COPOM e Taxa Selic")
+    st.info("Acompanhe as decisões do Comitê de Política Monetária (COPOM) e seu impacto na taxa básica de juros brasileira.")
+    
+    selic_data, copom_df = carregar_dados_selic_copom()
+    
+    if not selic_data.empty:
+        # Gráfico principal
+        fig_selic_copom = gerar_grafico_selic_copom(selic_data, copom_df)
+        st.plotly_chart(fig_selic_copom, use_container_width=True)
+        
+        # Análise de impacto
+        if not copom_df.empty:
+            st.subheader("📊 Análise de Impacto das Reuniões COPOM")
+            df_impacto = analisar_impacto_copom(selic_data, copom_df)
+            
+            if not df_impacto.empty:
+                # Mostrar tabela de impactos
+                colunas_display = ['Data COPOM', 'Decisão', 'Taxa Anterior', 'Taxa Nova', 
+                                 'Mudança Anunciada', 'Variação Real', 'Surpresa']
+                
+                df_display_copom = df_impacto[colunas_display].copy()
+                
+                st.dataframe(
+                    df_display_copom.style.format({
+                        'Taxa Anterior': '{:.2f}%',
+                        'Taxa Nova': '{:.2f}%',
+                        'Mudança Anunciada': '{:+.2f} p.p.',
+                        'Variação Real': '{:+.2f} p.p.',
+                        'Surpresa': '{:+.2f} p.p.'
+                    }).applymap(
+                        lambda x: 'color: #4CAF50' if isinstance(x, (int, float)) and x > 0 
+                        else 'color: #F44336' if isinstance(x, (int, float)) and x < 0 
+                        else '', 
+                        subset=['Mudança Anunciada', 'Variação Real', 'Surpresa']
+                    ),
+                    use_container_width=True
+                )
+                
+                # KPIs da última reunião
+                if len(df_impacto) > 0:
+                    ultima_reuniao = df_impacto.iloc[-1]
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric(
+                            "Última Reunião", 
+                            ultima_reuniao['Data COPOM'].strftime('%d/%m/%Y'),
+                            ultima_reuniao['Decisão']
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "Taxa Atual", 
+                            f"{ultima_reuniao['Taxa Nova']:.2f}%",
+                            f"{ultima_reuniao['Mudança Anunciada']:+.2f} p.p."
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "Variação Real", 
+                            f"{ultima_reuniao['Variação Real']:+.2f} p.p.",
+                            help="Mudança real na taxa Selic nos 10 dias após a reunião"
+                        )
+                    
+                    with col4:
+                        st.metric(
+                            "Elemento Surpresa", 
+                            f"{ultima_reuniao['Surpresa']:+.2f} p.p.",
+                            help="Diferença entre a mudança anunciada e a variação real"
+                        )
+            else:
+                st.warning("Não foi possível calcular o impacto das reuniões COPOM.")
+        
+        # Próximas reuniões (dados simulados)
+        st.subheader("📅 Próximas Reuniões COPOM 2025")
+        proximas_reunioes = pd.DataFrame({
+            'Data': ['29-30/01/2025', '18-19/03/2025', '06-07/05/2025', '17-18/06/2025', 
+                    '29-30/07/2025', '16-17/09/2025', '04-05/11/2025', '09-10/12/2025'],
+            'Status': ['Próxima', 'Programada', 'Programada', 'Programada', 
+                      'Programada', 'Programada', 'Programada', 'Programada']
+        })
+        
+        st.dataframe(proximas_reunioes, use_container_width=True, hide_index=True)
+    else:
+        st.warning("Não foi possível carregar dados da taxa Selic.")
+    
+    st.markdown("---")
+    
+    # --- Seção de Análise Setorial B3 ---
+    st.subheader("🏭 Análise Setorial B3")
+    st.info("Performance dos principais setores da bolsa brasileira baseada em carteiras representativas de cada segmento.")
+    
+    dados_setores = carregar_dados_setores_b3()
+    
+    if dados_setores:
+        # Tabela de performance
+        df_performance_setores = calcular_performance_setores(dados_setores)
+        
+        if not df_performance_setores.empty:
+            col1_setor, col2_setor = st.columns([2, 1])
+            
+            with col1_setor:
+                # Gráfico comparativo
+                periodo_selecionado = st.selectbox(
+                    "Período para análise:",
+                    options=[30, 90, 180, 252, 504],
+                    format_func=lambda x: f"{x} dias" if x < 252 else f"{x//252} ano{'s' if x > 252 else ''}",
+                    index=3  # 252 dias (1 ano) como padrão
+                )
+                
+                fig_setores = gerar_grafico_setores_comparativo(dados_setores, periodo_selecionado)
+                st.plotly_chart(fig_setores, use_container_width=True)
+            
+            with col2_setor:
+                st.write("**Ranking YTD:**")
+                # Mostrar top 5 setores do ano
+                top_setores = df_performance_setores.head().copy()
+                for _, row in top_setores.iterrows():
+                    delta_color = "normal" if row['YTD (%)'] >= 0 else "inverse"
+                    st.metric(
+                        row['Setor'], 
+                        f"{row['YTD (%)']:+.1f}%",
+                        help=f"Volatilidade: {row['Volatilidade (%)']:.1f}%"
+                    )
+            
+            # Tabela completa
+            st.subheader("📊 Métricas Detalhadas por Setor")
+            
+            colunas_display = ['Setor', '1 Mês (%)', '3 Meses (%)', '6 Meses (%)', 
+                             '1 Ano (%)', 'YTD (%)', 'Volatilidade (%)', 'Dist. Máxima (%)', 'Dist. Mínima (%)']
+            
+            df_display_setores = df_performance_setores[colunas_display].copy()
+            
+            format_dict_setores = {col: '{:+.1f}%' for col in colunas_display[1:]}
+            
+            st.dataframe(
+                df_display_setores.style.format(format_dict_setores).applymap(
+                    lambda x: 'color: #4CAF50; font-weight: bold' if isinstance(x, (int, float)) and x > 5 
+                    else 'color: #FFA726; font-weight: bold' if isinstance(x, (int, float)) and -5 <= x <= 5
+                    else 'color: #F44336; font-weight: bold' if isinstance(x, (int, float)) and x < -5
+                    else '', 
+                    subset=['1 Mês (%)', '3 Meses (%)', '6 Meses (%)', '1 Ano (%)', 'YTD (%)']
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.warning("Não foi possível calcular a performance dos setores.")
+    else:
+        st.warning("Não foi possível carregar dados dos setores da B3.")
+    
+    st.markdown("---")
+    
+    # --- Seção original dos indicadores econômicos ---
     df_bcb, config_bcb = carregar_dados_bcb()
     if not df_bcb.empty:
         # --- Seção de Previsões ---
