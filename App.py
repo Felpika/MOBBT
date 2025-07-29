@@ -9,6 +9,9 @@ from bcb import sgs
 from datetime import datetime, timedelta
 import os
 from fredapi import Fred
+import requests
+import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="MOBBT")
@@ -48,7 +51,7 @@ def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra M
     titulo = f'Histórico da Taxa de Compra: {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})' if metrica == 'Taxa Compra Manha' else f'Histórico do Preço Unitário (PU): {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})'
     eixo_y = "Taxa de Compra (% a.a.)" if metrica == 'Taxa Compra Manha' else "Preço Unitário (R$)"
     fig = px.line(df_filtrado, x='Data Base', y=metrica, title=titulo, template='plotly_dark')
-    fig.update_layout(title_x=0, yaxis_title=eixo_y, xaxis_title="Data") # <--- AJUSTADO
+    fig.update_layout(title_x=0, yaxis_title=eixo_y, xaxis_title="Data")
     return fig
 
 @st.cache_data
@@ -76,7 +79,7 @@ def gerar_grafico_spread_juros(df):
     data_recente = df_ntnf['Data Base'].max()
     titulos_disponiveis_hoje = df_ntnf[df_ntnf['Data Base'] == data_recente]
     vencimentos_atuais = sorted(titulos_disponiveis_hoje['Data Vencimento'].unique())
-    if len(vencimentos_atuais) < 2: return go.Figure().update_layout(title_text="Menos de duas NTN-Fs disponíveis.")
+    if len(vencimentos_atuais) < 2: return go.Figure().update_layout(title_text="Menos de duas NTN-Fs disponíveis para calcular o spread.")
     target_2y, target_10y = data_recente + pd.DateOffset(years=2), data_recente + pd.DateOffset(years=10)
     venc_curto = min(vencimentos_atuais, key=lambda d: abs(d - target_2y))
     venc_longo = min(vencimentos_atuais, key=lambda d: abs(d - target_10y))
@@ -87,7 +90,7 @@ def gerar_grafico_spread_juros(df):
     if df_spread.empty: return go.Figure().update_layout(title_text=f"Não há histórico comum entre as NTN-Fs.")
     df_spread['Spread'] = (df_spread['Taxa Compra Manha_longo'] - df_spread['Taxa Compra Manha_curto']) * 100
     fig = px.area(df_spread, y='Spread', title=f'Spread de Juros: NTN-F ~10 Anos ({pd.to_datetime(venc_longo).year}) vs ~2 Anos ({pd.to_datetime(venc_curto).year})', template='plotly_dark')
-    fig.update_layout(title_x=0, yaxis_title="Diferença (Basis Points)", xaxis_title="Data", showlegend=False) # <--- AJUSTADO
+    fig.update_layout(title_x=0, yaxis_title="Diferença (Basis Points)", xaxis_title="Data", showlegend=False)
     return fig
 
 def gerar_grafico_ettj_curto_prazo(df):
@@ -110,7 +113,7 @@ def gerar_grafico_ettj_curto_prazo(df):
         df_data['Dias Uteis'] = np.busday_count(df_data['Data Base'].values.astype('M8[D]'), df_data['Data Vencimento'].values.astype('M8[D]'))
         line_style = dict(dash='dash') if not legenda.startswith('Hoje') else {}
         fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
-    fig.update_layout(title_text='Curva de Juros (ETTJ) - Curto Prazo (últimos 5 dias)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)) # <--- AJUSTADO
+    fig.update_layout(title_text='Curva de Juros (ETTJ) - Curto Prazo (últimos 5 dias)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
 def gerar_grafico_ettj_longo_prazo(df):
@@ -133,7 +136,7 @@ def gerar_grafico_ettj_longo_prazo(df):
         df_data['Dias Uteis'] = np.busday_count(df_data['Data Base'].values.astype('M8[D]'), df_data['Data Vencimento'].values.astype('M8[D]'))
         line_style = dict(dash='dash') if not legenda.startswith('Hoje') else {}
         fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
-    fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)) # <--- AJUSTADO
+    fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS ---
@@ -214,7 +217,7 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
         buttons.append(dict(method='relayout', label=label, args=[update_args]))
     active_button_index = list(periods.keys()).index('1A') if '1A' in list(periods.keys()) else 4
     fig.update_layout(title_text="Dashboard de Preços Históricos de Commodities", title_x=0, template="plotly_dark", height=250 * num_rows, showlegend=False,
-                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons, active=active_button_index)]) # <--- AJUSTADO
+                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons, active=active_button_index)])
     start_date_1y = end_date - timedelta(days=365); idx = 0
     for df_cat in dados_preco_por_categoria.values():
         for i, commodity_name in enumerate(df_cat.columns, start=idx):
@@ -253,7 +256,7 @@ def gerar_grafico_fred(df, ticker, titulo):
         start_date = df.index.min() if days == 'max' else end_date - timedelta(days=days)
         buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
     fig.update_layout(title_x=0, yaxis_title="Pontos Percentuais (%)", xaxis_title="Data", showlegend=False,
-                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)]) # <--- AJUSTADO
+                      updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
     start_date_1y = end_date - timedelta(days=365)
     filtered_series = df.loc[start_date_1y:end_date, ticker].dropna()
     fig.update_xaxes(range=[start_date_1y, end_date])
@@ -276,7 +279,7 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
         start_date = df_merged.index.min() if days == 'max' else end_date - timedelta(days=days)
         buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
     fig.update_layout(
-        title_x=0, yaxis_title="Diferença (Pontos Percentuais)", xaxis_title="Data", # <--- AJUSTADO
+        title_x=0, yaxis_title="Diferença (Pontos Percentuais)", xaxis_title="Data",
         updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)]
     )
     start_date_1y = end_date - timedelta(days=365)
@@ -289,6 +292,103 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
     return fig
 
 # --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR ---
+@st.cache_data(ttl=3600*24) # Cache de 1 dia para a análise pesada
+def executar_analise_insiders():
+    """Função principal que orquestra o download e processamento dos dados de insiders."""
+    ANO_ATUAL = datetime.now().year
+    URL_MOVIMENTACOES = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/VLMO/DADOS/vlmo_cia_aberta_{ANO_ATUAL}.zip"
+    URL_CADASTRO = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ANO_ATUAL}.zip"
+    ZIP_MOVIMENTACOES, CSV_MOVIMENTACOES = "movimentacoes.zip", f"vlmo_cia_aberta_con_{ANO_ATUAL}.csv"
+    ZIP_CADASTRO, CSV_CADASTRO = "cadastro.zip", f"fca_cia_aberta_valor_mobiliario_{ANO_ATUAL}.csv"
+    
+    # Sub-funções de apoio
+    def _cvm_baixar_zip(url, nome_zip, nome_csv):
+        try:
+            response = requests.get(url, timeout=60)
+            response.raise_for_status()
+            with open(nome_zip, 'wb') as f: f.write(response.content)
+            with zipfile.ZipFile(nome_zip, 'r') as z: z.extract(nome_csv)
+            os.remove(nome_zip)
+            return nome_csv
+        except Exception as e:
+            st.error(f"Erro no download de {url}: {e}")
+            if os.path.exists(nome_zip): os.remove(nome_zip)
+            return None
+
+    def _obter_market_cap_individual(ticker):
+        if pd.isna(ticker) or not isinstance(ticker, str): return ticker, np.nan
+        try:
+            stock = yf.Ticker(f"{ticker.strip()}.SA")
+            return ticker, stock.info.get('marketCap', np.nan)
+        except Exception:
+            return ticker, np.nan
+
+    # Início da execução
+    caminho_csv_mov = _cvm_baixar_zip(URL_MOVIMENTACOES, ZIP_MOVIMENTACOES, CSV_MOVIMENTACOES)
+    caminho_csv_cad = _cvm_baixar_zip(URL_CADASTRO, ZIP_CADASTRO, CSV_CADASTRO)
+
+    if not caminho_csv_mov or not caminho_csv_cad:
+        return None, None, None
+
+    df_mov = pd.read_csv(caminho_csv_mov, sep=';', encoding='ISO-8859-1', on_bad_lines='skip')
+    df_cad = pd.read_csv(caminho_csv_cad, sep=';', encoding='ISO-8859-1', on_bad_lines='skip', usecols=['CNPJ_Companhia', 'Codigo_Negociacao'])
+    os.remove(caminho_csv_mov); os.remove(caminho_csv_cad)
+
+    df_mov['Data_Movimentacao'] = pd.to_datetime(df_mov['Data_Movimentacao'], errors='coerce')
+    df_mov.dropna(subset=['Data_Movimentacao'], inplace=True)
+    df_mov = df_mov[df_mov['Tipo_Movimentacao'].isin(['Compra à vista', 'Venda à vista'])]
+    ultimo_mes = df_mov['Data_Movimentacao'].max().to_period('M')
+    df_mes = df_mov[df_mov['Data_Movimentacao'].dt.to_period('M') == ultimo_mes].copy()
+    df_mes['Volume_Net'] = np.where(df_mes['Tipo_Movimentacao'] == 'Compra à vista', df_mes['Volume'], -df_mes['Volume'])
+
+    df_controladores = df_mes[df_mes['Tipo_Cargo'] == 'Controlador ou Vinculado'].copy()
+    df_outros = df_mes[df_mes['Tipo_Cargo'] != 'Controlador ou Vinculado'].copy()
+    
+    df_net_controladores = df_controladores.groupby(['CNPJ_Companhia', 'Nome_Companhia'])['Volume_Net'].sum().reset_index()
+    df_net_outros = df_outros.groupby(['CNPJ_Companhia', 'Nome_Companhia'])['Volume_Net'].sum().reset_index()
+
+    cnpjs_unicos = pd.concat([df_net_controladores[['CNPJ_Companhia']], df_net_outros[['CNPJ_Companhia']]]).drop_duplicates()
+    df_tickers = df_cad.dropna().drop_duplicates(subset=['CNPJ_Companhia'])
+    df_lookup = pd.merge(cnpjs_unicos, df_tickers, on='CNPJ_Companhia', how='left')
+    
+    # Busca de Market Caps
+    market_caps = {}
+    tickers_para_buscar = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
+    progress_bar = st.progress(0, text="Buscando valores de mercado...")
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_ticker = {executor.submit(_obter_market_cap_individual, ticker): ticker for ticker in tickers_para_buscar}
+        for i, future in enumerate(as_completed(future_to_ticker)):
+            ticker, market_cap = future.result()
+            market_caps[ticker] = market_cap
+            progress_bar.progress((i + 1) / len(tickers_para_buscar), text=f"Buscando valores de mercado... ({i+1}/{len(tickers_para_buscar)})")
+    progress_bar.empty()
+    df_market_caps = pd.DataFrame(list(market_caps.items()), columns=['Codigo_Negociacao', 'MarketCap'])
+    df_market_cap_lookup = pd.merge(df_lookup, df_market_caps, on="Codigo_Negociacao", how="left")
+    
+    # Merge Final
+    df_final_controladores = pd.merge(df_net_controladores, df_market_cap_lookup, on='CNPJ_Companhia', how='left')
+    df_final_controladores['Volume_vs_MarketCap_Pct'] = (df_final_controladores['Volume_Net'] / df_final_controladores['MarketCap']) * 100
+    df_final_controladores.fillna({'Volume_vs_MarketCap_Pct': 0}, inplace=True)
+
+    df_final_outros = pd.merge(df_net_outros, df_market_cap_lookup, on='CNPJ_Companhia', how='left')
+    df_final_outros['Volume_vs_MarketCap_Pct'] = (df_final_outros['Volume_Net'] / df_final_outros['MarketCap']) * 100
+    df_final_outros.fillna({'Volume_vs_MarketCap_Pct': 0}, inplace=True)
+    
+    return df_final_controladores, df_final_outros, ultimo_mes
+
+def gerar_grafico_insiders_plotly(df_dados, top_n=20):
+    if df_dados.empty: return go.Figure()
+    df_plot_volume = df_dados.sort_values(by='Volume_Net', ascending=True).tail(top_n)
+    df_plot_relevancia = df_dados.sort_values(by='Volume_vs_MarketCap_Pct', ascending=True).tail(top_n)
+    fig = make_subplots(rows=2, cols=1, subplot_titles=(f'Top {top_n} por Volume Líquido', f'Top {top_n} por Relevância (Volume / Valor de Mercado)'), vertical_spacing=0.15)
+    fig.add_trace(go.Bar(y=df_plot_volume['Nome_Companhia'], x=df_plot_volume['Volume_Net'] / 1e6, orientation='h', text=df_plot_volume['Volume_Net'].apply(lambda x: f"R$ {x/1e6:.2f}M"), textposition='outside'), row=1, col=1)
+    fig.add_trace(go.Bar(y=df_plot_relevancia['Nome_Companhia'], x=df_plot_relevancia['Volume_vs_MarketCap_Pct'], orientation='h', text=df_plot_relevancia['Volume_vs_MarketCap_Pct'].apply(lambda x: f"{x:.3f}%"), textposition='outside'), row=2, col=1)
+    fig.update_layout(height=1000, showlegend=False, template='plotly_dark', bargap=0.4, title_x=0)
+    fig.update_xaxes(title_text="Volume Líquido (R$ Milhões)", row=1, col=1)
+    fig.update_xaxes(title_text="Volume como % do Valor de Mercado", row=2, col=1)
+    fig.update_yaxes(tickson="boundaries")
+    return fig
+
 @st.cache_data
 def carregar_dados_acoes(tickers, period="max"):
     try:
@@ -336,11 +436,7 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Lower_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Inferior', fill='tonexty', fillcolor='rgba(128,128,128,0.1)', showlegend=False))
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Rolling_Mean'], mode='lines', line_color='orange', line_dash='dash', name=f'Média Móvel ({window}d)'))
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Ratio'], mode='lines', line_color='#636EFA', name='Ratio Atual', line_width=2.5))
-    fig.update_layout(
-        title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}',
-        template='plotly_dark', title_x=0, # <--- AJUSTADO
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
+    fig.update_layout(title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}', template='plotly_dark', title_x=0, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
@@ -366,7 +462,7 @@ with tab1:
             if not df_breakeven.empty:
                 st.dataframe(df_breakeven[['Inflação Implícita (% a.a.)']].style.format('{:.2f}%'), use_container_width=True)
                 fig_breakeven = px.bar(df_breakeven, y='Inflação Implícita (% a.a.)', text_auto='.2f', title='Inflação Implícita por Vencimento').update_traces(textposition='outside')
-                fig_breakeven.update_layout(title_x=0) # <--- AJUSTADO
+                fig_breakeven.update_layout(title_x=0)
                 st.plotly_chart(fig_breakeven, use_container_width=True)
             else: st.warning("Não há pares de títulos para calcular a inflação implícita.")
         with col_analise2:
@@ -382,8 +478,10 @@ with tab1:
             if not df_juro_br.empty:
                 fig_spread_br_eua = gerar_grafico_spread_br_eua(df_juro_br, df_fred_br_tab)
                 st.plotly_chart(fig_spread_br_eua, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
-            else: st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
-        else: st.warning("Não foi possível carregar os dados de juros dos EUA para o comparativo.")
+            else:
+                st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
+        else:
+            st.warning("Não foi possível carregar os dados de juros dos EUA para o comparativo.")
         st.markdown("---")
         st.subheader("Análise Histórica de Título Individual")
         col1_hist, col2_hist = st.columns(2)
@@ -410,7 +508,7 @@ with tab2:
         st.subheader("Gráficos Individuais"); num_cols_bcb = 3; cols_bcb = st.columns(num_cols_bcb)
         for i, nome_serie in enumerate(df_filtrado_bcb.columns):
             fig_bcb = px.line(df_filtrado_bcb, x=df_filtrado_bcb.index, y=nome_serie, title=nome_serie, template='plotly_dark')
-            fig_bcb.update_layout(title_x=0) # <--- AJUSTADO
+            fig_bcb.update_layout(title_x=0)
             cols_bcb[i % num_cols_bcb].plotly_chart(fig_bcb, use_container_width=True)
     else: st.warning("Não foi possível carregar os dados do BCB.")
 
@@ -463,17 +561,15 @@ with tab4:
 
 # --- CONTEÚDO DA ABA 5: AÇÕES BR ---
 with tab5:
+    # --- Seção 1: Análise de Ratio ---
     st.header("Análise de Ratio de Ativos (Long & Short)")
-    st.info(
-        "Esta ferramenta calcula o ratio entre o preço de dois ativos. "
-        "**Interpretação:** Quando o ratio está alto (acima das médias), o Ativo A está caro em relação ao Ativo B. "
-        "Quando está baixo, o Ativo A está barato em relação ao Ativo B. As bandas mostram desvios padrão que podem indicar pontos de reversão à média."
-    )
+    st.info("Esta ferramenta calcula o ratio entre o preço de dois ativos. "
+            "**Interpretação:** Quando o ratio está alto, o Ativo A está caro em relação ao Ativo B. "
+            "Quando está baixo, está barato. As bandas mostram desvios padrão que podem indicar pontos de reversão à média.")
 
     def executar_analise_ratio():
         st.session_state.spinner_placeholder.info(f"Buscando e processando dados para {st.session_state.ticker_a_key} e {st.session_state.ticker_b_key}...")
         close_prices = carregar_dados_acoes([st.session_state.ticker_a_key, st.session_state.ticker_b_key], period="max")
-        
         if close_prices.empty or close_prices.shape[1] < 2:
             st.session_state.spinner_placeholder.error(f"Não foi possível obter dados para ambos os tickers. Verifique os códigos (ex: PETR4.SA) e tente novamente.")
             st.session_state.fig_ratio, st.session_state.kpis_ratio = None, None
@@ -484,12 +580,9 @@ with tab5:
             st.session_state.spinner_placeholder.empty()
 
     col1, col2, col3 = st.columns([0.4, 0.4, 0.2])
-    with col1:
-        st.text_input("Ticker do Ativo A (Numerador)", "SMAL11.SA", key="ticker_a_key")
-    with col2:
-        st.text_input("Ticker do Ativo B (Denominador)", "BOVA11.SA", key="ticker_b_key")
-    with col3:
-        st.number_input("Janela Móvel (dias)", min_value=20, max_value=500, value=252, key="window_size_key")
+    with col1: st.text_input("Ticker do Ativo A (Numerador)", "SMAL11.SA", key="ticker_a_key")
+    with col2: st.text_input("Ticker do Ativo B (Denominador)", "BOVA11.SA", key="ticker_b_key")
+    with col3: st.number_input("Janela Móvel (dias)", min_value=20, max_value=500, value=252, key="window_size_key")
 
     st.button("Analisar Ratio", on_click=executar_analise_ratio, use_container_width=True)
     st.session_state.spinner_placeholder = st.empty()
@@ -504,11 +597,39 @@ with tab5:
         cols[1].metric("Média Histórica", f"{kpis['media']:.2f}")
         cols[2].metric("Mínimo Histórico", f"{kpis['minimo']:.2f}", f"em {kpis['data_minimo'].strftime('%d/%m/%Y')}")
         cols[3].metric("Máximo Histórico", f"{kpis['maximo']:.2f}", f"em {kpis['data_maximo'].strftime('%d/%m/%Y')}")
-        cols[4].metric(
-            label="Variação p/ Média",
-            value=f"{kpis['variacao_para_media']:.2f}%",
-            help="Quanto o Ativo A (numerador) precisa variar para o ratio voltar à média."
-        )
+        cols[4].metric(label="Variação p/ Média", value=f"{kpis['variacao_para_media']:.2f}%", help="Quanto o Ativo A (numerador) precisa variar para o ratio voltar à média.")
     
     if st.session_state.get('fig_ratio'):
         st.plotly_chart(st.session_state.fig_ratio, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
+    
+    st.markdown("---")
+
+    # --- Seção 2: Análise de Insiders ---
+    st.header("Análise de Movimentação de Insiders (CVM)")
+    st.info("Analisa as movimentações de compra e venda de ações feitas por pessoas ligadas à empresa (Controladores, Diretores, etc.), com base nos dados públicos da CVM. Grandes volumes de compra podem indicar confiança na empresa.")
+    
+    if st.button("Analisar Movimentações de Insiders do Mês", use_container_width=True):
+        with st.spinner("Baixando e processando dados da CVM e YFinance... Isso pode levar alguns minutos na primeira vez."):
+            dados_insiders = executar_analise_insiders()
+        
+        if dados_insiders:
+            df_controladores, df_outros, ultimo_mes = dados_insiders
+            st.subheader(f"Dados de {ultimo_mes.strftime('%B de %Y')}")
+
+            if not df_controladores.empty:
+                fig_controladores = gerar_grafico_insiders_plotly(df_controladores)
+                st.write("#### Grupo: Controladores e Vinculados")
+                st.plotly_chart(fig_controladores, use_container_width=True)
+            else:
+                st.warning("Não foram encontrados dados de movimentação para Controladores no último mês.")
+            
+            st.markdown("---")
+
+            if not df_outros.empty:
+                fig_outros = gerar_grafico_insiders_plotly(df_outros)
+                st.write("#### Grupo: Demais Insiders (Diretores, Conselheiros, etc.)")
+                st.plotly_chart(fig_outros, use_container_width=True)
+            else:
+                st.warning("Não foram encontrados dados de movimentação para Demais Insiders no último mês.")
+        else:
+            st.error("Falha ao processar dados de insiders.")
