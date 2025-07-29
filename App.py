@@ -90,37 +90,44 @@ def gerar_grafico_historico_inflacao(df_historico):
     fig.update_layout(title_x=0, yaxis_title="Inflação Implícita (% a.a.)", xaxis_title="Data", updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
     return fig
 
+# --- FUNÇÃO ATUALIZADA PARA INFLAÇÃO FUTURA ANO A ANO ---
 @st.cache_data
 def calcular_inflacao_futura_implicita(df):
+    """Calcula a inflação implícita futura para cada ano individualmente usando interpolação."""
     df_recente = df[df['Data Base'] == df['Data Base'].max()].copy()
-    df_prefixados = df_recente[df_recente['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
-    tipos_ipca = ['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+']
-    df_ipca = df_recente[df_recente['Tipo Titulo'].isin(tipos_ipca)].copy()
-    if df_prefixados.empty or df_ipca.empty: return pd.DataFrame()
-    def get_rate_for_tenor(df_bonds, tenor_years, data_base):
-        target_date = data_base + pd.DateOffset(years=tenor_years)
-        vencimento = min(df_bonds['Data Vencimento'], key=lambda d: abs(d - target_date))
-        T = (vencimento - data_base).days / 365.25
-        taxa = df_bonds[df_bonds['Data Vencimento'] == vencimento]['Taxa Compra Manha'].iloc[0] / 100
-        return taxa, T
+
+    def criar_curva_interpolada(df_bonds, data_base):
+        if df_bonds.empty or len(df_bonds) < 2: return None
+        maturidades = np.array([(venc - data_base).days / 365.25 for venc in df_bonds['Data Vencimento']])
+        taxas = np.array(df_bonds['Taxa Compra Manha'] / 100)
+        idx_sorted = np.argsort(maturidades)
+        return lambda T: np.interp(T, maturidades[idx_sorted], taxas[idx_sorted])
+
     data_base = df_recente['Data Base'].max()
-    tenors = [2, 5, 10]; rates = {'prefix': {}, 'ipca': {}}
-    for tenor in tenors:
-        try:
-            rates['prefix'][tenor] = get_rate_for_tenor(df_prefixados, tenor, data_base)
-            rates['ipca'][tenor] = get_rate_for_tenor(df_ipca, tenor, data_base)
-        except (ValueError, IndexError): continue
+    curva_prefix = criar_curva_interpolada(df_recente[df_recente['Tipo Titulo'] == 'Tesouro Prefixado'], data_base)
+    curva_ipca = criar_curva_interpolada(df_recente[df_recente['Tipo Titulo'].isin(['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+'])], data_base)
+
+    if not curva_prefix or not curva_ipca: return pd.DataFrame()
+
     forwards = []
-    for t1, t2 in [(2, 5), (5, 10)]:
-        if t1 in rates['prefix'] and t2 in rates['prefix'] and t1 in rates['ipca'] and t2 in rates['ipca']:
-            R_prefix_t1, T_prefix_t1 = rates['prefix'][t1]; R_prefix_t2, T_prefix_t2 = rates['prefix'][t2]
-            R_ipca_t1, T_ipca_t1 = rates['ipca'][t1]; R_ipca_t2, T_ipca_t2 = rates['ipca'][t2]
-            f_nom = (((1 + R_prefix_t2)**T_prefix_t2) / ((1 + R_prefix_t1)**T_prefix_t1))**(1/(T_prefix_t2 - T_prefix_t1)) - 1
-            f_real = (((1 + R_ipca_t2)**T_ipca_t2) / ((1 + R_ipca_t1)**T_ipca_t1))**(1/(T_ipca_t2 - T_ipca_t1)) - 1
-            if f_real > -1:
-                f_bei = ((1 + f_nom) / (1 + f_real) - 1) * 100
-                periodo_label = f"{t2-t1} Anos (a partir de {t1} anos)"
-                forwards.append({'Período': periodo_label, 'Inflação Implícita Futura (%)': f_bei})
+    anos = np.arange(1, 11)
+    try:
+        R_prefix_spots = curva_prefix(anos); R_ipca_spots = curva_ipca(anos)
+        R_prefix_spots_shifted = curva_prefix(anos - 1); R_ipca_spots_shifted = curva_ipca(anos - 1)
+        
+        # Corrige o valor para ano 0, que deve ser 0
+        R_prefix_spots_shifted[0], R_ipca_spots_shifted[0] = 0, 0
+
+        f_nom = (((1 + R_prefix_spots)**anos) / ((1 + R_prefix_spots_shifted)**(anos - 1))) - 1
+        f_real = (((1 + R_ipca_spots)**anos) / ((1 + R_ipca_spots_shifted)**(anos - 1))) - 1
+        
+        f_bei = np.where(f_real > -1, ((1 + f_nom) / (1 + f_real) - 1) * 100, np.nan)
+        
+        for i, ano in enumerate(anos):
+            forwards.append({'Período': f'Ano {ano}', 'Inflação Implícita Futura (%)': f_bei[i]})
+    except Exception:
+        return pd.DataFrame()
+            
     return pd.DataFrame(forwards)
 
 @st.cache_data
@@ -189,6 +196,7 @@ def gerar_grafico_ettj_longo_prazo(df):
         fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
     fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
+
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS ---
 @st.cache_data(ttl=3600*4)
 def carregar_dados_bcb():
@@ -933,18 +941,21 @@ with tab1:
 
             st.markdown("---")
 
-            st.info("A **Inflação Implícita Futura** mostra a expectativa de inflação para um período que começa no futuro (ex: a inflação média por 5 anos, começando daqui a 5 anos).")
+            st.info("A **Inflação Implícita Futura (Anual)** mostra a expectativa do mercado para a inflação de cada ano específico no futuro, calculada a partir da interpolação da curva de juros.")
             df_fwd_bei = calcular_inflacao_futura_implicita(df_tesouro)
             if not df_fwd_bei.empty:
                 fig_fwd_bei = px.bar(
-                    df_fwd_bei, x='Período', y='Inflação Implícita Futura (%)',
-                    title='Inflação Implícita na Curva Futura', text_auto='.2f'
+                    df_fwd_bei,
+                    x='Período',
+                    y='Inflação Implícita Futura (%)',
+                    title='Inflação Implícita na Curva Futura (Ano a Ano)',
+                    text_auto='.2f'
                 )
                 fig_fwd_bei.update_traces(texttemplate='%{y:.2f}%', textposition='outside')
                 fig_fwd_bei.update_layout(title_x=0, yaxis_title="Inflação (% a.a.)", xaxis_title="Período Futuro")
                 st.plotly_chart(fig_fwd_bei, use_container_width=True)
             else:
-                st.warning("Não há pares de títulos disponíveis hoje para calcular a inflação futura.")
+                st.warning("Não foi possível calcular a inflação futura. Verifique se há títulos com maturidades variadas disponíveis.")
 
         with col_analise2:
             st.info("O **Spread de Juros** mostra a diferença entre as taxas de um título longo e um curto. Positivo indica otimismo; negativo (invertido) pode sinalizar recessão.")
@@ -981,6 +992,7 @@ with tab1:
         if vencimento_selecionado:
             st.plotly_chart(gerar_grafico_historico_tesouro(df_tesouro, tipo_selecionado, pd.to_datetime(vencimento_selecionado), metrica=coluna_metrica), use_container_width=True)
     else: st.warning("Não foi possível carregar os dados do Tesouro.")
+
 # --- CONTEÚDO DA ABA 2: INDICADORES ECONÔMICOS ---
 with tab2:
     st.header("Monitor de Indicadores Econômicos do Brasil")
