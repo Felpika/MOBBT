@@ -292,7 +292,7 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
     return fig
 
 # --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR ---
-@st.cache_data(ttl=3600*24) # Cache de 1 dia para a análise pesada
+@st.cache_data(ttl=3600*24)
 def executar_analise_insiders():
     """Função principal que orquestra o download e processamento dos dados de insiders."""
     ANO_ATUAL = datetime.now().year
@@ -301,7 +301,6 @@ def executar_analise_insiders():
     ZIP_MOVIMENTACOES, CSV_MOVIMENTACOES = "movimentacoes.zip", f"vlmo_cia_aberta_con_{ANO_ATUAL}.csv"
     ZIP_CADASTRO, CSV_CADASTRO = "cadastro.zip", f"fca_cia_aberta_valor_mobiliario_{ANO_ATUAL}.csv"
     
-    # Sub-funções de apoio
     def _cvm_baixar_zip(url, nome_zip, nome_csv):
         try:
             response = requests.get(url, timeout=60)
@@ -323,12 +322,10 @@ def executar_analise_insiders():
         except Exception:
             return ticker, np.nan
 
-    # Início da execução
     caminho_csv_mov = _cvm_baixar_zip(URL_MOVIMENTACOES, ZIP_MOVIMENTACOES, CSV_MOVIMENTACOES)
     caminho_csv_cad = _cvm_baixar_zip(URL_CADASTRO, ZIP_CADASTRO, CSV_CADASTRO)
 
-    if not caminho_csv_mov or not caminho_csv_cad:
-        return None, None, None
+    if not caminho_csv_mov or not caminho_csv_cad: return None, None, None
 
     df_mov = pd.read_csv(caminho_csv_mov, sep=';', encoding='ISO-8859-1', on_bad_lines='skip')
     df_cad = pd.read_csv(caminho_csv_cad, sep=';', encoding='ISO-8859-1', on_bad_lines='skip', usecols=['CNPJ_Companhia', 'Codigo_Negociacao'])
@@ -351,7 +348,6 @@ def executar_analise_insiders():
     df_tickers = df_cad.dropna().drop_duplicates(subset=['CNPJ_Companhia'])
     df_lookup = pd.merge(cnpjs_unicos, df_tickers, on='CNPJ_Companhia', how='left')
     
-    # Busca de Market Caps
     market_caps = {}
     tickers_para_buscar = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
     progress_bar = st.progress(0, text="Buscando valores de mercado...")
@@ -365,7 +361,6 @@ def executar_analise_insiders():
     df_market_caps = pd.DataFrame(list(market_caps.items()), columns=['Codigo_Negociacao', 'MarketCap'])
     df_market_cap_lookup = pd.merge(df_lookup, df_market_caps, on="Codigo_Negociacao", how="left")
     
-    # Merge Final
     df_final_controladores = pd.merge(df_net_controladores, df_market_cap_lookup, on='CNPJ_Companhia', how='left')
     df_final_controladores['Volume_vs_MarketCap_Pct'] = (df_final_controladores['Volume_Net'] / df_final_controladores['MarketCap']) * 100
     df_final_controladores.fillna({'Volume_vs_MarketCap_Pct': 0}, inplace=True)
@@ -376,14 +371,15 @@ def executar_analise_insiders():
     
     return df_final_controladores, df_final_outros, ultimo_mes
 
-def gerar_grafico_insiders_plotly(df_dados, top_n=20):
+# --- FUNÇÃO ATUALIZADA PARA TOP 10 ---
+def gerar_grafico_insiders_plotly(df_dados, top_n=10):
     if df_dados.empty: return go.Figure()
     df_plot_volume = df_dados.sort_values(by='Volume_Net', ascending=True).tail(top_n)
     df_plot_relevancia = df_dados.sort_values(by='Volume_vs_MarketCap_Pct', ascending=True).tail(top_n)
     fig = make_subplots(rows=2, cols=1, subplot_titles=(f'Top {top_n} por Volume Líquido', f'Top {top_n} por Relevância (Volume / Valor de Mercado)'), vertical_spacing=0.15)
     fig.add_trace(go.Bar(y=df_plot_volume['Nome_Companhia'], x=df_plot_volume['Volume_Net'] / 1e6, orientation='h', text=df_plot_volume['Volume_Net'].apply(lambda x: f"R$ {x/1e6:.2f}M"), textposition='outside'), row=1, col=1)
     fig.add_trace(go.Bar(y=df_plot_relevancia['Nome_Companhia'], x=df_plot_relevancia['Volume_vs_MarketCap_Pct'], orientation='h', text=df_plot_relevancia['Volume_vs_MarketCap_Pct'].apply(lambda x: f"{x:.3f}%"), textposition='outside'), row=2, col=1)
-    fig.update_layout(height=1000, showlegend=False, template='plotly_dark', bargap=0.4, title_x=0)
+    fig.update_layout(height=800, showlegend=False, template='plotly_dark', bargap=0.4, title_x=0)
     fig.update_xaxes(title_text="Volume Líquido (R$ Milhões)", row=1, col=1)
     fig.update_xaxes(title_text="Volume como % do Valor de Mercado", row=2, col=1)
     fig.update_yaxes(tickson="boundaries")
