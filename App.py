@@ -371,19 +371,39 @@ def executar_analise_insiders():
     
     return df_final_controladores, df_final_outros, ultimo_mes
 
-# --- FUNÇÃO ATUALIZADA PARA TOP 10 ---
-def gerar_grafico_insiders_plotly(df_dados, top_n=10):
-    if df_dados.empty: return go.Figure()
+# --- FUNÇÃO ATUALIZADA PARA RETORNAR DOIS GRÁFICOS ---
+def gerar_graficos_insiders_plotly(df_dados, top_n=10):
+    if df_dados.empty: return None, None
+
+    # Gráfico 1: Volume
     df_plot_volume = df_dados.sort_values(by='Volume_Net', ascending=True).tail(top_n)
+    fig_volume = px.bar(
+        df_plot_volume,
+        y='Nome_Companhia',
+        x='Volume_Net',
+        orientation='h',
+        title=f'Top {top_n} por Volume Líquido',
+        template='plotly_dark',
+        text='Volume_Net'
+    )
+    fig_volume.update_traces(texttemplate='R$ %{text:,.2s}', textposition='outside')
+    fig_volume.update_layout(title_x=0, xaxis_title="Volume Líquido (R$)", yaxis_title="")
+
+    # Gráfico 2: Relevância
     df_plot_relevancia = df_dados.sort_values(by='Volume_vs_MarketCap_Pct', ascending=True).tail(top_n)
-    fig = make_subplots(rows=2, cols=1, subplot_titles=(f'Top {top_n} por Volume Líquido', f'Top {top_n} por Relevância (Volume / Valor de Mercado)'), vertical_spacing=0.15)
-    fig.add_trace(go.Bar(y=df_plot_volume['Nome_Companhia'], x=df_plot_volume['Volume_Net'] / 1e6, orientation='h', text=df_plot_volume['Volume_Net'].apply(lambda x: f"R$ {x/1e6:.2f}M"), textposition='outside'), row=1, col=1)
-    fig.add_trace(go.Bar(y=df_plot_relevancia['Nome_Companhia'], x=df_plot_relevancia['Volume_vs_MarketCap_Pct'], orientation='h', text=df_plot_relevancia['Volume_vs_MarketCap_Pct'].apply(lambda x: f"{x:.3f}%"), textposition='outside'), row=2, col=1)
-    fig.update_layout(height=800, showlegend=False, template='plotly_dark', bargap=0.4, title_x=0)
-    fig.update_xaxes(title_text="Volume Líquido (R$ Milhões)", row=1, col=1)
-    fig.update_xaxes(title_text="Volume como % do Valor de Mercado", row=2, col=1)
-    fig.update_yaxes(tickson="boundaries")
-    return fig
+    fig_relevancia = px.bar(
+        df_plot_relevancia,
+        y='Nome_Companhia',
+        x='Volume_vs_MarketCap_Pct',
+        orientation='h',
+        title=f'Top {top_n} por Relevância (Volume / Valor de Mercado)',
+        template='plotly_dark',
+        text='Volume_vs_MarketCap_Pct'
+    )
+    fig_relevancia.update_traces(texttemplate='%{text:.3f}%', textposition='outside')
+    fig_relevancia.update_layout(title_x=0, xaxis_title="Volume como % do Valor de Mercado", yaxis_title="")
+    
+    return fig_volume, fig_relevancia
 
 @st.cache_data
 def carregar_dados_acoes(tickers, period="max"):
@@ -600,7 +620,7 @@ with tab5:
     
     st.markdown("---")
 
-    # --- Seção 2: Análise de Insiders ---
+    # --- Seção 2: Análise de Insiders (LÓGICA ATUALIZADA) ---
     st.header("Análise de Movimentação de Insiders (CVM)")
     st.info("Analisa as movimentações de compra e venda de ações feitas por pessoas ligadas à empresa (Controladores, Diretores, etc.), com base nos dados públicos da CVM. Grandes volumes de compra podem indicar confiança na empresa.")
     
@@ -612,19 +632,29 @@ with tab5:
             df_controladores, df_outros, ultimo_mes = dados_insiders
             st.subheader(f"Dados de {ultimo_mes.strftime('%B de %Y')}")
 
+            # Exibição lado a lado para Controladores
             if not df_controladores.empty:
-                fig_controladores = gerar_grafico_insiders_plotly(df_controladores)
                 st.write("#### Grupo: Controladores e Vinculados")
-                st.plotly_chart(fig_controladores, use_container_width=True)
+                fig_vol_ctrl, fig_rel_ctrl = gerar_graficos_insiders_plotly(df_controladores)
+                col1_ctrl, col2_ctrl = st.columns(2)
+                with col1_ctrl:
+                    st.plotly_chart(fig_vol_ctrl, use_container_width=True)
+                with col2_ctrl:
+                    st.plotly_chart(fig_rel_ctrl, use_container_width=True)
             else:
                 st.warning("Não foram encontrados dados de movimentação para Controladores no último mês.")
             
             st.markdown("---")
 
+            # Exibição lado a lado para Demais Insiders
             if not df_outros.empty:
-                fig_outros = gerar_grafico_insiders_plotly(df_outros)
                 st.write("#### Grupo: Demais Insiders (Diretores, Conselheiros, etc.)")
-                st.plotly_chart(fig_outros, use_container_width=True)
+                fig_vol_outros, fig_rel_outros = gerar_graficos_insiders_plotly(df_outros)
+                col1_outros, col2_outros = st.columns(2)
+                with col1_outros:
+                    st.plotly_chart(fig_vol_outros, use_container_width=True)
+                with col2_outros:
+                    st.plotly_chart(fig_rel_outros, use_container_width=True)
             else:
                 st.warning("Não foram encontrados dados de movimentação para Demais Insiders no último mês.")
         else:
