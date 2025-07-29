@@ -54,23 +54,64 @@ def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra M
     fig.update_layout(title_x=0, yaxis_title=eixo_y, xaxis_title="Data")
     return fig
 
+# --- NOVA FUNÇÃO PARA HISTÓRICO DA INFLAÇÃO IMPLÍCITA ---
 @st.cache_data
-def calcular_inflacao_implicita(df):
-    df_recente = df[df['Data Base'] == df['Data Base'].max()].copy()
+def calcular_historico_inflacao_implicita(df):
+    """Calcula o histórico da inflação implícita para o vértice de ~5 anos."""
+    df_prefixados = df[df['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
     tipos_ipca = ['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+']
-    df_ipca_raw = df_recente[df_recente['Tipo Titulo'].isin(tipos_ipca)]
-    df_prefixados = df_recente[df_recente['Tipo Titulo'] == 'Tesouro Prefixado'].set_index('Data Vencimento')
-    df_ipca = df_ipca_raw.sort_values('Tipo Titulo', ascending=False).drop_duplicates('Data Vencimento').set_index('Data Vencimento')
-    if df_prefixados.empty or df_ipca.empty: return pd.DataFrame()
-    inflacao_implicita = []
-    for venc_prefixado, row_prefixado in df_prefixados.iterrows():
-        venc_ipca_proximo = min(df_ipca.index, key=lambda d: abs(d - venc_prefixado))
-        if abs((venc_ipca_proximo - venc_prefixado).days) < 550:
-            taxa_prefixada, taxa_ipca = row_prefixado['Taxa Compra Manha'], df_ipca.loc[venc_ipca_proximo]['Taxa Compra Manha']
-            breakeven = (((1 + taxa_prefixada / 100) / (1 + taxa_ipca / 100)) - 1) * 100
-            inflacao_implicita.append({'Vencimento do Prefixo': venc_prefixado, 'Inflação Implícita (% a.a.)': breakeven})
-    if not inflacao_implicita: return pd.DataFrame()
-    return pd.DataFrame(inflacao_implicita).sort_values('Vencimento do Prefixo').set_index('Vencimento do Prefixo')
+    df_ipca = df[df['Tipo Titulo'].isin(tipos_ipca)].copy()
+
+    if df_prefixados.empty or df_ipca.empty:
+        return pd.Series(dtype=float)
+
+    historico_breakeven = {}
+    
+    # Agrupa por data para processar cada dia
+    for data_base, group in df.groupby('Data Base'):
+        prefixados_dia = df_prefixados[df_prefixados['Data Base'] == data_base]
+        ipca_dia = df_ipca[df_ipca['Data Base'] == data_base]
+
+        if prefixados_dia.empty or ipca_dia.empty:
+            continue
+
+        try:
+            target_5y = data_base + pd.DateOffset(years=5)
+            
+            venc_prefixado_5y = min(prefixados_dia['Data Vencimento'], key=lambda d: abs(d - target_5y))
+            venc_ipca_5y = min(ipca_dia['Data Vencimento'], key=lambda d: abs(d - target_5y))
+            
+            taxa_prefixada = prefixados_dia[prefixados_dia['Data Vencimento'] == venc_prefixado_5y]['Taxa Compra Manha'].iloc[0]
+            taxa_ipca = ipca_dia[ipca_dia['Data Vencimento'] == venc_ipca_5y]['Taxa Compra Manha'].iloc[0]
+
+            if pd.notna(taxa_prefixada) and pd.notna(taxa_ipca):
+                breakeven = (((1 + taxa_prefixada / 100) / (1 + taxa_ipca / 100)) - 1) * 100
+                historico_breakeven[data_base] = breakeven
+        except (ValueError, IndexError):
+            continue
+    
+    return pd.Series(historico_breakeven).sort_index()
+
+def gerar_grafico_historico_inflacao(df_historico):
+    """Gera o gráfico de linha para o histórico da inflação implícita."""
+    if df_historico.empty:
+        return go.Figure().update_layout(title_text="Não há dados para gerar o gráfico de inflação implícita.")
+        
+    fig = px.line(df_historico, title="Histórico da Inflação Implícita (~5 Anos)", template='plotly_dark')
+    
+    end_date = df_historico.index.max()
+    buttons = []
+    periods = {'1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
+    for label, days in periods.items():
+        start_date = df_historico.index.min() if days == 'max' else end_date - timedelta(days=days)
+        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
+
+    fig.update_layout(
+        title_x=0, yaxis_title="Inflação Implícita (% a.a.)", xaxis_title="Data",
+        updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)]
+    )
+    return fig
+
 
 @st.cache_data
 def gerar_grafico_spread_juros(df):
@@ -862,7 +903,7 @@ st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Juros BR", "Indicadores Econômicos", "Commodities", "Indicadores Internacionais", "Ações BR", "Padrões Sazonais"])
 
-# --- CONTEÚDO DA ABA 1: JUROS BR ---
+# --- CONTEÚDO DA ABA 1: JUROS BR (LÓGICA ATUALIZADA) ---
 with tab1:
     st.header("Análise de Títulos do Tesouro Direto")
     df_tesouro = obter_dados_tesouro()
@@ -871,21 +912,22 @@ with tab1:
         st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
         st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
         st.markdown("---")
+
         st.subheader("Análises da Curva de Juros")
         col_analise1, col_analise2 = st.columns(2)
+        
         with col_analise1:
-            st.info("A **Inflação Implícita** mostra a expectativa do mercado para a inflação futura.")
-            df_breakeven = calcular_inflacao_implicita(df_tesouro)
-            if not df_breakeven.empty:
-                st.dataframe(df_breakeven[['Inflação Implícita (% a.a.)']].style.format('{:.2f}%'), use_container_width=True)
-                fig_breakeven = px.bar(df_breakeven, y='Inflação Implícita (% a.a.)', text_auto='.2f', title='Inflação Implícita por Vencimento').update_traces(textposition='outside')
-                fig_breakeven.update_layout(title_x=0)
-                st.plotly_chart(fig_breakeven, use_container_width=True)
-            else: st.warning("Não há pares de títulos para calcular a inflação implícita.")
+            st.info("A **Inflação Implícita** mostra a expectativa do mercado para a inflação futura, extraída da diferença entre as taxas de títulos prefixados e atrelados ao IPCA de mesmo vencimento.")
+            df_breakeven_hist = calcular_historico_inflacao_implicita(df_tesouro)
+            fig_breakeven = gerar_grafico_historico_inflacao(df_breakeven_hist)
+            st.plotly_chart(fig_breakeven, use_container_width=True)
+
         with col_analise2:
             st.info("O **Spread de Juros** mostra a diferença entre as taxas de um título longo e um curto. Positivo indica otimismo; negativo (invertido) pode sinalizar recessão.")
             st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True)
+        
         st.markdown("---")
+
         st.subheader("Spread de Juros (Risco-País): Brasil 10 Anos vs. EUA 10 Anos")
         st.info("Este gráfico mostra a diferença entre a taxa da NTN-B de ~10 anos e a do título americano de 10 anos. É uma medida da percepção de risco do Brasil. **Spreads crescentes** indicam maior risco percebido, enquanto **spreads caindo** sugerem maior confiança no país.")
         FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
@@ -899,7 +941,9 @@ with tab1:
                 st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
         else:
             st.warning("Não foi possível carregar os dados de juros dos EUA para o comparativo.")
+        
         st.markdown("---")
+
         st.subheader("Análise Histórica de Título Individual")
         col1_hist, col2_hist = st.columns(2)
         with col1_hist:
