@@ -55,80 +55,22 @@ def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra M
     return fig
 
 @st.cache_data
-def calcular_historico_inflacao_implicita(df):
-    df_prefixados = df[df['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
-    tipos_ipca = ['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+']
-    df_ipca = df[df['Tipo Titulo'].isin(tipos_ipca)].copy()
-    if df_prefixados.empty or df_ipca.empty: return pd.Series(dtype=float)
-    historico_breakeven = {}
-    for data_base, group in df.groupby('Data Base'):
-        prefixados_dia = df_prefixados[df_prefixados['Data Base'] == data_base]
-        ipca_dia = df_ipca[df_ipca['Data Base'] == data_base]
-        if prefixados_dia.empty or ipca_dia.empty: continue
-        try:
-            target_5y = data_base + pd.DateOffset(years=5)
-            venc_prefixado_5y = min(prefixados_dia['Data Vencimento'], key=lambda d: abs(d - target_5y))
-            venc_ipca_5y = min(ipca_dia['Data Vencimento'], key=lambda d: abs(d - target_5y))
-            taxa_prefixada = prefixados_dia[prefixados_dia['Data Vencimento'] == venc_prefixado_5y]['Taxa Compra Manha'].iloc[0]
-            taxa_ipca = ipca_dia[ipca_dia['Data Vencimento'] == venc_ipca_5y]['Taxa Compra Manha'].iloc[0]
-            if pd.notna(taxa_prefixada) and pd.notna(taxa_ipca):
-                breakeven = (((1 + taxa_prefixada / 100) / (1 + taxa_ipca / 100)) - 1) * 100
-                historico_breakeven[data_base] = breakeven
-        except (ValueError, IndexError):
-            continue
-    return pd.Series(historico_breakeven).sort_index()
-
-def gerar_grafico_historico_inflacao(df_historico):
-    if df_historico.empty: return go.Figure().update_layout(title_text="Não há dados para gerar o gráfico.")
-    fig = px.line(df_historico, title="Histórico da Inflação Implícita (~5 Anos)", template='plotly_dark')
-    end_date = df_historico.index.max()
-    buttons = []
-    periods = {'1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
-    for label, days in periods.items():
-        start_date = df_historico.index.min() if days == 'max' else end_date - timedelta(days=days)
-        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
-    fig.update_layout(title_x=0, yaxis_title="Inflação Implícita (% a.a.)", xaxis_title="Data", updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)])
-    return fig
-
-# --- FUNÇÃO ATUALIZADA PARA INFLAÇÃO FUTURA ANO A ANO ---
-@st.cache_data
-def calcular_inflacao_futura_implicita(df):
-    """Calcula a inflação implícita futura para cada ano individualmente usando interpolação."""
+def calcular_inflacao_implicita(df):
     df_recente = df[df['Data Base'] == df['Data Base'].max()].copy()
-
-    def criar_curva_interpolada(df_bonds, data_base):
-        if df_bonds.empty or len(df_bonds) < 2: return None
-        maturidades = np.array([(venc - data_base).days / 365.25 for venc in df_bonds['Data Vencimento']])
-        taxas = np.array(df_bonds['Taxa Compra Manha'] / 100)
-        idx_sorted = np.argsort(maturidades)
-        return lambda T: np.interp(T, maturidades[idx_sorted], taxas[idx_sorted])
-
-    data_base = df_recente['Data Base'].max()
-    curva_prefix = criar_curva_interpolada(df_recente[df_recente['Tipo Titulo'] == 'Tesouro Prefixado'], data_base)
-    curva_ipca = criar_curva_interpolada(df_recente[df_recente['Tipo Titulo'].isin(['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+'])], data_base)
-
-    if not curva_prefix or not curva_ipca: return pd.DataFrame()
-
-    forwards = []
-    anos = np.arange(1, 11)
-    try:
-        R_prefix_spots = curva_prefix(anos); R_ipca_spots = curva_ipca(anos)
-        R_prefix_spots_shifted = curva_prefix(anos - 1); R_ipca_spots_shifted = curva_ipca(anos - 1)
-        
-        # Corrige o valor para ano 0, que deve ser 0
-        R_prefix_spots_shifted[0], R_ipca_spots_shifted[0] = 0, 0
-
-        f_nom = (((1 + R_prefix_spots)**anos) / ((1 + R_prefix_spots_shifted)**(anos - 1))) - 1
-        f_real = (((1 + R_ipca_spots)**anos) / ((1 + R_ipca_spots_shifted)**(anos - 1))) - 1
-        
-        f_bei = np.where(f_real > -1, ((1 + f_nom) / (1 + f_real) - 1) * 100, np.nan)
-        
-        for i, ano in enumerate(anos):
-            forwards.append({'Período': f'Ano {ano}', 'Inflação Implícita Futura (%)': f_bei[i]})
-    except Exception:
-        return pd.DataFrame()
-            
-    return pd.DataFrame(forwards)
+    tipos_ipca = ['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+']
+    df_ipca_raw = df_recente[df_recente['Tipo Titulo'].isin(tipos_ipca)]
+    df_prefixados = df_recente[df_recente['Tipo Titulo'] == 'Tesouro Prefixado'].set_index('Data Vencimento')
+    df_ipca = df_ipca_raw.sort_values('Tipo Titulo', ascending=False).drop_duplicates('Data Vencimento').set_index('Data Vencimento')
+    if df_prefixados.empty or df_ipca.empty: return pd.DataFrame()
+    inflacao_implicita = []
+    for venc_prefixado, row_prefixado in df_prefixados.iterrows():
+        venc_ipca_proximo = min(df_ipca.index, key=lambda d: abs(d - venc_prefixado))
+        if abs((venc_ipca_proximo - venc_prefixado).days) < 550:
+            taxa_prefixada, taxa_ipca = row_prefixado['Taxa Compra Manha'], df_ipca.loc[venc_ipca_proximo]['Taxa Compra Manha']
+            breakeven = (((1 + taxa_prefixada / 100) / (1 + taxa_ipca / 100)) - 1) * 100
+            inflacao_implicita.append({'Vencimento do Prefixo': venc_prefixado, 'Inflação Implícita (% a.a.)': breakeven})
+    if not inflacao_implicita: return pd.DataFrame()
+    return pd.DataFrame(inflacao_implicita).sort_values('Vencimento do Prefixo').set_index('Vencimento do Prefixo')
 
 @st.cache_data
 def gerar_grafico_spread_juros(df):
@@ -137,7 +79,7 @@ def gerar_grafico_spread_juros(df):
     data_recente = df_ntnf['Data Base'].max()
     titulos_disponiveis_hoje = df_ntnf[df_ntnf['Data Base'] == data_recente]
     vencimentos_atuais = sorted(titulos_disponiveis_hoje['Data Vencimento'].unique())
-    if len(vencimentos_atuais) < 2: return go.Figure().update_layout(title_text="Menos de duas NTN-Fs disponíveis.")
+    if len(vencimentos_atuais) < 2: return go.Figure().update_layout(title_text="Menos de duas NTN-Fs disponíveis para calcular o spread.")
     target_2y, target_10y = data_recente + pd.DateOffset(years=2), data_recente + pd.DateOffset(years=10)
     venc_curto = min(vencimentos_atuais, key=lambda d: abs(d - target_2y))
     venc_longo = min(vencimentos_atuais, key=lambda d: abs(d - target_10y))
@@ -209,148 +151,6 @@ def carregar_dados_bcb():
     if not lista_dfs_sucesso: return pd.DataFrame(), {}
     df_full = pd.concat(lista_dfs_sucesso, axis=1); df_full.ffill(inplace=True); df_full.dropna(inplace=True)
     return df_full, config_sucesso
-
-@st.cache_data
-def calcular_previsoes_economicas(df):
-    """Calcula previsões simples para próximo mês usando diferentes modelos"""
-    if df.empty: return pd.DataFrame()
-
-    previsoes = {}
-    df_monthly = df.resample('M').last()  # Converter para mensal se necessário
-
-    for coluna in df.columns:
-        serie = df_monthly[coluna].dropna()
-        if len(serie) < 12: continue  # Precisa de pelo menos 12 observações
-
-        try:
-            # Modelo 1: Média Móvel Simples (3 meses)
-            ma_3 = serie.rolling(window=3).mean().iloc[-1]
-
-            # Modelo 2: Média Móvel Ponderada (pesos decrescentes)
-            pesos = np.array([0.5, 0.3, 0.2])
-            if len(serie) >= 3:
-                wma = np.average(serie.iloc[-3:], weights=pesos)
-            else:
-                wma = serie.iloc[-1]
-
-            # Modelo 3: Tendência Linear Simples (últimos 6 meses)
-            if len(serie) >= 6:
-                x = np.arange(6)
-                y = serie.iloc[-6:].values
-                z = np.polyfit(x, y, 1)
-                trend_forecast = z[0] * 6 + z[1]  # Próximo ponto da tendência
-            else:
-                trend_forecast = serie.iloc[-1]
-
-            # Modelo 4: Média da variação percentual (momentum)
-            if len(serie) >= 6:
-                pct_changes = serie.pct_change().dropna().iloc[-5:]  # Últimas 5 variações
-                avg_change = pct_changes.mean()
-                momentum_forecast = serie.iloc[-1] * (1 + avg_change)
-            else:
-                momentum_forecast = serie.iloc[-1]
-
-            # Modelo 5: Sazonalidade simples (mesmo mês do ano anterior)
-            if len(serie) >= 12:
-                seasonal_forecast = serie.iloc[-12]
-            else:
-                seasonal_forecast = serie.iloc[-1]
-
-            # Previsão final: média dos modelos (ensemble simples)
-            modelos = [ma_3, wma, trend_forecast, momentum_forecast, seasonal_forecast]
-            modelos_validos = [m for m in modelos if not np.isnan(m)]
-
-            if modelos_validos:
-                previsao_final = np.mean(modelos_validos)
-                valor_atual = serie.iloc[-1]
-                variacao_prevista = ((previsao_final - valor_atual) / valor_atual) * 100
-
-                previsoes[coluna] = {
-                    'Valor Atual': valor_atual,
-                    'Previsão Próximo Mês': previsao_final,
-                    'Variação Prevista (%)': variacao_prevista,
-                    'Média Móvel 3M': ma_3,
-                    'Tendência Linear': trend_forecast,
-                    'Momentum': momentum_forecast,
-                    'Sazonalidade': seasonal_forecast
-                }
-        except Exception as e:
-            continue
-
-    if not previsoes:
-        return pd.DataFrame()
-
-    df_previsoes = pd.DataFrame.from_dict(previsoes, orient='index')
-    return df_previsoes.round(3)
-
-def gerar_grafico_previsao(df_original, indicador, df_previsoes):
-    """Gera gráfico com histórico e previsão para um indicador específico"""
-    if indicador not in df_original.columns or indicador not in df_previsoes.index:
-        return go.Figure().update_layout(title_text=f"Dados não disponíveis para {indicador}")
-
-    # Dados históricos (últimos 24 meses)
-    serie_historica = df_original[indicador].dropna().tail(24)
-
-    # Previsão
-    previsao = df_previsoes.loc[indicador, 'Previsão Próximo Mês']
-
-    # Criar próxima data (aproximada)
-    ultima_data = serie_historica.index[-1]
-    if hasattr(ultima_data, 'to_period'):
-        proxima_data = (ultima_data.to_period('M') + 1).to_timestamp()
-    else:
-        proxima_data = ultima_data + pd.DateOffset(months=1)
-
-    # Criar gráfico
-    fig = go.Figure()
-
-    # Linha histórica
-    fig.add_trace(go.Scatter(
-        x=serie_historica.index,
-        y=serie_historica.values,
-        mode='lines+markers',
-        name='Dados Históricos',
-        line=dict(color='#636EFA', width=2)
-    ))
-
-    # Ponto de previsão
-    fig.add_trace(go.Scatter(
-        x=[ultima_data, proxima_data],
-        y=[serie_historica.iloc[-1], previsao],
-        mode='lines+markers',
-        name='Previsão',
-        line=dict(color='#FF6B6B', width=3, dash='dash'),
-        marker=dict(size=8, symbol='diamond')
-    ))
-
-    # Zona de confiança (±10% da previsão como exemplo)
-    margem = abs(previsao * 0.1)
-    fig.add_trace(go.Scatter(
-        x=[proxima_data, proxima_data],
-        y=[previsao - margem, previsao + margem],
-        mode='lines',
-        fill='tonexty',
-        fillcolor='rgba(255, 107, 107, 0.2)',
-        line=dict(color='rgba(255, 107, 107, 0)'),
-        name='Zona de Incerteza (±10%)',
-        showlegend=False
-    ))
-
-    fig.update_layout(
-        title=f'Previsão para {indicador}',
-        title_x=0,
-        template='plotly_dark',
-        xaxis_title='Data',
-        yaxis_title='Valor',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-
-    return fig
-
-def colorir_previsao(val):
-    """Aplica cores às variações previstas"""
-    if pd.isna(val) or val == 0: return ''
-    return f"color: {'#4CAF50' if val > 0 else '#F44336'}; font-weight: bold"
 
 # --- BLOCO 3: LÓGICA DO DASHBOARD DE COMMODITIES ---
 @st.cache_data(ttl=3600*4)
@@ -490,265 +290,6 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
         padding = (max_y - min_y) * 0.10 if (max_y - min_y) > 0 else 0.5
         fig.update_yaxes(range=[min_y - padding, max_y + padding])
     return fig
-
-# --- BLOCO 4.5: LÓGICA DE PADRÕES SAZONAIS ---
-@st.cache_data
-def calcular_padroes_sazonais_commodities(dados_por_categoria):
-    """Calcula padrões sazonais para commodities por mês"""
-    padroes_sazonais = {}
-    
-    for categoria, df_categoria in dados_por_categoria.items():
-        padroes_categoria = {}
-        
-        for commodity in df_categoria.columns:
-            serie = df_categoria[commodity].dropna()
-            if len(serie) < 24:  # Precisa de pelo menos 2 anos de dados
-                continue
-                
-            # Calcular retornos mensais
-            serie_mensal = serie.resample('M').last()
-            retornos_mensais = serie_mensal.pct_change().dropna()
-            
-            if len(retornos_mensais) < 12:
-                continue
-            
-            # Agrupar por mês e calcular estatísticas
-            retornos_por_mes = retornos_mensais.groupby(retornos_mensais.index.month)
-            
-            estatisticas_mensais = {}
-            for mes in range(1, 13):
-                if mes in retornos_por_mes.groups:
-                    dados_mes = retornos_por_mes.get_group(mes)
-                    estatisticas_mensais[mes] = {
-                        'retorno_medio': dados_mes.mean() * 100,
-                        'volatilidade': dados_mes.std() * 100,
-                        'prob_positivo': (dados_mes > 0).mean() * 100,
-                        'num_observacoes': len(dados_mes)
-                    }
-                else:
-                    estatisticas_mensais[mes] = {
-                        'retorno_medio': 0,
-                        'volatilidade': 0,
-                        'prob_positivo': 50,
-                        'num_observacoes': 0
-                    }
-            
-            padroes_categoria[commodity] = estatisticas_mensais
-        
-        if padroes_categoria:
-            padroes_sazonais[categoria] = padroes_categoria
-    
-    return padroes_sazonais
-
-@st.cache_data
-def calcular_padroes_sazonais_acoes(tickers_lista):
-    """Calcula padrões sazonais para ações brasileiras"""
-    padroes_acoes = {}
-    
-    with st.spinner("Analisando padrões sazonais das ações..."):
-        for ticker in tickers_lista:
-            try:
-                # Baixar dados históricos
-                dados = yf.download(ticker, period="max", auto_adjust=True, progress=False)
-                if dados.empty:
-                    continue
-                
-                serie = dados['Close'].dropna()
-                if len(serie) < 500:  # Precisa de dados suficientes
-                    continue
-                
-                # Calcular retornos mensais
-                serie_mensal = serie.resample('M').last()
-                retornos_mensais = serie_mensal.pct_change().dropna()
-                
-                if len(retornos_mensais) < 12:
-                    continue
-                
-                # Agrupar por mês
-                retornos_por_mes = retornos_mensais.groupby(retornos_mensais.index.month)
-                
-                estatisticas_mensais = {}
-                for mes in range(1, 13):
-                    if mes in retornos_por_mes.groups:
-                        dados_mes = retornos_por_mes.get_group(mes)
-                        estatisticas_mensais[mes] = {
-                            'retorno_medio': dados_mes.mean() * 100,
-                            'volatilidade': dados_mes.std() * 100,
-                            'prob_positivo': (dados_mes > 0).mean() * 100,
-                            'num_observacoes': len(dados_mes)
-                        }
-                    else:
-                        estatisticas_mensais[mes] = {
-                            'retorno_medio': 0,
-                            'volatilidade': 0,
-                            'prob_positivo': 50,
-                            'num_observacoes': 0
-                        }
-                
-                padroes_acoes[ticker] = estatisticas_mensais
-                
-            except Exception as e:
-                continue
-    
-    return padroes_acoes
-
-def gerar_grafico_sazonalidade(padroes_dados, titulo_base, tipo='commodity'):
-    """Gera gráfico de padrões sazonais"""
-    if not padroes_dados:
-        return go.Figure().update_layout(title_text="Nenhum dado disponível para análise sazonal")
-    
-    # Nomes dos meses
-    nomes_meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 
-                   'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-    
-    fig = go.Figure()
-    
-    if tipo == 'commodity':
-        # Para commodities, mostrar por categoria
-        for categoria, commodities in padroes_dados.items():
-            # Calcular média da categoria
-            retornos_categoria = []
-            for mes in range(1, 13):
-                retornos_mes = []
-                for commodity, dados in commodities.items():
-                    if dados[mes]['num_observacoes'] > 0:
-                        retornos_mes.append(dados[mes]['retorno_medio'])
-                
-                if retornos_mes:
-                    retornos_categoria.append(np.mean(retornos_mes))
-                else:
-                    retornos_categoria.append(0)
-            
-            fig.add_trace(go.Scatter(
-                x=nomes_meses,
-                y=retornos_categoria,
-                mode='lines+markers',
-                name=categoria,
-                line=dict(width=3),
-                marker=dict(size=8)
-            ))
-    
-    else:
-        # Para ações individuais
-        for ticker, dados in list(padroes_dados.items())[:10]:  # Limitar a 10 ações
-            retornos_ticker = [dados[mes]['retorno_medio'] for mes in range(1, 13)]
-            
-            fig.add_trace(go.Scatter(
-                x=nomes_meses,
-                y=retornos_ticker,
-                mode='lines+markers',
-                name=ticker.replace('.SA', ''),
-                line=dict(width=2),
-                marker=dict(size=6)
-            ))
-    
-    # Adicionar linha de referência no zero
-    fig.add_hline(y=0, line_dash="dash", line_color="gray", 
-                  annotation_text="Neutro (0%)", annotation_position="bottom right")
-    
-    fig.update_layout(
-        title=f'{titulo_base} - Padrões Sazonais (Retorno Médio Mensal)',
-        title_x=0,
-        template='plotly_dark',
-        xaxis_title='Mês',
-        yaxis_title='Retorno Médio (%)',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        hovermode='x unified'
-    )
-    
-    return fig
-
-def gerar_heatmap_sazonalidade(padroes_dados, titulo, limite_itens=15):
-    """Gera heatmap de sazonalidade"""
-    if not padroes_dados:
-        return go.Figure().update_layout(title_text="Nenhum dado disponível")
-    
-    # Preparar dados para o heatmap
-    nomes_meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 
-                   'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-    
-    # Flatten os dados se for por categoria (commodities)
-    items_dados = {}
-    if any(isinstance(v, dict) and any(isinstance(vv, dict) for vv in v.values()) for v in padroes_dados.values()):
-        # É dados de commodity (categoria -> commodity -> mês)
-        for categoria, commodities in padroes_dados.items():
-            for commodity, dados_commodity in commodities.items():
-                items_dados[f"{commodity} ({categoria})"] = dados_commodity
-    else:
-        # É dados de ações (ticker -> mês)
-        items_dados = padroes_dados
-    
-    # Limitar número de itens
-    items_limitados = dict(list(items_dados.items())[:limite_itens])
-    
-    # Criar matriz de dados
-    matriz_retornos = []
-    nomes_items = []
-    
-    for item, dados in items_limitados.items():
-        retornos_item = [dados[mes]['retorno_medio'] for mes in range(1, 13)]
-        matriz_retornos.append(retornos_item)
-        nomes_items.append(item.replace('.SA', '') if '.SA' in item else item)
-    
-    if not matriz_retornos:
-        return go.Figure().update_layout(title_text="Nenhum dado suficiente para heatmap")
-    
-    fig = go.Figure(data=go.Heatmap(
-        z=matriz_retornos,
-        x=nomes_meses,
-        y=nomes_items,
-        colorscale='RdYlGn',
-        colorbar=dict(title="Retorno Médio (%)"),
-        hoverongaps=False,
-        texttemplate="%{z:.1f}%",
-        textfont={"size": 10}
-    ))
-    
-    fig.update_layout(
-        title=f'{titulo} - Heatmap de Sazonalidade',
-        title_x=0,
-        template='plotly_dark',
-        xaxis_title='Mês',
-        yaxis_title='Ativo',
-        height=max(400, len(nomes_items) * 25)
-    )
-    
-    return fig
-
-def criar_tabela_ranking_sazonal(padroes_dados, mes_selecionado):
-    """Cria tabela com ranking de performance para um mês específico"""
-    if not padroes_dados:
-        return pd.DataFrame()
-    
-    ranking_data = []
-    
-    # Flatten os dados se necessário
-    items_dados = {}
-    if any(isinstance(v, dict) and any(isinstance(vv, dict) for vv in v.values()) for v in padroes_dados.values()):
-        for categoria, commodities in padroes_dados.items():
-            for commodity, dados_commodity in commodities.items():
-                items_dados[f"{commodity}"] = dados_commodity
-    else:
-        items_dados = padroes_dados
-    
-    for item, dados in items_dados.items():
-        dados_mes = dados[mes_selecionado]
-        if dados_mes['num_observacoes'] > 0:
-            ranking_data.append({
-                'Ativo': item.replace('.SA', '') if '.SA' in item else item,
-                'Retorno Médio (%)': dados_mes['retorno_medio'],
-                'Prob. Positivo (%)': dados_mes['prob_positivo'],
-                'Volatilidade (%)': dados_mes['volatilidade'],
-                'Observações': dados_mes['num_observacoes']
-            })
-    
-    if not ranking_data:
-        return pd.DataFrame()
-    
-    df_ranking = pd.DataFrame(ranking_data)
-    df_ranking = df_ranking.sort_values('Retorno Médio (%)', ascending=False)
-    
-    return df_ranking
 
 # --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR ---
 @st.cache_data(ttl=3600*24)
@@ -914,88 +455,11 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     fig.update_layout(title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}', template='plotly_dark', title_x=0, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
-# --- BLOCO 6: LÓGICA DA ANÁLISE DE AMPLITUDE DE MERCADO ---
-
-@st.cache_data(ttl=3600*24) # Cache de 1 dia
-def carregar_tickers_cvm():
-    """Obtém a lista de tickers da CVM, usando o cache do Streamlit."""
-    ANO_CVM = datetime.now().year
-    url = f'https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ANO_ATUAL}.zip'
-    nome_arquivo_csv = f'fca_cia_aberta_valor_mobiliario_{ANO_ATUAL}.csv'
-
-    try:
-        response = requests.get(url, stream=True, timeout=60)
-        response.raise_for_status()
-        
-        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-            with z.open(nome_arquivo_csv) as f:
-                df = pd.read_csv(f, sep=';', encoding='ISO-8859-1', dtype={'Valor_Mobiliario': 'category', 'Mercado': 'category'})
-
-        df_filtrado = df[
-            (df['Valor_Mobiliario'].isin(['Ações Ordinárias', 'Ações Preferenciais'])) &
-            (df['Mercado'] == 'Bolsa')
-        ]
-        return df_filtrado['Codigo_Negociacao'].dropna().unique().tolist()
-
-    except Exception as e:
-        st.error(f"ERRO: Não foi possível obter a lista de tickers da CVM. {e}")
-        return None
-
-@st.cache_data(ttl=3600*12) # Cache de 12 horas para os preços
-def carregar_precos_historicos(_tickers, anos_historico=10):
-    """Baixa os dados históricos para uma lista de tickers, otimizado para Streamlit."""
-    tickers_sa = [ticker + ".SA" for ticker in _tickers]
-    data_final = datetime.now()
-    data_inicial = data_final - timedelta(days=anos_historico*365)
-    
-    dados_completos = yf.download(tickers=tickers_sa, start=data_inicial, end=data_final, auto_adjust=True, progress=False)
-    
-    if not dados_completos.empty:
-        precos_fechamento = dados_completos['Close'].astype('float32')
-        return precos_fechamento
-    else:
-        st.error("ERRO: Falha no download dos dados de preços do Yahoo Finance.")
-        return pd.DataFrame()
-
-@st.cache_data
-def gerar_grafico_amplitude_plotly(_precos_fechamento):
-    """Calcula e gera o gráfico de amplitude de mercado com Plotly."""
-    mma200 = _precos_fechamento.rolling(window=200).mean()
-    acima_da_media = _precos_fechamento > mma200
-    percentual_acima_media = (acima_da_media.sum(axis=1) / _precos_fechamento.notna().sum(axis=1)) * 100
-    
-    fig = px.line(percentual_acima_media, title='Indicador de Amplitude B3 (% de Ações Acima da MMA de 200 Dias)', template='plotly_dark')
-    
-    # Adiciona linhas de referência
-    fig.add_hline(y=70, line_color='red', line_dash='dash', annotation_text="Sobrecompra (70%)")
-    fig.add_hline(y=50, line_color='gray', line_dash='dash', annotation_text="Central (50%)")
-    fig.add_hline(y=30, line_color='green', line_dash='dash', annotation_text="Sobrevenda (30%)")
-
-    # Adiciona botões de período
-    end_date = percentual_acima_media.index.max()
-    buttons = []
-    periods = {'1A': 365, '3A': 365*3, '5A': 365*5, 'Máx': 'max'}
-    for label, days in periods.items():
-        start_date = percentual_acima_media.index.min() if days == 'max' else end_date - timedelta(days=days)
-        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
-
-    fig.update_layout(
-        title_x=0,
-        yaxis_title="Percentual de Ativos (%)",
-        xaxis_title="Data",
-        yaxis_range=[0, 100],
-        showlegend=False,
-        updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)]
-    )
-    fig.update_yaxes(ticksuffix="%")
-    return fig
-
-
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
 st.title("MOBBT")
 st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Juros BR", "Indicadores Econômicos", "Commodities", "Indicadores Internacionais", "Ações BR", "Padrões Sazonais"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Juros BR", "Indicadores Econômicos", "Commodities", "Indicadores Internacionais", "Ações BR"])
 
 # --- CONTEÚDO DA ABA 1: JUROS BR ---
 with tab1:
@@ -1006,40 +470,21 @@ with tab1:
         st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
         st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
         st.markdown("---")
-        
         st.subheader("Análises da Curva de Juros")
         col_analise1, col_analise2 = st.columns(2)
-        
         with col_analise1:
-            st.info("A **Inflação Implícita Histórica** mostra a evolução da expectativa do mercado para a inflação média futura (aqui calculada para o vértice de ~5 anos).")
-            df_breakeven_hist = calcular_historico_inflacao_implicita(df_tesouro)
-            fig_breakeven_hist = gerar_grafico_historico_inflacao(df_breakeven_hist)
-            st.plotly_chart(fig_breakeven_hist, use_container_width=True)
-
-            st.markdown("---")
-
-            st.info("A **Inflação Implícita Futura (Anual)** mostra a expectativa do mercado para a inflação de cada ano específico no futuro, calculada a partir da interpolação da curva de juros.")
-            df_fwd_bei = calcular_inflacao_futura_implicita(df_tesouro)
-            if not df_fwd_bei.empty:
-                fig_fwd_bei = px.bar(
-                    df_fwd_bei,
-                    x='Período',
-                    y='Inflação Implícita Futura (%)',
-                    title='Inflação Implícita na Curva Futura (Ano a Ano)',
-                    text_auto='.2f'
-                )
-                fig_fwd_bei.update_traces(texttemplate='%{y:.2f}%', textposition='outside')
-                fig_fwd_bei.update_layout(title_x=0, yaxis_title="Inflação (% a.a.)", xaxis_title="Período Futuro")
-                st.plotly_chart(fig_fwd_bei, use_container_width=True)
-            else:
-                st.warning("Não foi possível calcular a inflação futura. Verifique se há títulos com maturidades variadas disponíveis.")
-
+            st.info("A **Inflação Implícita** mostra a expectativa do mercado para a inflação futura.")
+            df_breakeven = calcular_inflacao_implicita(df_tesouro)
+            if not df_breakeven.empty:
+                st.dataframe(df_breakeven[['Inflação Implícita (% a.a.)']].style.format('{:.2f}%'), use_container_width=True)
+                fig_breakeven = px.bar(df_breakeven, y='Inflação Implícita (% a.a.)', text_auto='.2f', title='Inflação Implícita por Vencimento').update_traces(textposition='outside')
+                fig_breakeven.update_layout(title_x=0)
+                st.plotly_chart(fig_breakeven, use_container_width=True)
+            else: st.warning("Não há pares de títulos para calcular a inflação implícita.")
         with col_analise2:
             st.info("O **Spread de Juros** mostra a diferença entre as taxas de um título longo e um curto. Positivo indica otimismo; negativo (invertido) pode sinalizar recessão.")
             st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True)
-        
         st.markdown("---")
-
         st.subheader("Spread de Juros (Risco-País): Brasil 10 Anos vs. EUA 10 Anos")
         st.info("Este gráfico mostra a diferença entre a taxa da NTN-B de ~10 anos e a do título americano de 10 anos. É uma medida da percepção de risco do Brasil. **Spreads crescentes** indicam maior risco percebido, enquanto **spreads caindo** sugerem maior confiança no país.")
         FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
@@ -1053,9 +498,7 @@ with tab1:
                 st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
         else:
             st.warning("Não foi possível carregar os dados de juros dos EUA para o comparativo.")
-        
         st.markdown("---")
-
         st.subheader("Análise Histórica de Título Individual")
         col1_hist, col2_hist = st.columns(2)
         with col1_hist:
@@ -1075,71 +518,9 @@ with tab2:
     st.header("Monitor de Indicadores Econômicos do Brasil")
     df_bcb, config_bcb = carregar_dados_bcb()
     if not df_bcb.empty:
-        # --- Seção de Previsões ---
-        st.subheader("📈 Previsões Econômicas (Próximo Mês)")
-        st.info("**Modelos utilizados:** Média móvel, tendência linear, momentum, sazonalidade e média móvel ponderada. "
-                "A previsão final é um ensemble (média) destes modelos simples. "
-                "⚠️ **Importante:** Estas são previsões estatísticas simples, não constituem recomendações de investimento.")
-
-        df_previsoes = calcular_previsoes_economicas(df_bcb)
-
-        if not df_previsoes.empty:
-            # Tabela de previsões
-            colunas_principais = ['Valor Atual', 'Previsão Próximo Mês', 'Variação Prevista (%)']
-            df_display = df_previsoes[colunas_principais].copy()
-
-            # Formatar para exibição
-            format_dict = {
-                'Valor Atual': '{:.3f}',
-                'Previsão Próximo Mês': '{:.3f}',
-                'Variação Prevista (%)': '{:+.2f}%'
-            }
-
-            st.dataframe(
-                df_display.style.format(format_dict).applymap(
-                    colorir_previsao, subset=['Variação Prevista (%)']
-                ),
-                use_container_width=True
-            )
-
-            # Seletor para gráfico detalhado
-            st.subheader("Análise Detalhada por Indicador")
-            indicador_selecionado = st.selectbox(
-                "Selecione um indicador para ver previsão detalhada:",
-                options=df_previsoes.index.tolist(),
-                key='indicador_previsao'
-            )
-
-            if indicador_selecionado:
-                col1, col2 = st.columns([2, 1])
-
-                with col1:
-                    fig_previsao = gerar_grafico_previsao(df_bcb, indicador_selecionado, df_previsoes)
-                    st.plotly_chart(fig_previsao, use_container_width=True)
-
-                with col2:
-                    st.write("**Detalhes dos Modelos:**")
-                    detalhes = df_previsoes.loc[indicador_selecionado]
-                    st.metric("Valor Atual", f"{detalhes['Valor Atual']:.3f}")
-                    st.metric("Previsão Final", f"{detalhes['Previsão Próximo Mês']:.3f}", 
-                             f"{detalhes['Variação Prevista (%)']:+.2f}%")
-
-                    st.write("**Modelos Individuais:**")
-                    st.write(f"• Média Móvel 3M: {detalhes['Média Móvel 3M']:.3f}")
-                    st.write(f"• Tendência Linear: {detalhes['Tendência Linear']:.3f}")
-                    st.write(f"• Momentum: {detalhes['Momentum']:.3f}")
-                    st.write(f"• Sazonalidade: {detalhes['Sazonalidade']:.3f}")
-        else:
-            st.warning("Não foi possível calcular previsões. Dados insuficientes.")
-
-        st.markdown("---")
-
-        # --- Seção histórica original ---
-        st.subheader("📊 Dados Históricos")
         data_inicio = st.date_input("Data de Início", df_bcb.index.min().date(), min_value=df_bcb.index.min().date(), max_value=df_bcb.index.max().date(), key='bcb_start')
         data_fim = st.date_input("Data de Fim", df_bcb.index.max().date(), min_value=data_inicio, max_value=df_bcb.index.max().date(), key='bcb_end')
         df_filtrado_bcb = df_bcb.loc[str(data_inicio):str(data_fim)]
-
         st.subheader("Gráficos Individuais"); num_cols_bcb = 3; cols_bcb = st.columns(num_cols_bcb)
         for i, nome_serie in enumerate(df_filtrado_bcb.columns):
             fig_bcb = px.line(df_filtrado_bcb, x=df_filtrado_bcb.index, y=nome_serie, title=nome_serie, template='plotly_dark')
@@ -1278,219 +659,3 @@ with tab5:
                 st.warning("Não foram encontrados dados de movimentação para Demais Insiders no último mês.")
         else:
             st.error("Falha ao processar dados de insiders.")
-
-    st.markdown("---")
-
-    # --- Seção 3: Análise de Amplitude de Mercado (NOVO) ---
-    st.header("Análise de Amplitude de Mercado (Breadth)")
-    st.info(
-        "Este indicador mostra o percentual de todas as ações da B3 que estão sendo negociadas acima de sua Média Móvel de 200 dias. "
-        "É um termômetro da saúde do mercado: valores **altos (>70%)** podem indicar euforia ou sobrecompra, enquanto valores **baixos (<30%)** podem indicar pânico ou sobrevenda."
-    )
-
-    if st.button("Analisar Amplitude do Mercado (Lento na 1ª vez)", use_container_width=True):
-        
-        with st.spinner("Passo 1/3: Obtendo lista completa de tickers da CVM..."):
-            lista_de_tickers = carregar_tickers_cvm()
-        
-        if lista_de_tickers:
-            with st.spinner(f"Passo 2/3: Baixando dados históricos para {len(lista_de_tickers)} ações... Por favor, aguarde, isso pode levar vários minutos."):
-                precos = carregar_precos_historicos(lista_de_tickers)
-            
-            if not precos.empty:
-                with st.spinner("Passo 3/3: Calculando indicador e gerando gráfico..."):
-                    fig_amplitude = gerar_grafico_amplitude_plotly(precos)
-                    st.plotly_chart(fig_amplitude, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
-# --- CONTEÚDO DA ABA 6: PADRÕES SAZONAIS ---
-with tab6:
-    st.header("📅 Análise de Padrões Sazonais")
-    st.info("Esta análise mostra tendências históricas por mês do ano para commodities e ações. "
-             "**Interpretação:** Meses com retornos médios positivos historicamente tendem a ser mais favoráveis, "
-             "mas lembre-se que performance passada não garante resultados futuros.")
-    
-    # Seletor de análise
-    tipo_analise = st.radio(
-        "Escolha o tipo de análise:",
-        ["Commodities", "Ações Brasileiras"],
-        horizontal=True
-    )
-    
-    if tipo_analise == "Commodities":
-        st.subheader("Padrões Sazonais - Commodities")
-        
-        # Carregar dados de commodities (reutilizar da aba 3)
-        dados_commodities_sazonal = carregar_dados_commodities()
-        
-        if dados_commodities_sazonal:
-            # Calcular padrões sazonais
-            padroes_commodities = calcular_padroes_sazonais_commodities(dados_commodities_sazonal)
-            
-            if padroes_commodities:
-                # Gráficos de linha por categoria
-                st.subheader("Tendências Sazonais por Categoria")
-                fig_sazonal_commodities = gerar_grafico_sazonalidade(
-                    padroes_commodities, 
-                    "Commodities", 
-                    tipo='commodity'
-                )
-                st.plotly_chart(fig_sazonal_commodities, use_container_width=True)
-                
-                st.markdown("---")
-                
-                # Heatmap detalhado
-                st.subheader("Heatmap de Sazonalidade - Commodities")
-                st.info("**Verde** = Meses historicamente favoráveis | **Vermelho** = Meses historicamente desfavoráveis")
-                
-                fig_heatmap_commodities = gerar_heatmap_sazonalidade(
-                    padroes_commodities, 
-                    "Commodities",
-                    limite_itens=20
-                )
-                st.plotly_chart(fig_heatmap_commodities, use_container_width=True)
-                
-                st.markdown("---")
-                
-                # Ranking por mês específico
-                st.subheader("Ranking de Performance por Mês")
-                nomes_meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
-                              'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
-                
-                mes_selecionado = st.selectbox(
-                    "Selecione um mês para ver o ranking:",
-                    options=list(range(1, 13)),
-                    format_func=lambda x: nomes_meses[x-1],
-                    index=datetime.now().month - 1  # Mês atual como padrão
-                )
-                
-                df_ranking_commodities = criar_tabela_ranking_sazonal(padroes_commodities, mes_selecionado)
-                
-                if not df_ranking_commodities.empty:
-                    # Formatar tabela
-                    st.dataframe(
-                        df_ranking_commodities.style.format({
-                            'Retorno Médio (%)': '{:+.2f}%',
-                            'Prob. Positivo (%)': '{:.1f}%',
-                            'Volatilidade (%)': '{:.2f}%'
-                        }).applymap(
-                            lambda x: 'color: #4CAF50' if isinstance(x, (int, float)) and x > 0 
-                            else 'color: #F44336' if isinstance(x, (int, float)) and x < 0 
-                            else '', 
-                            subset=['Retorno Médio (%)']
-                        ),
-                        use_container_width=True
-                    )
-                else:
-                    st.warning("Nenhum dado disponível para o mês selecionado.")
-            else:
-                st.warning("Não foi possível calcular padrões sazonais para commodities.")
-        else:
-            st.warning("Dados de commodities não disponíveis.")
-    
-    else:  # Ações Brasileiras
-        st.subheader("Padrões Sazonais - Ações Brasileiras")
-        
-        # Lista de ações populares para análise
-        acoes_populares = [
-            'PETR4.SA', 'VALE3.SA', 'ITUB4.SA', 'BBDC4.SA', 'ABEV3.SA',
-            'WEGE3.SA', 'MGLU3.SA', 'LREN3.SA', 'JBSS3.SA', 'BEEF3.SA',
-            'BOVA11.SA', 'SMAL11.SA', 'IVVB11.SA', 'DIVO11.SA', 'XBOV11.SA'
-        ]
-        
-        # Permitir personalização da lista
-        with st.expander("Configurar Lista de Ações"):
-            acoes_customizadas = st.text_area(
-                "Adicione tickers personalizados (um por linha, formato: PETR4.SA):",
-                value="\n".join(acoes_populares),
-                height=200
-            )
-            acoes_lista_final = [ticker.strip() for ticker in acoes_customizadas.split('\n') if ticker.strip()]
-        
-        if st.button("Analisar Padrões Sazonais das Ações", use_container_width=True):
-            # Calcular padrões sazonais para ações
-            padroes_acoes = calcular_padroes_sazonais_acoes(acoes_lista_final)
-            
-            if padroes_acoes:
-                # Armazenar no session_state para não recalcular
-                st.session_state.padroes_acoes_calculados = padroes_acoes
-                
-                # Gráfico de linha
-                st.subheader("Tendências Sazonais - Principais Ações")
-                fig_sazonal_acoes = gerar_grafico_sazonalidade(
-                    padroes_acoes, 
-                    "Ações Brasileiras", 
-                    tipo='acao'
-                )
-                st.plotly_chart(fig_sazonal_acoes, use_container_width=True)
-                
-                st.markdown("---")
-                
-                # Heatmap
-                st.subheader("Heatmap de Sazonalidade - Ações")
-                fig_heatmap_acoes = gerar_heatmap_sazonalidade(
-                    padroes_acoes, 
-                    "Ações Brasileiras",
-                    limite_itens=15
-                )
-                st.plotly_chart(fig_heatmap_acoes, use_container_width=True)
-                
-                st.markdown("---")
-                
-                # Ranking por mês
-                st.subheader("Ranking de Performance por Mês - Ações")
-                nomes_meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
-                              'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
-                
-                mes_selecionado_acoes = st.selectbox(
-                    "Selecione um mês para ver o ranking:",
-                    options=list(range(1, 13)),
-                    format_func=lambda x: nomes_meses[x-1],
-                    index=datetime.now().month - 1,
-                    key='mes_acoes'
-                )
-                
-                df_ranking_acoes = criar_tabela_ranking_sazonal(padroes_acoes, mes_selecionado_acoes)
-                
-                if not df_ranking_acoes.empty:
-                    st.dataframe(
-                        df_ranking_acoes.style.format({
-                            'Retorno Médio (%)': '{:+.2f}%',
-                            'Prob. Positivo (%)': '{:.1f}%',
-                            'Volatilidade (%)': '{:.2f}%'
-                        }).applymap(
-                            lambda x: 'color: #4CAF50' if isinstance(x, (int, float)) and x > 0 
-                            else 'color: #F44336' if isinstance(x, (int, float)) and x < 0 
-                            else '', 
-                            subset=['Retorno Médio (%)']
-                        ),
-                        use_container_width=True
-                    )
-                else:
-                    st.warning("Nenhum dado disponível para o mês selecionado.")
-            else:
-                st.warning("Não foi possível calcular padrões sazonais para as ações selecionadas.")
-        
-        # Mostrar resultados salvos se existirem
-        elif 'padroes_acoes_calculados' in st.session_state:
-            padroes_acoes = st.session_state.padroes_acoes_calculados
-            
-            st.subheader("Tendências Sazonais - Principais Ações")
-            fig_sazonal_acoes = gerar_grafico_sazonalidade(
-                padroes_acoes, 
-                "Ações Brasileiras", 
-                tipo='acao'
-            )
-            st.plotly_chart(fig_sazonal_acoes, use_container_width=True)
-            
-            st.markdown("---")
-            
-            st.subheader("Heatmap de Sazonalidade - Ações")
-            fig_heatmap_acoes = gerar_heatmap_sazonalidade(
-                padroes_acoes, 
-                "Ações Brasileiras",
-                limite_itens=15
-            )
-            st.plotly_chart(fig_heatmap_acoes, use_container_width=True)
-    
-    st.markdown("---")
-    st.info("💡 **Dica de Uso:** Os padrões sazonais podem ajudar a identificar meses historicamente favoráveis para diferentes ativos, "
-            "mas sempre considere o contexto econômico atual e outros fatores fundamentais antes de tomar decisões de investimento.")
