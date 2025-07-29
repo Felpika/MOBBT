@@ -6,3 +6,4 @@ plotly
 yfinance
 python-bcb
 fredapi
+textblob
