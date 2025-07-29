@@ -455,6 +455,83 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     fig.update_layout(title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}', template='plotly_dark', title_x=0, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
+# --- BLOCO 6: LÓGICA DA ANÁLISE DE AMPLITUDE DE MERCADO ---
+
+@st.cache_data(ttl=3600*24) # Cache de 1 dia
+def carregar_tickers_cvm():
+    """Obtém a lista de tickers da CVM, usando o cache do Streamlit."""
+    ANO_CVM = datetime.now().year
+    url = f'https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ANO_CVM}.zip'
+    nome_arquivo_csv = f'fca_cia_aberta_valor_mobiliario_{ANO_CVM}.csv'
+
+    try:
+        response = requests.get(url, stream=True, timeout=60)
+        response.raise_for_status()
+        
+        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+            with z.open(nome_arquivo_csv) as f:
+                df = pd.read_csv(f, sep=';', encoding='ISO-8859-1', dtype={'Valor_Mobiliario': 'category', 'Mercado': 'category'})
+
+        df_filtrado = df[
+            (df['Valor_Mobiliario'].isin(['Ações Ordinárias', 'Ações Preferenciais'])) &
+            (df['Mercado'] == 'Bolsa')
+        ]
+        return df_filtrado['Codigo_Negociacao'].dropna().unique().tolist()
+
+    except Exception as e:
+        st.error(f"ERRO: Não foi possível obter a lista de tickers da CVM. {e}")
+        return None
+
+@st.cache_data(ttl=3600*12) # Cache de 12 horas para os preços
+def carregar_precos_historicos(_tickers, anos_historico=10):
+    """Baixa os dados históricos para uma lista de tickers, otimizado para Streamlit."""
+    tickers_sa = [ticker + ".SA" for ticker in _tickers]
+    data_final = datetime.now()
+    data_inicial = data_final - timedelta(days=anos_historico*365)
+    
+    dados_completos = yf.download(tickers=tickers_sa, start=data_inicial, end=data_final, auto_adjust=True, progress=False)
+    
+    if not dados_completos.empty:
+        precos_fechamento = dados_completos['Close'].astype('float32')
+        return precos_fechamento
+    else:
+        st.error("ERRO: Falha no download dos dados de preços do Yahoo Finance.")
+        return pd.DataFrame()
+
+@st.cache_data
+def gerar_grafico_amplitude_plotly(_precos_fechamento):
+    """Calcula e gera o gráfico de amplitude de mercado com Plotly."""
+    mma200 = _precos_fechamento.rolling(window=200).mean()
+    acima_da_media = _precos_fechamento > mma200
+    percentual_acima_media = (acima_da_media.sum(axis=1) / _precos_fechamento.notna().sum(axis=1)) * 100
+    
+    fig = px.line(percentual_acima_media, title='Indicador de Amplitude B3 (% de Ações Acima da MMA de 200 Dias)', template='plotly_dark')
+    
+    # Adiciona linhas de referência
+    fig.add_hline(y=70, line_color='red', line_dash='dash', annotation_text="Sobrecompra (70%)")
+    fig.add_hline(y=50, line_color='gray', line_dash='dash', annotation_text="Central (50%)")
+    fig.add_hline(y=30, line_color='green', line_dash='dash', annotation_text="Sobrevenda (30%)")
+
+    # Adiciona botões de período
+    end_date = percentual_acima_media.index.max()
+    buttons = []
+    periods = {'1A': 365, '3A': 365*3, '5A': 365*5, 'Máx': 'max'}
+    for label, days in periods.items():
+        start_date = percentual_acima_media.index.min() if days == 'max' else end_date - timedelta(days=days)
+        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
+
+    fig.update_layout(
+        title_x=0,
+        yaxis_title="Percentual de Ativos (%)",
+        xaxis_title="Data",
+        yaxis_range=[0, 100],
+        showlegend=False,
+        updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)]
+    )
+    fig.update_yaxes(ticksuffix="%")
+    return fig
+
+
 # --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
 st.title("MOBBT")
 st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
@@ -659,3 +736,27 @@ with tab5:
                 st.warning("Não foram encontrados dados de movimentação para Demais Insiders no último mês.")
         else:
             st.error("Falha ao processar dados de insiders.")
+    # ... (todo o seu código existente para Análise de Ratio e Insiders fica aqui) ...
+
+    st.markdown("---")
+
+    # --- Seção 3: Análise de Amplitude de Mercado (NOVO) ---
+    st.header("Análise de Amplitude de Mercado (Breadth)")
+    st.info(
+        "Este indicador mostra o percentual de todas as ações da B3 que estão sendo negociadas acima de sua Média Móvel de 200 dias. "
+        "É um termômetro da saúde do mercado: valores **altos (>70%)** podem indicar euforia ou sobrecompra, enquanto valores **baixos (<30%)** podem indicar pânico ou sobrevenda."
+    )
+
+    if st.button("Analisar Amplitude do Mercado (Lento na 1ª vez)", use_container_width=True):
+        
+        with st.spinner("Passo 1/3: Obtendo lista completa de tickers da CVM..."):
+            lista_de_tickers = carregar_tickers_cvm()
+        
+        if lista_de_tickers:
+            with st.spinner(f"Passo 2/3: Baixando dados históricos para {len(lista_de_tickers)} ações... Por favor, aguarde, isso pode levar vários minutos."):
+                precos = carregar_precos_historicos(lista_de_tickers)
+            
+            if not precos.empty:
+                with st.spinner("Passo 3/3: Calculando indicador e gerando gráfico..."):
+                    fig_amplitude = gerar_grafico_amplitude_plotly(precos)
+                    st.plotly_chart(fig_amplitude, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
