@@ -433,6 +433,265 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
         fig.update_yaxes(range=[min_y - padding, max_y + padding])
     return fig
 
+# --- BLOCO 4.5: LÓGICA DE PADRÕES SAZONAIS ---
+@st.cache_data
+def calcular_padroes_sazonais_commodities(dados_por_categoria):
+    """Calcula padrões sazonais para commodities por mês"""
+    padroes_sazonais = {}
+    
+    for categoria, df_categoria in dados_por_categoria.items():
+        padroes_categoria = {}
+        
+        for commodity in df_categoria.columns:
+            serie = df_categoria[commodity].dropna()
+            if len(serie) < 24:  # Precisa de pelo menos 2 anos de dados
+                continue
+                
+            # Calcular retornos mensais
+            serie_mensal = serie.resample('M').last()
+            retornos_mensais = serie_mensal.pct_change().dropna()
+            
+            if len(retornos_mensais) < 12:
+                continue
+            
+            # Agrupar por mês e calcular estatísticas
+            retornos_por_mes = retornos_mensais.groupby(retornos_mensais.index.month)
+            
+            estatisticas_mensais = {}
+            for mes in range(1, 13):
+                if mes in retornos_por_mes.groups:
+                    dados_mes = retornos_por_mes.get_group(mes)
+                    estatisticas_mensais[mes] = {
+                        'retorno_medio': dados_mes.mean() * 100,
+                        'volatilidade': dados_mes.std() * 100,
+                        'prob_positivo': (dados_mes > 0).mean() * 100,
+                        'num_observacoes': len(dados_mes)
+                    }
+                else:
+                    estatisticas_mensais[mes] = {
+                        'retorno_medio': 0,
+                        'volatilidade': 0,
+                        'prob_positivo': 50,
+                        'num_observacoes': 0
+                    }
+            
+            padroes_categoria[commodity] = estatisticas_mensais
+        
+        if padroes_categoria:
+            padroes_sazonais[categoria] = padroes_categoria
+    
+    return padroes_sazonais
+
+@st.cache_data
+def calcular_padroes_sazonais_acoes(tickers_lista):
+    """Calcula padrões sazonais para ações brasileiras"""
+    padroes_acoes = {}
+    
+    with st.spinner("Analisando padrões sazonais das ações..."):
+        for ticker in tickers_lista:
+            try:
+                # Baixar dados históricos
+                dados = yf.download(ticker, period="max", auto_adjust=True, progress=False)
+                if dados.empty:
+                    continue
+                
+                serie = dados['Close'].dropna()
+                if len(serie) < 500:  # Precisa de dados suficientes
+                    continue
+                
+                # Calcular retornos mensais
+                serie_mensal = serie.resample('M').last()
+                retornos_mensais = serie_mensal.pct_change().dropna()
+                
+                if len(retornos_mensais) < 12:
+                    continue
+                
+                # Agrupar por mês
+                retornos_por_mes = retornos_mensais.groupby(retornos_mensais.index.month)
+                
+                estatisticas_mensais = {}
+                for mes in range(1, 13):
+                    if mes in retornos_por_mes.groups:
+                        dados_mes = retornos_por_mes.get_group(mes)
+                        estatisticas_mensais[mes] = {
+                            'retorno_medio': dados_mes.mean() * 100,
+                            'volatilidade': dados_mes.std() * 100,
+                            'prob_positivo': (dados_mes > 0).mean() * 100,
+                            'num_observacoes': len(dados_mes)
+                        }
+                    else:
+                        estatisticas_mensais[mes] = {
+                            'retorno_medio': 0,
+                            'volatilidade': 0,
+                            'prob_positivo': 50,
+                            'num_observacoes': 0
+                        }
+                
+                padroes_acoes[ticker] = estatisticas_mensais
+                
+            except Exception as e:
+                continue
+    
+    return padroes_acoes
+
+def gerar_grafico_sazonalidade(padroes_dados, titulo_base, tipo='commodity'):
+    """Gera gráfico de padrões sazonais"""
+    if not padroes_dados:
+        return go.Figure().update_layout(title_text="Nenhum dado disponível para análise sazonal")
+    
+    # Nomes dos meses
+    nomes_meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 
+                   'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+    
+    fig = go.Figure()
+    
+    if tipo == 'commodity':
+        # Para commodities, mostrar por categoria
+        for categoria, commodities in padroes_dados.items():
+            # Calcular média da categoria
+            retornos_categoria = []
+            for mes in range(1, 13):
+                retornos_mes = []
+                for commodity, dados in commodities.items():
+                    if dados[mes]['num_observacoes'] > 0:
+                        retornos_mes.append(dados[mes]['retorno_medio'])
+                
+                if retornos_mes:
+                    retornos_categoria.append(np.mean(retornos_mes))
+                else:
+                    retornos_categoria.append(0)
+            
+            fig.add_trace(go.Scatter(
+                x=nomes_meses,
+                y=retornos_categoria,
+                mode='lines+markers',
+                name=categoria,
+                line=dict(width=3),
+                marker=dict(size=8)
+            ))
+    
+    else:
+        # Para ações individuais
+        for ticker, dados in list(padroes_dados.items())[:10]:  # Limitar a 10 ações
+            retornos_ticker = [dados[mes]['retorno_medio'] for mes in range(1, 13)]
+            
+            fig.add_trace(go.Scatter(
+                x=nomes_meses,
+                y=retornos_ticker,
+                mode='lines+markers',
+                name=ticker.replace('.SA', ''),
+                line=dict(width=2),
+                marker=dict(size=6)
+            ))
+    
+    # Adicionar linha de referência no zero
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", 
+                  annotation_text="Neutro (0%)", annotation_position="bottom right")
+    
+    fig.update_layout(
+        title=f'{titulo_base} - Padrões Sazonais (Retorno Médio Mensal)',
+        title_x=0,
+        template='plotly_dark',
+        xaxis_title='Mês',
+        yaxis_title='Retorno Médio (%)',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        hovermode='x unified'
+    )
+    
+    return fig
+
+def gerar_heatmap_sazonalidade(padroes_dados, titulo, limite_itens=15):
+    """Gera heatmap de sazonalidade"""
+    if not padroes_dados:
+        return go.Figure().update_layout(title_text="Nenhum dado disponível")
+    
+    # Preparar dados para o heatmap
+    nomes_meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 
+                   'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+    
+    # Flatten os dados se for por categoria (commodities)
+    items_dados = {}
+    if any(isinstance(v, dict) and any(isinstance(vv, dict) for vv in v.values()) for v in padroes_dados.values()):
+        # É dados de commodity (categoria -> commodity -> mês)
+        for categoria, commodities in padroes_dados.items():
+            for commodity, dados_commodity in commodities.items():
+                items_dados[f"{commodity} ({categoria})"] = dados_commodity
+    else:
+        # É dados de ações (ticker -> mês)
+        items_dados = padroes_dados
+    
+    # Limitar número de itens
+    items_limitados = dict(list(items_dados.items())[:limite_itens])
+    
+    # Criar matriz de dados
+    matriz_retornos = []
+    nomes_items = []
+    
+    for item, dados in items_limitados.items():
+        retornos_item = [dados[mes]['retorno_medio'] for mes in range(1, 13)]
+        matriz_retornos.append(retornos_item)
+        nomes_items.append(item.replace('.SA', '') if '.SA' in item else item)
+    
+    if not matriz_retornos:
+        return go.Figure().update_layout(title_text="Nenhum dado suficiente para heatmap")
+    
+    fig = go.Figure(data=go.Heatmap(
+        z=matriz_retornos,
+        x=nomes_meses,
+        y=nomes_items,
+        colorscale='RdYlGn',
+        colorbar=dict(title="Retorno Médio (%)"),
+        hoverongaps=False,
+        texttemplate="%{z:.1f}%",
+        textfont={"size": 10}
+    ))
+    
+    fig.update_layout(
+        title=f'{titulo} - Heatmap de Sazonalidade',
+        title_x=0,
+        template='plotly_dark',
+        xaxis_title='Mês',
+        yaxis_title='Ativo',
+        height=max(400, len(nomes_items) * 25)
+    )
+    
+    return fig
+
+def criar_tabela_ranking_sazonal(padroes_dados, mes_selecionado):
+    """Cria tabela com ranking de performance para um mês específico"""
+    if not padroes_dados:
+        return pd.DataFrame()
+    
+    ranking_data = []
+    
+    # Flatten os dados se necessário
+    items_dados = {}
+    if any(isinstance(v, dict) and any(isinstance(vv, dict) for vv in v.values()) for v in padroes_dados.values()):
+        for categoria, commodities in padroes_dados.items():
+            for commodity, dados_commodity in commodities.items():
+                items_dados[f"{commodity}"] = dados_commodity
+    else:
+        items_dados = padroes_dados
+    
+    for item, dados in items_dados.items():
+        dados_mes = dados[mes_selecionado]
+        if dados_mes['num_observacoes'] > 0:
+            ranking_data.append({
+                'Ativo': item.replace('.SA', '') if '.SA' in item else item,
+                'Retorno Médio (%)': dados_mes['retorno_medio'],
+                'Prob. Positivo (%)': dados_mes['prob_positivo'],
+                'Volatilidade (%)': dados_mes['volatilidade'],
+                'Observações': dados_mes['num_observacoes']
+            })
+    
+    if not ranking_data:
+        return pd.DataFrame()
+    
+    df_ranking = pd.DataFrame(ranking_data)
+    df_ranking = df_ranking.sort_values('Retorno Médio (%)', ascending=False)
+    
+    return df_ranking
+
 # --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR ---
 @st.cache_data(ttl=3600*24)
 def executar_analise_insiders():
@@ -601,7 +860,7 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
 st.title("MOBBT")
 st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Juros BR", "Indicadores Econômicos", "Commodities", "Indicadores Internacionais", "Ações BR"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Juros BR", "Indicadores Econômicos", "Commodities", "Indicadores Internacionais", "Ações BR", "Padrões Sazonais"])
 
 # --- CONTEÚDO DA ABA 1: JUROS BR ---
 with tab1:
@@ -863,3 +1122,197 @@ with tab5:
                 st.warning("Não foram encontrados dados de movimentação para Demais Insiders no último mês.")
         else:
             st.error("Falha ao processar dados de insiders.")
+
+# --- CONTEÚDO DA ABA 6: PADRÕES SAZONAIS ---
+with tab6:
+    st.header("📅 Análise de Padrões Sazonais")
+    st.info("Esta análise mostra tendências históricas por mês do ano para commodities e ações. "
+             "**Interpretação:** Meses com retornos médios positivos historicamente tendem a ser mais favoráveis, "
+             "mas lembre-se que performance passada não garante resultados futuros.")
+    
+    # Seletor de análise
+    tipo_analise = st.radio(
+        "Escolha o tipo de análise:",
+        ["Commodities", "Ações Brasileiras"],
+        horizontal=True
+    )
+    
+    if tipo_analise == "Commodities":
+        st.subheader("Padrões Sazonais - Commodities")
+        
+        # Carregar dados de commodities (reutilizar da aba 3)
+        dados_commodities_sazonal = carregar_dados_commodities()
+        
+        if dados_commodities_sazonal:
+            # Calcular padrões sazonais
+            padroes_commodities = calcular_padroes_sazonais_commodities(dados_commodities_sazonal)
+            
+            if padroes_commodities:
+                # Gráficos de linha por categoria
+                st.subheader("Tendências Sazonais por Categoria")
+                fig_sazonal_commodities = gerar_grafico_sazonalidade(
+                    padroes_commodities, 
+                    "Commodities", 
+                    tipo='commodity'
+                )
+                st.plotly_chart(fig_sazonal_commodities, use_container_width=True)
+                
+                st.markdown("---")
+                
+                # Heatmap detalhado
+                st.subheader("Heatmap de Sazonalidade - Commodities")
+                st.info("**Verde** = Meses historicamente favoráveis | **Vermelho** = Meses historicamente desfavoráveis")
+                
+                fig_heatmap_commodities = gerar_heatmap_sazonalidade(
+                    padroes_commodities, 
+                    "Commodities",
+                    limite_itens=20
+                )
+                st.plotly_chart(fig_heatmap_commodities, use_container_width=True)
+                
+                st.markdown("---")
+                
+                # Ranking por mês específico
+                st.subheader("Ranking de Performance por Mês")
+                nomes_meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+                              'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+                
+                mes_selecionado = st.selectbox(
+                    "Selecione um mês para ver o ranking:",
+                    options=list(range(1, 13)),
+                    format_func=lambda x: nomes_meses[x-1],
+                    index=datetime.now().month - 1  # Mês atual como padrão
+                )
+                
+                df_ranking_commodities = criar_tabela_ranking_sazonal(padroes_commodities, mes_selecionado)
+                
+                if not df_ranking_commodities.empty:
+                    # Formatar tabela
+                    st.dataframe(
+                        df_ranking_commodities.style.format({
+                            'Retorno Médio (%)': '{:+.2f}%',
+                            'Prob. Positivo (%)': '{:.1f}%',
+                            'Volatilidade (%)': '{:.2f}%'
+                        }).applymap(
+                            lambda x: 'color: #4CAF50' if isinstance(x, (int, float)) and x > 0 
+                            else 'color: #F44336' if isinstance(x, (int, float)) and x < 0 
+                            else '', 
+                            subset=['Retorno Médio (%)']
+                        ),
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("Nenhum dado disponível para o mês selecionado.")
+            else:
+                st.warning("Não foi possível calcular padrões sazonais para commodities.")
+        else:
+            st.warning("Dados de commodities não disponíveis.")
+    
+    else:  # Ações Brasileiras
+        st.subheader("Padrões Sazonais - Ações Brasileiras")
+        
+        # Lista de ações populares para análise
+        acoes_populares = [
+            'PETR4.SA', 'VALE3.SA', 'ITUB4.SA', 'BBDC4.SA', 'ABEV3.SA',
+            'WEGE3.SA', 'MGLU3.SA', 'LREN3.SA', 'JBSS3.SA', 'BEEF3.SA',
+            'BOVA11.SA', 'SMAL11.SA', 'IVVB11.SA', 'DIVO11.SA', 'XBOV11.SA'
+        ]
+        
+        # Permitir personalização da lista
+        with st.expander("Configurar Lista de Ações"):
+            acoes_customizadas = st.text_area(
+                "Adicione tickers personalizados (um por linha, formato: PETR4.SA):",
+                value="\n".join(acoes_populares),
+                height=200
+            )
+            acoes_lista_final = [ticker.strip() for ticker in acoes_customizadas.split('\n') if ticker.strip()]
+        
+        if st.button("Analisar Padrões Sazonais das Ações", use_container_width=True):
+            # Calcular padrões sazonais para ações
+            padroes_acoes = calcular_padroes_sazonais_acoes(acoes_lista_final)
+            
+            if padroes_acoes:
+                # Armazenar no session_state para não recalcular
+                st.session_state.padroes_acoes_calculados = padroes_acoes
+                
+                # Gráfico de linha
+                st.subheader("Tendências Sazonais - Principais Ações")
+                fig_sazonal_acoes = gerar_grafico_sazonalidade(
+                    padroes_acoes, 
+                    "Ações Brasileiras", 
+                    tipo='acao'
+                )
+                st.plotly_chart(fig_sazonal_acoes, use_container_width=True)
+                
+                st.markdown("---")
+                
+                # Heatmap
+                st.subheader("Heatmap de Sazonalidade - Ações")
+                fig_heatmap_acoes = gerar_heatmap_sazonalidade(
+                    padroes_acoes, 
+                    "Ações Brasileiras",
+                    limite_itens=15
+                )
+                st.plotly_chart(fig_heatmap_acoes, use_container_width=True)
+                
+                st.markdown("---")
+                
+                # Ranking por mês
+                st.subheader("Ranking de Performance por Mês - Ações")
+                nomes_meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+                              'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+                
+                mes_selecionado_acoes = st.selectbox(
+                    "Selecione um mês para ver o ranking:",
+                    options=list(range(1, 13)),
+                    format_func=lambda x: nomes_meses[x-1],
+                    index=datetime.now().month - 1,
+                    key='mes_acoes'
+                )
+                
+                df_ranking_acoes = criar_tabela_ranking_sazonal(padroes_acoes, mes_selecionado_acoes)
+                
+                if not df_ranking_acoes.empty:
+                    st.dataframe(
+                        df_ranking_acoes.style.format({
+                            'Retorno Médio (%)': '{:+.2f}%',
+                            'Prob. Positivo (%)': '{:.1f}%',
+                            'Volatilidade (%)': '{:.2f}%'
+                        }).applymap(
+                            lambda x: 'color: #4CAF50' if isinstance(x, (int, float)) and x > 0 
+                            else 'color: #F44336' if isinstance(x, (int, float)) and x < 0 
+                            else '', 
+                            subset=['Retorno Médio (%)']
+                        ),
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("Nenhum dado disponível para o mês selecionado.")
+            else:
+                st.warning("Não foi possível calcular padrões sazonais para as ações selecionadas.")
+        
+        # Mostrar resultados salvos se existirem
+        elif 'padroes_acoes_calculados' in st.session_state:
+            padroes_acoes = st.session_state.padroes_acoes_calculados
+            
+            st.subheader("Tendências Sazonais - Principais Ações")
+            fig_sazonal_acoes = gerar_grafico_sazonalidade(
+                padroes_acoes, 
+                "Ações Brasileiras", 
+                tipo='acao'
+            )
+            st.plotly_chart(fig_sazonal_acoes, use_container_width=True)
+            
+            st.markdown("---")
+            
+            st.subheader("Heatmap de Sazonalidade - Ações")
+            fig_heatmap_acoes = gerar_heatmap_sazonalidade(
+                padroes_acoes, 
+                "Ações Brasileiras",
+                limite_itens=15
+            )
+            st.plotly_chart(fig_heatmap_acoes, use_container_width=True)
+    
+    st.markdown("---")
+    st.info("💡 **Dica de Uso:** Os padrões sazonais podem ajudar a identificar meses historicamente favoráveis para diferentes ativos, "
+            "mas sempre considere o contexto econômico atual e outros fatores fundamentais antes de tomar decisões de investimento.")
