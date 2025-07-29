@@ -152,6 +152,148 @@ def carregar_dados_bcb():
     df_full = pd.concat(lista_dfs_sucesso, axis=1); df_full.ffill(inplace=True); df_full.dropna(inplace=True)
     return df_full, config_sucesso
 
+@st.cache_data
+def calcular_previsoes_economicas(df):
+    """Calcula previsões simples para próximo mês usando diferentes modelos"""
+    if df.empty: return pd.DataFrame()
+
+    previsoes = {}
+    df_monthly = df.resample('M').last()  # Converter para mensal se necessário
+
+    for coluna in df.columns:
+        serie = df_monthly[coluna].dropna()
+        if len(serie) < 12: continue  # Precisa de pelo menos 12 observações
+
+        try:
+            # Modelo 1: Média Móvel Simples (3 meses)
+            ma_3 = serie.rolling(window=3).mean().iloc[-1]
+
+            # Modelo 2: Média Móvel Ponderada (pesos decrescentes)
+            pesos = np.array([0.5, 0.3, 0.2])
+            if len(serie) >= 3:
+                wma = np.average(serie.iloc[-3:], weights=pesos)
+            else:
+                wma = serie.iloc[-1]
+
+            # Modelo 3: Tendência Linear Simples (últimos 6 meses)
+            if len(serie) >= 6:
+                x = np.arange(6)
+                y = serie.iloc[-6:].values
+                z = np.polyfit(x, y, 1)
+                trend_forecast = z[0] * 6 + z[1]  # Próximo ponto da tendência
+            else:
+                trend_forecast = serie.iloc[-1]
+
+            # Modelo 4: Média da variação percentual (momentum)
+            if len(serie) >= 6:
+                pct_changes = serie.pct_change().dropna().iloc[-5:]  # Últimas 5 variações
+                avg_change = pct_changes.mean()
+                momentum_forecast = serie.iloc[-1] * (1 + avg_change)
+            else:
+                momentum_forecast = serie.iloc[-1]
+
+            # Modelo 5: Sazonalidade simples (mesmo mês do ano anterior)
+            if len(serie) >= 12:
+                seasonal_forecast = serie.iloc[-12]
+            else:
+                seasonal_forecast = serie.iloc[-1]
+
+            # Previsão final: média dos modelos (ensemble simples)
+            modelos = [ma_3, wma, trend_forecast, momentum_forecast, seasonal_forecast]
+            modelos_validos = [m for m in modelos if not np.isnan(m)]
+
+            if modelos_validos:
+                previsao_final = np.mean(modelos_validos)
+                valor_atual = serie.iloc[-1]
+                variacao_prevista = ((previsao_final - valor_atual) / valor_atual) * 100
+
+                previsoes[coluna] = {
+                    'Valor Atual': valor_atual,
+                    'Previsão Próximo Mês': previsao_final,
+                    'Variação Prevista (%)': variacao_prevista,
+                    'Média Móvel 3M': ma_3,
+                    'Tendência Linear': trend_forecast,
+                    'Momentum': momentum_forecast,
+                    'Sazonalidade': seasonal_forecast
+                }
+        except Exception as e:
+            continue
+
+    if not previsoes:
+        return pd.DataFrame()
+
+    df_previsoes = pd.DataFrame.from_dict(previsoes, orient='index')
+    return df_previsoes.round(3)
+
+def gerar_grafico_previsao(df_original, indicador, df_previsoes):
+    """Gera gráfico com histórico e previsão para um indicador específico"""
+    if indicador not in df_original.columns or indicador not in df_previsoes.index:
+        return go.Figure().update_layout(title_text=f"Dados não disponíveis para {indicador}")
+
+    # Dados históricos (últimos 24 meses)
+    serie_historica = df_original[indicador].dropna().tail(24)
+
+    # Previsão
+    previsao = df_previsoes.loc[indicador, 'Previsão Próximo Mês']
+
+    # Criar próxima data (aproximada)
+    ultima_data = serie_historica.index[-1]
+    if hasattr(ultima_data, 'to_period'):
+        proxima_data = (ultima_data.to_period('M') + 1).to_timestamp()
+    else:
+        proxima_data = ultima_data + pd.DateOffset(months=1)
+
+    # Criar gráfico
+    fig = go.Figure()
+
+    # Linha histórica
+    fig.add_trace(go.Scatter(
+        x=serie_historica.index,
+        y=serie_historica.values,
+        mode='lines+markers',
+        name='Dados Históricos',
+        line=dict(color='#636EFA', width=2)
+    ))
+
+    # Ponto de previsão
+    fig.add_trace(go.Scatter(
+        x=[ultima_data, proxima_data],
+        y=[serie_historica.iloc[-1], previsao],
+        mode='lines+markers',
+        name='Previsão',
+        line=dict(color='#FF6B6B', width=3, dash='dash'),
+        marker=dict(size=8, symbol='diamond')
+    ))
+
+    # Zona de confiança (±10% da previsão como exemplo)
+    margem = abs(previsao * 0.1)
+    fig.add_trace(go.Scatter(
+        x=[proxima_data, proxima_data],
+        y=[previsao - margem, previsao + margem],
+        mode='lines',
+        fill='tonexty',
+        fillcolor='rgba(255, 107, 107, 0.2)',
+        line=dict(color='rgba(255, 107, 107, 0)'),
+        name='Zona de Incerteza (±10%)',
+        showlegend=False
+    ))
+
+    fig.update_layout(
+        title=f'Previsão para {indicador}',
+        title_x=0,
+        template='plotly_dark',
+        xaxis_title='Data',
+        yaxis_title='Valor',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+
+    return fig
+
+def colorir_previsao(val):
+    """Aplica cores às variações previstas"""
+    if pd.isna(val) or val == 0: return ''
+    return f"color: {'#4CAF50' if val > 0 else '#F44336'}; font-weight: bold"
+
 # --- BLOCO 3: LÓGICA DO DASHBOARD DE COMMODITIES ---
 @st.cache_data(ttl=3600*4)
 def carregar_dados_commodities():
@@ -518,9 +660,71 @@ with tab2:
     st.header("Monitor de Indicadores Econômicos do Brasil")
     df_bcb, config_bcb = carregar_dados_bcb()
     if not df_bcb.empty:
+        # --- Seção de Previsões ---
+        st.subheader("📈 Previsões Econômicas (Próximo Mês)")
+        st.info("**Modelos utilizados:** Média móvel, tendência linear, momentum, sazonalidade e média móvel ponderada. "
+                "A previsão final é um ensemble (média) destes modelos simples. "
+                "⚠️ **Importante:** Estas são previsões estatísticas simples, não constituem recomendações de investimento.")
+
+        df_previsoes = calcular_previsoes_economicas(df_bcb)
+
+        if not df_previsoes.empty:
+            # Tabela de previsões
+            colunas_principais = ['Valor Atual', 'Previsão Próximo Mês', 'Variação Prevista (%)']
+            df_display = df_previsoes[colunas_principais].copy()
+
+            # Formatar para exibição
+            format_dict = {
+                'Valor Atual': '{:.3f}',
+                'Previsão Próximo Mês': '{:.3f}',
+                'Variação Prevista (%)': '{:+.2f}%'
+            }
+
+            st.dataframe(
+                df_display.style.format(format_dict).applymap(
+                    colorir_previsao, subset=['Variação Prevista (%)']
+                ),
+                use_container_width=True
+            )
+
+            # Seletor para gráfico detalhado
+            st.subheader("Análise Detalhada por Indicador")
+            indicador_selecionado = st.selectbox(
+                "Selecione um indicador para ver previsão detalhada:",
+                options=df_previsoes.index.tolist(),
+                key='indicador_previsao'
+            )
+
+            if indicador_selecionado:
+                col1, col2 = st.columns([2, 1])
+
+                with col1:
+                    fig_previsao = gerar_grafico_previsao(df_bcb, indicador_selecionado, df_previsoes)
+                    st.plotly_chart(fig_previsao, use_container_width=True)
+
+                with col2:
+                    st.write("**Detalhes dos Modelos:**")
+                    detalhes = df_previsoes.loc[indicador_selecionado]
+                    st.metric("Valor Atual", f"{detalhes['Valor Atual']:.3f}")
+                    st.metric("Previsão Final", f"{detalhes['Previsão Próximo Mês']:.3f}", 
+                             f"{detalhes['Variação Prevista (%)']:+.2f}%")
+
+                    st.write("**Modelos Individuais:**")
+                    st.write(f"• Média Móvel 3M: {detalhes['Média Móvel 3M']:.3f}")
+                    st.write(f"• Tendência Linear: {detalhes['Tendência Linear']:.3f}")
+                    st.write(f"• Momentum: {detalhes['Momentum']:.3f}")
+                    st.write(f"• Sazonalidade: {detalhes['Sazonalidade']:.3f}")
+        else:
+            st.warning("Não foi possível calcular previsões. Dados insuficientes.")
+
+        st.markdown("---")
+
+        # --- Seção histórica original ---
+        st.subheader("📊 Dados Históricos")
         data_inicio = st.date_input("Data de Início", df_bcb.index.min().date(), min_value=df_bcb.index.min().date(), max_value=df_bcb.index.max().date(), key='bcb_start')
         data_fim = st.date_input("Data de Fim", df_bcb.index.max().date(), min_value=data_inicio, max_value=df_bcb.index.max().date(), key='bcb_end')
         df_filtrado_bcb = df_bcb.loc[str(data_inicio):str(data_fim)]
+
         st.subheader("Gráficos Individuais"); num_cols_bcb = 3; cols_bcb = st.columns(num_cols_bcb)
         for i, nome_serie in enumerate(df_filtrado_bcb.columns):
             fig_bcb = px.line(df_filtrado_bcb, x=df_filtrado_bcb.index, y=nome_serie, title=nome_serie, template='plotly_dark')
