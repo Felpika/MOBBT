@@ -675,7 +675,7 @@ with st.sidebar:
             "container": {"padding": "5px !important", "background-color": "transparent"},
             "icon": {"color": "#636EFA", "font-size": "20px"},
             "nav-link": {"font-size": "16px", "text-align": "left", "margin": "0px", "--hover-color": "#262830"},
-            "nav-link-selected": {"background-color": "#535c80"}, # Verde para destacar
+            "nav-link-selected": {"background-color": "#333952"}, # Verde para destacar
         }
     )
 
