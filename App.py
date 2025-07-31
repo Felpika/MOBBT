@@ -566,105 +566,261 @@ def gerar_grafico_amplitude(precos_fechamento):
     return fig
 
 # --- FIM DO NOVO BLOCO ---
+# --- FIM DO BLOCO INDICADOR DE AMPLITUDE ---
+
+# --- BLOCO 6: LÓGICA DO INDICADOR IDEX JGP (NOVO) ---
+@st.cache_data(ttl=3600*4) # Cache de 4 horas
+def carregar_dados_idex():
+    """
+    Baixa e processa os dados do IDEX JGP para os índices Geral e Low Rated.
+    """
+    st.info("Carregando dados do IDEX JGP... (Cache de 4h)")
+    url_geral = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_geral_datafile.xlsx"
+    url_low_rated = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_low_rated_datafile.xlsx"
+    emissores_para_remover = ['AMERICANAS SA', 'Light - Servicos de Eletricidade', 'Aeris', 'Viveo']
+
+    def _processar_url(url):
+        response = requests.get(url)
+        response.raise_for_status()
+        df = pd.read_excel(io.BytesIO(response.content), sheet_name='Detalhado')
+        df.columns = df.columns.str.strip()
+        df_filtrado = df[~df['Emissor'].isin(emissores_para_remover)].copy()
+        df_filtrado['Data'] = pd.to_datetime(df_filtrado['Data'])
+        df_filtrado['weighted_spread'] = df_filtrado['Peso no índice (%)'] * df_filtrado['Spread de compra (%)']
+        
+        # Agrupa por data e calcula o spread médio ponderado
+        daily_spread = df_filtrado.groupby('Data').apply(
+            lambda x: x['weighted_spread'].sum() / x['Peso no índice (%)'].sum() if x['Peso no índice (%)'].sum() != 0 else 0
+        ).reset_index(name='spread')
+        
+        return daily_spread.set_index('Data')
+
+    try:
+        spread_geral = _processar_url(url_geral)
+        spread_low_rated = _processar_url(url_low_rated)
+        
+        # Unir os dois dataframes
+        df_final = pd.merge(spread_geral, spread_low_rated, on='Data', how='outer', suffixes=('_geral', '_low_rated'))
+        df_final.rename(columns={'spread_geral': 'IDEX Geral (Filtrado)', 'spread_low_rated': 'IDEX Low Rated (Filtrado)'}, inplace=True)
+        return df_final.sort_index()
+
+    except Exception as e:
+        st.error(f"Erro ao carregar dados do IDEX JGP: {e}")
+        return pd.DataFrame()
 
 
-# --- CONSTRUÇÃO DA INTERFACE PRINCIPAL COM ABAS ---
-st.title("MOBBT")
-st.caption(f"Dados atualizados pela última vez em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+def gerar_grafico_idex(df_idex):
+    """
+    Gera um gráfico Plotly comparando os spreads do IDEX Geral e Low Rated.
+    """
+    if df_idex.empty:
+        return go.Figure().update_layout(title_text="Não foi possível gerar o gráfico do IDEX.")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Juros BR", "Indicadores Econômicos", "Commodities", "Indicadores Internacionais", "Ações BR"])
+    fig = px.line(
+        df_idex,
+        y=['IDEX Geral (Filtrado)', 'IDEX Low Rated (Filtrado)'],
+        title='Histórico do Spread Médio Ponderado: IDEX JGP',
+        template='plotly_dark'
+    )
 
-# --- CONTEÚDO DA ABA 1: JUROS BR ---
-with tab1:
-    # ... (código existente inalterado)
-    st.header("Análise de Títulos do Tesouro Direto")
-    df_tesouro = obter_dados_tesouro()
+    fig.update_layout(
+        title_x=0,
+        yaxis_title='Spread Médio Ponderado (%)',
+        xaxis_title='Data',
+        legend_title_text='Índice',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    return fig
+
+# --- FIM DO NOVO BLOCO ---
+
+# --- CONSTRUÇÃO DA INTERFACE (NOVO LAYOUT COM SIDEBAR) ---
+
+# --- Configuração do Sidebar ---
+st.sidebar.title("MOBBT")
+st.sidebar.caption(f"Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
+pagina_selecionada = st.sidebar.radio(
+    "Monitoramento",
+    [
+        "NTN-Bs ✨NOVO✨",
+        "Curva de Juros (Prefixados)",
+        "Crédito Privado", # NOVA ABA AQUI
+        "Indicadores Econômicos",
+        "Commodities",
+        "Indicadores Internacionais",
+        "Ações BR"
+    ]
+)
+st.sidebar.markdown("---")
+# Você pode adicionar mais elementos ao sidebar aqui no futuro, se quiser
+
+
+# --- Lógica para carregar os dados principais uma vez ---
+df_tesouro = obter_dados_tesouro()
+
+
+# --- Roteamento de Páginas ---
+
+if pagina_selecionada == "NTN-Bs ✨NOVO✨":
+    st.header("Dashboard de Análise de NTN-Bs (Tesouro IPCA+)")
+    st.markdown("---")
+
     if not df_tesouro.empty:
-        st.subheader("Estrutura a Termo da Taxa de Juros (ETTJ) - Títulos Prefixados")
-        st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
-        st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
-        st.markdown("---")
-        st.subheader("Análises da Curva de Juros")
-        col_analise1, col_analise2 = st.columns(2)
-        with col_analise1:
-            st.info("A **Inflação Implícita** mostra a expectativa do mercado para a inflação futura.")
+        # --- Linha 1 do Dashboard ---
+        top_left, top_right = st.columns((1, 1))
+
+        with top_left:
+            st.subheader("Análise Histórica Individual")
+            st.info("Selecione um título para ver a variação da sua taxa ou preço ao longo do tempo.")
+
+            tipos_ntnb = ['Tesouro IPCA+', 'Tesouro IPCA+ com Juros Semestrais']
+            df_ntnb_all = df_tesouro[df_tesouro['Tipo Titulo'].isin(tipos_ntnb)]
+
+            vencimentos_disponiveis = sorted(df_ntnb_all['Data Vencimento'].unique())
+            vencimento_selecionado = st.selectbox(
+                "Selecione o Vencimento da NTN-B",
+                vencimentos_disponiveis,
+                format_func=lambda dt: pd.to_datetime(dt).strftime('%d/%m/%Y'),
+                key='venc_ntnb'
+            )
+            tipo_selecionado = df_ntnb_all[df_ntnb_all['Data Vencimento'] == vencimento_selecionado]['Tipo Titulo'].iloc[0]
+
+            metrica_escolhida = st.radio(
+                "Analisar por:", ('Taxa de Compra', 'Preço Unitário (PU)'),
+                horizontal=True, key='metrica_ntnb'
+            )
+            coluna_metrica = 'Taxa Compra Manha' if metrica_escolhida == 'Taxa de Compra' else 'PU Compra Manha'
+
+            if vencimento_selecionado:
+                fig_hist_ntnb = gerar_grafico_historico_tesouro(
+                    df_tesouro, tipo_selecionado, pd.to_datetime(vencimento_selecionado), metrica=coluna_metrica
+                )
+                st.plotly_chart(fig_hist_ntnb, use_container_width=True)
+
+        with top_right:
+            st.subheader("Spread de Juros: Brasil vs. EUA")
+            st.info("Diferença entre a taxa da NTN-B de ~10 anos e o título americano de 10 anos. Uma medida da percepção de risco do Brasil.")
+
+            FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
+            df_fred_br_tab = carregar_dados_fred(FRED_API_KEY, {'DGS10': 'Juros 10 Anos EUA'})
+
+            if not df_fred_br_tab.empty:
+                df_juro_br = calcular_juro_10a_br(df_tesouro)
+                if not df_juro_br.empty:
+                    fig_spread_br_eua = gerar_grafico_spread_br_eua(df_juro_br, df_fred_br_tab)
+                    st.plotly_chart(fig_spread_br_eua, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
+                else:
+                    st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
+            else:
+                st.warning("Não foi possível carregar os dados de juros dos EUA.")
+
+        st.markdown("<br>", unsafe_allow_html=True) # Espaçamento
+
+        # --- Linha 2 do Dashboard ---
+        bottom_left, bottom_right = st.columns((1, 1))
+
+        with bottom_left:
+            st.subheader("Inflação Implícita (Breakeven)")
+            st.info("A expectativa do mercado para a inflação futura, derivada da diferença entre as taxas dos títulos prefixados e os atrelados à inflação (NTN-Bs).")
             df_breakeven = calcular_inflacao_implicita(df_tesouro)
             if not df_breakeven.empty:
-                st.dataframe(df_breakeven[['Inflação Implícita (% a.a.)']].style.format('{:.2f}%'), use_container_width=True)
-                fig_breakeven = px.bar(df_breakeven, y='Inflação Implícita (% a.a.)', text_auto='.2f', title='Inflação Implícita por Vencimento').update_traces(textposition='outside')
-                fig_breakeven.update_layout(title_x=0)
+                fig_breakeven = px.bar(
+                    df_breakeven, y='Inflação Implícita (% a.a.)', text_auto='.2f',
+                    title='Inflação Implícita por Vencimento'
+                ).update_traces(textposition='outside')
+                fig_breakeven.update_layout(title_x=0, template='plotly_dark')
                 st.plotly_chart(fig_breakeven, use_container_width=True)
-            else: st.warning("Não há pares de títulos para calcular a inflação implícita.")
-        with col_analise2:
-            st.info("O **Spread de Juros** mostra a diferença entre as taxas de um título longo e um curto. Positivo indica otimismo; negativo (invertido) pode sinalizar recessão.")
-            st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True)
-        st.markdown("---")
-        st.subheader("Spread de Juros (Risco-País): Brasil 10 Anos vs. EUA 10 Anos")
-        st.info("Este gráfico mostra a diferença entre a taxa da NTN-B de ~10 anos e a do título americano de 10 anos. É uma medida da percepção de risco do Brasil. **Spreads crescentes** indicam maior risco percebido, enquanto **spreads caindo** sugerem maior confiança no país.")
-        FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
-        df_fred_br_tab = carregar_dados_fred(FRED_API_KEY, {'DGS10': 'Juros 10 Anos EUA'})
-        if not df_fred_br_tab.empty:
-            df_juro_br = calcular_juro_10a_br(df_tesouro)
-            if not df_juro_br.empty:
-                fig_spread_br_eua = gerar_grafico_spread_br_eua(df_juro_br, df_fred_br_tab)
-                st.plotly_chart(fig_spread_br_eua, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
             else:
-                st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
-        else:
-            st.warning("Não foi possível carregar os dados de juros dos EUA para o comparativo.")
-        st.markdown("---")
-        st.subheader("Análise Histórica de Título Individual")
-        col1_hist, col2_hist = st.columns(2)
-        with col1_hist:
-            tipos_disponiveis = sorted(df_tesouro['Tipo Titulo'].unique())
-            tipo_selecionado = st.selectbox("Selecione o Tipo de Título", tipos_disponiveis, key='tipo_tesouro')
-        with col2_hist:
-            vencimentos_disponiveis = sorted(df_tesouro[df_tesouro['Tipo Titulo'] == tipo_selecionado]['Data Vencimento'].unique())
-            vencimento_selecionado = st.selectbox("Selecione a Data de Vencimento", vencimentos_disponiveis, format_func=lambda dt: pd.to_datetime(dt).strftime('%d/%m/%Y'), key='venc_tesouro')
-        metrica_escolhida = st.radio("Analisar por:", ('Taxa de Compra', 'Preço Unitário (PU)'), horizontal=True, key='metrica_tesouro', help="**Taxa de Compra:** Rentabilidade anual. **Preço Unitário:** Valor do título (efeito da marcação a mercado).")
-        coluna_metrica = 'Taxa Compra Manha' if metrica_escolhida == 'Taxa de Compra' else 'PU Compra Manha'
-        if vencimento_selecionado:
-            st.plotly_chart(gerar_grafico_historico_tesouro(df_tesouro, tipo_selecionado, pd.to_datetime(vencimento_selecionado), metrica=coluna_metrica), use_container_width=True)
-    else: st.warning("Não foi possível carregar os dados do Tesouro.")
+                st.warning("Não há pares de títulos para calcular a inflação implícita hoje.")
 
-# --- CONTEÚDO DA ABA 2: INDICADORES ECONÔMICOS ---
-with tab2:
-    # ... (código existente inalterado)
-    st.header("Monitor de Indicadores Econômicos do Brasil")
+        with bottom_right:
+            st.subheader("Spread da Curva de Juros (NTN-Fs)")
+            st.info("A diferença entre as taxas de um título prefixado longo e um curto. Embora use NTN-Fs, é um indicador importante do sentimento geral da curva de juros.")
+            fig_spread_juros = gerar_grafico_spread_juros(df_tesouro)
+            st.plotly_chart(fig_spread_juros, use_container_width=True)
+
+    else:
+        st.warning("Não foi possível carregar os dados do Tesouro Direto para exibir esta página.")
+
+
+elif pagina_selecionada == "Curva de Juros (Prefixados)":
+    st.header("Estrutura a Termo da Taxa de Juros (ETTJ)")
+    st.info("Esta página foca na análise dos títulos públicos prefixados (LTNs e NTN-Fs), que formam a curva de juros nominal da economia.")
+    st.markdown("---")
+
+    if not df_tesouro.empty:
+        st.subheader("Comparativo de Curto Prazo (Últimos 5 Dias)")
+        st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
+        st.markdown("---")
+        st.subheader("Comparativo de Longo Prazo (Histórico)")
+        st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
+    else:
+        st.warning("Não foi possível carregar os dados do Tesouro Direto.")
+
+# NOVA PÁGINA DE CRÉDITO PRIVADO
+elif pagina_selecionada == "Crédito Privado":
+    st.header("IDEX JGP - Indicador de Crédito Privado")
+    st.markdown("---")
+    st.info(
+        "O IDEX-CDI é um índice de debêntures calculado pela JGP. O gráfico mostra o spread médio (prêmio acima do CDI) "
+        "exigido pelo mercado para comprar esses títulos. Spreads maiores indicam maior percepção de risco. "
+        "Filtramos emissores que passaram por eventos de crédito relevantes (Americanas, Light, etc.) para uma visão mais limpa da tendência geral."
+    )
+    
+    df_idex = carregar_dados_idex()
+    if not df_idex.empty:
+        fig_idex = gerar_grafico_idex(df_idex)
+        st.plotly_chart(fig_idex, use_container_width=True)
+    else:
+        st.warning("Não foi possível carregar os dados do IDEX para exibição.")
+
+
+elif pagina_selecionada == "Indicadores Econômicos":
+    st.header("Monitor de Indicadores Econômicos Nacionais")
+    st.markdown("---")
+
+    st.subheader("Indicadores Macroeconômicos (BCB)")
     df_bcb, config_bcb = carregar_dados_bcb()
     if not df_bcb.empty:
         data_inicio = st.date_input("Data de Início", df_bcb.index.min().date(), min_value=df_bcb.index.min().date(), max_value=df_bcb.index.max().date(), key='bcb_start')
         data_fim = st.date_input("Data de Fim", df_bcb.index.max().date(), min_value=data_inicio, max_value=df_bcb.index.max().date(), key='bcb_end')
         df_filtrado_bcb = df_bcb.loc[str(data_inicio):str(data_fim)]
-        st.subheader("Gráficos Individuais"); num_cols_bcb = 3; cols_bcb = st.columns(num_cols_bcb)
+        num_cols_bcb = 3
+        cols_bcb = st.columns(num_cols_bcb)
         for i, nome_serie in enumerate(df_filtrado_bcb.columns):
             fig_bcb = px.line(df_filtrado_bcb, x=df_filtrado_bcb.index, y=nome_serie, title=nome_serie, template='plotly_dark')
             fig_bcb.update_layout(title_x=0)
             cols_bcb[i % num_cols_bcb].plotly_chart(fig_bcb, use_container_width=True)
-    else: st.warning("Não foi possível carregar os dados do BCB.")
+    else:
+        st.warning("Não foi possível carregar os dados do BCB.")
 
-# --- CONTEÚDO DA ABA 3: COMMODITIES ---
-with tab3:
-    # ... (código existente inalterado)
+
+elif pagina_selecionada == "Commodities":
     st.header("Painel de Preços de Commodities")
+    st.markdown("---")
     dados_commodities_categorizados = carregar_dados_commodities()
     if dados_commodities_categorizados:
         st.subheader("Variação Percentual de Preços")
         df_variacao = calcular_variacao_commodities(dados_commodities_categorizados)
         if not df_variacao.empty:
             cols_variacao = [col for col in df_variacao.columns if 'Variação' in col]
-            format_dict = {'Preço Atual': '{:,.2f}'}; format_dict.update({col: '{:+.2%}' for col in cols_variacao})
+            format_dict = {'Preço Atual': '{:,.2f}'}
+            format_dict.update({col: '{:+.2%}' for col in cols_variacao})
             st.dataframe(df_variacao.style.format(format_dict, na_rep="-").applymap(colorir_negativo_positivo, subset=cols_variacao), use_container_width=True)
-        else: st.warning("Não foi possível calcular a variação de preços.")
+        else:
+            st.warning("Não foi possível calcular a variação de preços.")
+
         st.markdown("---")
         fig_commodities = gerar_dashboard_commodities(dados_commodities_categorizados)
         st.plotly_chart(fig_commodities, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
-    else: st.warning("Não foi possível carregar os dados de Commodities.")
+    else:
+        st.warning("Não foi possível carregar os dados de Commodities.")
 
-# --- CONTEÚDO DA ABA 4: INDICADORES INTERNACIONAIS ---
-with tab4:
-    # ... (código existente inalterado)
+
+elif pagina_selecionada == "Indicadores Internacionais":
     st.header("Monitor de Indicadores Internacionais (FRED)")
+    st.markdown("---")
     FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
     INDICADORES_FRED = {
         'T10Y2Y': 'Spread da Curva de Juros dos EUA (10 Anos vs 2 Anos)',
@@ -675,27 +831,29 @@ with tab4:
     config_fred = {'modeBarButtonsToRemove': ['autoscale']}
 
     if not df_fred.empty:
-        if 'T10Y2Y' in df_fred.columns:
-            st.info("O **Spread da Curva de Juros dos EUA (T10Y2Y)** é um dos indicadores mais observados para prever recessões. Quando o valor fica negativo (inversão da curva), historicamente tem sido um sinal de que uma recessão pode ocorrer nos próximos 6 a 18 meses.")
-            fig_t10y2y = gerar_grafico_fred(df_fred, 'T10Y2Y', INDICADORES_FRED['T10Y2Y'])
-            st.plotly_chart(fig_t10y2y, use_container_width=True, config=config_fred)
+        st.info("O **Spread da Curva de Juros dos EUA (T10Y2Y)** é um dos indicadores mais observados para prever recessões. Quando o valor fica negativo (inversão da curva), historicamente tem sido um sinal de que uma recessão pode ocorrer nos próximos 6 a 18 meses.")
+        fig_t10y2y = gerar_grafico_fred(df_fred, 'T10Y2Y', INDICADORES_FRED['T10Y2Y'])
+        st.plotly_chart(fig_t10y2y, use_container_width=True, config=config_fred)
         st.markdown("---")
-        if 'BAMLH0A0HYM2' in df_fred.columns:
-            st.info("O **Spread de Crédito High Yield** mede o prêmio de risco exigido pelo mercado para investir em títulos de empresas com maior risco de crédito. **Spreads crescentes** indicam aversão ao risco (medo) e podem sinalizar uma desaceleração econômica. **Spreads caindo** indicam apetite por risco (otimismo).")
-            fig_hy = gerar_grafico_fred(df_fred, 'BAMLH0A0HYM2', INDICADORES_FRED['BAMLH0A0HYM2'])
-            st.plotly_chart(fig_hy, use_container_width=True, config=config_fred)
+
+        st.info("O **Spread de Crédito High Yield** mede o prêmio de risco exigido pelo mercado para investir em títulos de empresas com maior risco de crédito. **Spreads crescentes** indicam aversão ao risco (medo) e podem sinalizar uma desaceleração econômica.")
+        fig_hy = gerar_grafico_fred(df_fred, 'BAMLH0A0HYM2', INDICADORES_FRED['BAMLH0A0HYM2'])
+        st.plotly_chart(fig_hy, use_container_width=True, config=config_fred)
         st.markdown("---")
-        if 'DGS10' in df_fred.columns:
-            st.info("A **taxa de juros do título americano de 10 anos (DGS10)** é uma referência para o custo do crédito global. **Juros em alta** podem indicar expectativas de crescimento econômico e inflação mais fortes. **Juros em queda** geralmente sinalizam uma busca por segurança ('flight to safety') ou expectativas de desaceleração.")
-            fig_dgs10 = gerar_grafico_fred(df_fred, 'DGS10', INDICADORES_FRED['DGS10'])
-            st.plotly_chart(fig_dgs10, use_container_width=True, config=config_fred)
+
+        st.info("A **taxa de juros do título americano de 10 anos (DGS10)** é uma referência para o custo do crédito global. **Juros em alta** podem indicar expectativas de crescimento econômico e inflação mais fortes.")
+        fig_dgs10 = gerar_grafico_fred(df_fred, 'DGS10', INDICADORES_FRED['DGS10'])
+        st.plotly_chart(fig_dgs10, use_container_width=True, config=config_fred)
     else:
         st.warning("Não foi possível carregar dados do FRED. Verifique a chave da API ou a conexão com a internet.")
 
-# --- CONTEÚDO DA ABA 5: AÇÕES BR ---
-with tab5:
+
+elif pagina_selecionada == "Ações BR":
+    st.header("Ferramentas de Análise de Ações Brasileiras")
+    st.markdown("---")
+
     # --- Seção 1: Análise de Ratio ---
-    st.header("Análise de Ratio de Ativos (Long & Short)")
+    st.subheader("Análise de Ratio de Ativos (Long & Short)")
     st.info("Esta ferramenta calcula o ratio entre o preço de dois ativos. "
             "**Interpretação:** Quando o ratio está alto, o Ativo A está caro em relação ao Ativo B. "
             "Quando está baixo, está barato. As bandas mostram desvios padrão que podem indicar pontos de reversão à média.")
@@ -731,47 +889,42 @@ with tab5:
         cols[2].metric("Mínimo Histórico", f"{kpis['minimo']:.2f}", f"em {kpis['data_minimo'].strftime('%d/%m/%Y')}")
         cols[3].metric("Máximo Histórico", f"{kpis['maximo']:.2f}", f"em {kpis['data_maximo'].strftime('%d/%m/%Y')}")
         cols[4].metric(label="Variação p/ Média", value=f"{kpis['variacao_para_media']:.2f}%", help="Quanto o Ativo A (numerador) precisa variar para o ratio voltar à média.")
-    
+
     if st.session_state.get('fig_ratio'):
         st.plotly_chart(st.session_state.fig_ratio, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
     
     st.markdown("---")
 
     # --- Seção 2: Análise de Insiders ---
-    st.header("Análise de Movimentação de Insiders (CVM)")
+    st.subheader("Radar de Insiders (Movimentações CVM)")
     st.info("Analisa as movimentações de compra e venda de ações feitas por pessoas ligadas à empresa (Controladores, Diretores, etc.), com base nos dados públicos da CVM. Grandes volumes de compra podem indicar confiança na empresa.")
     
     if st.button("Analisar Movimentações de Insiders do Mês", use_container_width=True):
-        with st.spinner("Baixando e processando dados da CVM e YFinance... Isso pode levar alguns minutos na primeira vez."):
+        with st.spinner("Baixando e processando dados da CVM e YFinance... Isso pode levar alguns minutos."):
             dados_insiders = executar_analise_insiders()
         
         if dados_insiders:
             df_controladores, df_outros, ultimo_mes = dados_insiders
             st.subheader(f"Dados de {ultimo_mes.strftime('%B de %Y')}")
-
-            # Exibição lado a lado para Controladores
+            
+            # Exibição lado a lado
             if not df_controladores.empty:
                 st.write("#### Grupo: Controladores e Vinculados")
                 fig_vol_ctrl, fig_rel_ctrl = gerar_graficos_insiders_plotly(df_controladores)
                 col1_ctrl, col2_ctrl = st.columns(2)
-                with col1_ctrl:
-                    st.plotly_chart(fig_vol_ctrl, use_container_width=True)
-                with col2_ctrl:
-                    st.plotly_chart(fig_rel_ctrl, use_container_width=True)
+                with col1_ctrl: st.plotly_chart(fig_vol_ctrl, use_container_width=True)
+                with col2_ctrl: st.plotly_chart(fig_rel_ctrl, use_container_width=True)
             else:
                 st.warning("Não foram encontrados dados de movimentação para Controladores no último mês.")
             
             st.markdown("---")
-
-            # Exibição lado a lado para Demais Insiders
+            
             if not df_outros.empty:
                 st.write("#### Grupo: Demais Insiders (Diretores, Conselheiros, etc.)")
                 fig_vol_outros, fig_rel_outros = gerar_graficos_insiders_plotly(df_outros)
                 col1_outros, col2_outros = st.columns(2)
-                with col1_outros:
-                    st.plotly_chart(fig_vol_outros, use_container_width=True)
-                with col2_outros:
-                    st.plotly_chart(fig_rel_outros, use_container_width=True)
+                with col1_outros: st.plotly_chart(fig_vol_outros, use_container_width=True)
+                with col2_outros: st.plotly_chart(fig_rel_outros, use_container_width=True)
             else:
                 st.warning("Não foram encontrados dados de movimentação para Demais Insiders no último mês.")
         else:
@@ -779,23 +932,23 @@ with tab5:
 
     st.markdown("---")
 
-    # --- Seção 3: Indicador de Amplitude de Mercado (NOVO) ---
-    st.header("Indicador de Amplitude de Mercado (Market Breadth)")
+    # --- Seção 3: Indicador de Amplitude de Mercado ---
+    st.subheader("Raio-X do Mercado (Market Breadth)")
     st.info(
-        "Este indicador mostra a porcentagem de ações da B3 que estão sendo negociadas acima de sua Média Móvel de 200 dias (MMA 200). "
+        "Este indicador mostra a porcentagem de ações da B3 negociadas acima da Média Móvel de 200 dias. "
         "É uma ferramenta para medir a saúde interna do mercado.\n\n"
-        "- **Acima de 70%:** Pode indicar euforia ou condições de sobrecompra no mercado.\n"
-        "- **Abaixo de 30%:** Pode indicar pânico ou condições de sobrevenda, muitas vezes associadas a fundos de mercado."
+        "- **Acima de 70%:** Pode indicar euforia ou sobrecompra.\n"
+        "- **Abaixo de 30%:** Pode indicar pânico ou sobrevenda, geralmente associado a fundos de mercado."
     )
 
-    if st.button("Analisar Amplitude do Mercado (Pode ser lento na 1ª vez)", use_container_width=True):
+    if st.button("Analisar Amplitude do Mercado (Lento na 1ª vez)", use_container_width=True):
         with st.spinner("Executando análise de amplitude... Este processo é demorado, por favor aguarde."):
             lista_tickers = obter_tickers_cvm_amplitude()
             if lista_tickers:
                 precos = obter_precos_historicos_amplitude(lista_tickers)
                 if not precos.empty:
                     fig_amplitude = gerar_grafico_amplitude(precos)
-                    st.session_state.fig_amplitude = fig_amplitude # Salva no estado da sessão
+                    st.session_state.fig_amplitude = fig_amplitude
                 else:
                     st.session_state.fig_amplitude = None
                     st.error("Não foi possível gerar o gráfico de amplitude pois os dados de preços não foram baixados.")
@@ -803,6 +956,5 @@ with tab5:
                 st.session_state.fig_amplitude = None
                 st.error("Não foi possível gerar o gráfico de amplitude pois a lista de tickers não foi obtida.")
     
-    # Exibe o gráfico se ele já foi gerado e está no estado da sessão
     if 'fig_amplitude' in st.session_state and st.session_state.fig_amplitude is not None:
         st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
