@@ -753,7 +753,7 @@ elif pagina_selecionada == "Crédito Privado":
     st.markdown("---")
     st.info(
         "O IDEX-CDI é um índice de debêntures calculado pela JGP. O gráfico mostra o spread médio (prêmio acima do CDI) "
-        "exigido pelo mercado para comprar esses títulos. Spreads maiores indicam maior percepção de risco. "
+        "exigido pelo mercado para comprar esses títulos. IDEX Low Rated: Rating menor que AA"
         "Filtramos emissores que passaram por eventos de crédito relevantes para uma visão mais limpa da tendência geral."
     )
     df_idex = carregar_dados_idex()
