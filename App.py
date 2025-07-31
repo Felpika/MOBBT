@@ -58,7 +58,67 @@ def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra M
     fig = px.line(df_filtrado, x='Data Base', y=metrica, title=titulo, template='plotly_dark')
     fig.update_layout(title_x=0, yaxis_title=eixo_y, xaxis_title="Data")
     return fig
+# Adicione esta função nova ao seu código, de preferência no Bloco 1
 
+def gerar_grafico_ntnb_multiplos_vencimentos(df_ntnb_all, vencimentos, metrica):
+    """
+    Gera um gráfico comparativo para múltiplos vencimentos de NTN-Bs,
+    com filtro de tempo e zoom padrão de 5 anos.
+    """
+    fig = go.Figure()
+
+    if not vencimentos:
+        return fig.update_layout(
+            title_text="Selecione um ou mais vencimentos para visualizar",
+            template="plotly_dark",
+            title_x=0.5
+        )
+
+    for venc in vencimentos:
+        df_venc = df_ntnb_all[df_ntnb_all['Data Vencimento'] == venc].sort_values('Data Base')
+        if not df_venc.empty:
+            # Extrai o nome do título do primeiro registro (IPCA+ ou IPCA+ com Juros)
+            nome_base = df_venc['Tipo Titulo'].iloc[0].replace("Tesouro ", "")
+            fig.add_trace(go.Scatter(
+                x=df_venc['Data Base'],
+                y=df_venc[metrica],
+                mode='lines',
+                name=f'{nome_base} {venc.year}'
+            ))
+
+    titulo = f'Histórico da Taxa de Compra' if metrica == 'Taxa Compra Manha' else f'Histórico do Preço Unitário (PU)'
+    eixo_y = "Taxa de Compra (% a.a.)" if metrica == 'Taxa Compra Manha' else "Preço Unitário (R$)"
+    
+    fig.update_layout(
+        title_text=titulo, title_x=0,
+        yaxis_title=eixo_y,
+        xaxis_title="Data",
+        template='plotly_dark',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+
+    # Adiciona o seletor de range e define o zoom padrão para 5 anos
+    fig.update_xaxes(
+        rangeselector=dict(
+            buttons=list([
+                dict(count=1, label="1a", step="year", stepmode="backward"),
+                dict(count=3, label="3a", step="year", stepmode="backward"),
+                dict(count=5, label="5a", step="year", stepmode="backward"),
+                dict(count=1, label="YTD", step="year", stepmode="todate"),
+                dict(step="all", label="Tudo")
+            ]),
+            bgcolor="#333952",
+            font=dict(color="white")
+        )
+    )
+    
+    # Define a visualização inicial padrão para os últimos 5 anos
+    if not df_ntnb_all.empty:
+        end_date = df_ntnb_all['Data Base'].max()
+        start_date = end_date - pd.DateOffset(years=5)
+        fig.update_xaxes(range=[start_date, end_date])
+
+    return fig
 @st.cache_data
 def calcular_inflacao_implicita(df):
     # ... (código existente inalterado)
@@ -715,24 +775,61 @@ if pagina_selecionada == "NTN-Bs":
     st.markdown("---")
 
     if not df_tesouro.empty:
-        # Layout do dashboard... (código inalterado)
-        top_left, top_right = st.columns((1, 1))
-        with top_left:
-            st.subheader("Análise Histórica Individual")
-            st.info("Selecione um título para ver a variação da sua taxa ou preço ao longo do tempo.")
-            tipos_ntnb = ['Tesouro IPCA+', 'Tesouro IPCA+ com Juros Semestrais']
-            df_ntnb_all = df_tesouro[df_tesouro['Tipo Titulo'].isin(tipos_ntnb)]
-            vencimentos_disponiveis = sorted(df_ntnb_all['Data Vencimento'].unique())
-            vencimento_selecionado = st.selectbox("Selecione o Vencimento da NTN-B", vencimentos_disponiveis, format_func=lambda dt: pd.to_datetime(dt).strftime('%d/%m/%Y'), key='venc_ntnb')
-            tipo_selecionado = df_ntnb_all[df_ntnb_all['Data Vencimento'] == vencimento_selecionado]['Tipo Titulo'].iloc[0]
-            metrica_escolhida = st.radio("Analisar por:", ('Taxa de Compra', 'Preço Unitário (PU)'), horizontal=True, key='metrica_ntnb')
-            coluna_metrica = 'Taxa Compra Manha' if metrica_escolhida == 'Taxa de Compra' else 'PU Compra Manha'
-            if vencimento_selecionado:
-                fig_hist_ntnb = gerar_grafico_historico_tesouro(df_tesouro, tipo_selecionado, pd.to_datetime(vencimento_selecionado), metrica=coluna_metrica)
-                st.plotly_chart(fig_hist_ntnb, use_container_width=True)
-        with top_right:
+        # --- PAINEL DE ANÁLISE HISTÓRICA (ATUALIZADO) ---
+        st.subheader("Análise Histórica Comparativa")
+        st.info("Selecione um ou mais vencimentos para comparar a variação da taxa ou preço ao longo do tempo.")
+        
+        # Filtra apenas os títulos NTN-B
+        tipos_ntnb = ['Tesouro IPCA+', 'Tesouro IPCA+ com Juros Semestrais']
+        df_ntnb_all = df_tesouro[df_tesouro['Tipo Titulo'].isin(tipos_ntnb)]
+        
+        # Prepara as opções para o multiselect
+        vencimentos_disponiveis = sorted(df_ntnb_all['Data Vencimento'].unique())
+        
+        # Encontra os vencimentos padrão (2030, 2035, etc.) que realmente existem nos dados
+        anos_padrao = [2030, 2035, 2040, 2045, 2060]
+        vencimentos_padrao = [v for v in vencimentos_disponiveis if pd.to_datetime(v).year in anos_padrao]
+
+        # Cria os widgets de filtro
+        col1, col2 = st.columns([0.8, 0.2])
+        with col1:
+            vencimentos_selecionados = st.multiselect(
+                "Selecione os Vencimentos",
+                options=vencimentos_disponiveis,
+                default=vencimentos_padrao,
+                format_func=lambda dt: pd.to_datetime(dt).strftime('%d/%m/%Y'),
+                key='multi_venc_ntnb'
+            )
+        with col2:
+             metrica_escolhida = st.radio(
+                "Analisar por:", ('Taxa', 'PU'), # Nomes mais curtos para caber
+                horizontal=True, key='metrica_ntnb',
+                help="Analisar por Taxa de Compra ou Preço Unitário (PU)"
+            )
+        coluna_metrica = 'Taxa Compra Manha' if metrica_escolhida == 'Taxa' else 'PU Compra Manha'
+
+        # Gera e exibe o gráfico
+        fig_hist_ntnb = gerar_grafico_ntnb_multiplos_vencimentos(
+            df_ntnb_all, vencimentos_selecionados, metrica=coluna_metrica
+        )
+        st.plotly_chart(fig_hist_ntnb, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # --- DEMAIS GRÁFICOS DO DASHBOARD (sem alteração) ---
+        bottom_left, bottom_right = st.columns((1, 1))
+        with bottom_left:
+            st.subheader("Inflação Implícita (Breakeven)")
+            df_breakeven = calcular_inflacao_implicita(df_tesouro)
+            if not df_breakeven.empty:
+                fig_breakeven = px.bar(df_breakeven, y='Inflação Implícita (% a.a.)', text_auto='.2f', title='Inflação Implícita por Vencimento').update_traces(textposition='outside')
+                fig_breakeven.update_layout(title_x=0, template='plotly_dark')
+                st.plotly_chart(fig_breakeven, use_container_width=True)
+            else:
+                st.warning("Não há pares de títulos para calcular a inflação implícita hoje.")
+        with bottom_right:
             st.subheader("Spread de Juros: Brasil vs. EUA")
-            st.info("Diferença entre a taxa da NTN-B de ~10 anos e o título americano de 10 anos. Uma medida da percepção de risco do Brasil.")
+            st.info("Diferença entre a taxa da NTN-B de ~10 anos e o título americano de 10 anos.")
             FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
             df_fred_br_tab = carregar_dados_fred(FRED_API_KEY, {'DGS10': 'Juros 10 Anos EUA'})
             if not df_fred_br_tab.empty:
@@ -744,25 +841,9 @@ if pagina_selecionada == "NTN-Bs":
                     st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
             else:
                 st.warning("Não foi possível carregar os dados de juros dos EUA.")
-        st.markdown("<br>", unsafe_allow_html=True)
-        bottom_left, bottom_right = st.columns((1, 1))
-        with bottom_left:
-            st.subheader("Inflação Implícita (Breakeven)")
-            st.info("A expectativa do mercado para a inflação futura, derivada da diferença entre as taxas dos títulos prefixados e os atrelados à inflação (NTN-Bs).")
-            df_breakeven = calcular_inflacao_implicita(df_tesouro)
-            if not df_breakeven.empty:
-                fig_breakeven = px.bar(df_breakeven, y='Inflação Implícita (% a.a.)', text_auto='.2f', title='Inflação Implícita por Vencimento').update_traces(textposition='outside')
-                fig_breakeven.update_layout(title_x=0, template='plotly_dark')
-                st.plotly_chart(fig_breakeven, use_container_width=True)
-            else:
-                st.warning("Não há pares de títulos para calcular a inflação implícita hoje.")
-        with bottom_right:
-            st.subheader("Spread da Curva de Juros (NTN-Fs)")
-            st.info("A diferença entre as taxas de um título prefixado longo e um curto. Embora use NTN-Fs, é um indicador importante do sentimento geral da curva de juros.")
-            fig_spread_juros = gerar_grafico_spread_juros(df_tesouro)
-            st.plotly_chart(fig_spread_juros, use_container_width=True)
     else:
         st.warning("Não foi possível carregar os dados do Tesouro Direto para exibir esta página.")
+
 
 elif pagina_selecionada == "Curva de Juros":
     st.header("Estrutura a Termo da Taxa de Juros (ETTJ)")
