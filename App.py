@@ -565,9 +565,6 @@ def gerar_grafico_amplitude(precos_fechamento):
     
     return fig
 
-# --- FIM DO NOVO BLOCO ---
-# --- FIM DO BLOCO INDICADOR DE AMPLITUDE ---
-
 # --- BLOCO 6: LÓGICA DO INDICADOR IDEX JGP (NOVO) ---
 @st.cache_data(ttl=3600*4) # Cache de 4 horas
 def carregar_dados_idex():
@@ -622,6 +619,12 @@ def gerar_grafico_idex(df_idex):
         title='Histórico do Spread Médio Ponderado: IDEX JGP',
         template='plotly_dark'
     )
+
+    # --- INÍCIO DA ALTERAÇÃO ---
+    # Formata os rótulos do eixo Y e do 'hover' para exibir como porcentagem com 2 casas decimais
+    fig.update_yaxes(tickformat=".2%")
+    fig.update_traces(hovertemplate='%{y:.2%}')
+    # --- FIM DA ALTERAÇÃO ---
 
     fig.update_layout(
         title_x=0,
