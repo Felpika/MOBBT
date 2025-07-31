@@ -477,7 +477,7 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     fig.update_layout(title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}', template='plotly_dark', title_x=0, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
-# --- INÍCIO DO NOVO BLOCO: LÓGICA DO INDICADOR DE AMPLITUDE ---
+# --- INÍCIO DO BLOCO: LÓGICA DO INDICADOR DE AMPLITUDE (ATUALIZADO) ---
 
 @st.cache_data(ttl=86400) # Cache de 1 dia
 def obter_tickers_cvm_amplitude():
@@ -486,18 +486,13 @@ def obter_tickers_cvm_amplitude():
     ano = datetime.now().year
     url = f'https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ano}.zip'
     nome_arquivo_csv = f'fca_cia_aberta_valor_mobiliario_{ano}.csv'
-
     try:
         response = requests.get(url, stream=True)
         response.raise_for_status()
         with zipfile.ZipFile(io.BytesIO(response.content)) as z:
             with z.open(nome_arquivo_csv) as f:
                 df = pd.read_csv(f, sep=';', encoding='ISO-8859-1', dtype={'Valor_Mobiliario': 'category', 'Mercado': 'category'})
-
-        df_filtrado = df[
-            (df['Valor_Mobiliario'].isin(['Ações Ordinárias', 'Ações Preferenciais'])) &
-            (df['Mercado'] == 'Bolsa')
-        ]
+        df_filtrado = df[(df['Valor_Mobiliario'].isin(['Ações Ordinárias', 'Ações Preferenciais'])) & (df['Mercado'] == 'Bolsa')]
         tickers = df_filtrado['Codigo_Negociacao'].dropna().unique().tolist()
         st.success(f"{len(tickers)} tickers encontrados na CVM.")
         return tickers
@@ -512,9 +507,7 @@ def obter_precos_historicos_amplitude(tickers, anos_historico=15):
     tickers_sa = [ticker + ".SA" for ticker in tickers]
     data_final = datetime.now()
     data_inicial = data_final - timedelta(days=anos_historico*365)
-    
     dados_completos = yf.download(tickers=tickers_sa, start=data_inicial, end=data_final, auto_adjust=True, progress=False)
-    
     if not dados_completos.empty:
         precos_fechamento = dados_completos['Close'].astype('float32')
         st.success("Download dos dados de preços concluído.")
@@ -523,49 +516,66 @@ def obter_precos_historicos_amplitude(tickers, anos_historico=15):
         st.error("ERRO: Falha no download dos dados de preços.")
         return pd.DataFrame()
 
-def gerar_grafico_amplitude(precos_fechamento):
-    """Calcula o indicador de amplitude e gera um gráfico Plotly."""
+@st.cache_data(ttl=86400) # Cache de 1 dia
+def calcular_dados_amplitude(precos_fechamento):
+    """Calcula o indicador de amplitude e retorna a série de dados a partir de 2014."""
     if precos_fechamento.empty:
-        return None
-
+        return pd.Series()
     st.info("Calculando o indicador de amplitude...")
     mma200 = precos_fechamento.rolling(window=200).mean()
     acima_da_media = precos_fechamento > mma200
-    
-    # Cálculo robusto que ignora NaNs tanto no numerador quanto no denominador
     percentual_acima_media = (acima_da_media.sum(axis=1) / precos_fechamento.notna().sum(axis=1)) * 100
     percentual_acima_media.dropna(inplace=True)
+    
+    # Filtra os dados para começar em 2014
+    dados_filtrados = percentual_acima_media[percentual_acima_media.index >= '2014-01-01']
+    return dados_filtrados
 
-    st.info("Gerando o gráfico de amplitude...")
+def gerar_grafico_amplitude(dados_amplitude):
+    """Gera o gráfico de linha do indicador de amplitude."""
+    if dados_amplitude.empty:
+        return None
+    st.info("Gerando o gráfico de linha...")
     fig = go.Figure()
-
-    # Adicionando as linhas de referência (sobrecompra, sobrevenda)
-    fig.add_hline(y=70, line_color='red', line_dash='dash', annotation_text='Sobrecompra (70%)', annotation_position="bottom right")
-    fig.add_hline(y=50, line_color='gray', line_dash='dash', annotation_text='Linha Central (50%)', annotation_position="bottom right")
-    fig.add_hline(y=30, line_color='green', line_dash='dash', annotation_text='Sobrevenda (30%)', annotation_position="bottom right")
-
-    # Adicionando a linha principal do indicador
-    fig.add_trace(go.Scatter(
-        x=percentual_acima_media.index,
-        y=percentual_acima_media,
-        mode='lines',
-        name='% Acima da MMA 200',
-        line=dict(color='#636EFA', width=2)
-    ))
-
-    # Layout do gráfico
+    fig.add_hline(y=70, line_color='red', line_dash='dash', annotation_text='Sobrecompra (70%)', annotation_position="bottom left")
+    fig.add_hline(y=50, line_color='gray', line_dash='dash', annotation_text='Linha Central (50%)', annotation_position="bottom left")
+    fig.add_hline(y=30, line_color='green', line_dash='dash', annotation_text='Sobrevenda (30%)', annotation_position="bottom left")
+    fig.add_trace(go.Scatter(x=dados_amplitude.index, y=dados_amplitude, mode='lines', name='% Acima da MMA 200', line=dict(color='#636EFA', width=2)))
     fig.update_layout(
-        title_text='Indicador de Amplitude B3 (% de Ações Acima da MMA de 200 Dias)',
-        title_x=0,
-        yaxis_title='Percentual de Ativos (%)',
-        xaxis_title='Data',
-        template='plotly_dark',
-        yaxis_range=[0, 100],
+        title_text='Raio-X do Mercado (desde 2014)', title_x=0,
+        yaxis_title='Percentual de Ativos (%)', xaxis_title='Data',
+        template='plotly_dark', yaxis_range=[0, 100],
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-    
     return fig
 
+def gerar_grafico_distribuicao_amplitude(dados_amplitude):
+    """Gera um histograma da distribuição dos valores do indicador."""
+    if dados_amplitude.empty:
+        return None
+    st.info("Gerando o gráfico de distribuição...")
+    valor_atual = dados_amplitude.iloc[-1]
+    fig = px.histogram(
+        dados_amplitude, nbins=50, 
+        title='Distribuição Histórica do Indicador',
+        template='plotly_dark'
+    )
+    fig.update_layout(
+        showlegend=False, title_x=0,
+        xaxis_title="Percentual de Ações Acima da MMA 200",
+        yaxis_title="Frequência (Dias)"
+    )
+    # Adiciona linha vertical para indicar o valor atual
+    fig.add_vline(
+        x=valor_atual, line_color="#fde047", line_dash="dash",
+        annotation_text=f" Hoje: {valor_atual:.1f}% ",
+        annotation_position="top left",
+        annotation_font=dict(color="#fde047", size=14),
+        annotation_bgcolor="rgba(0,0,0,0.7)"
+    )
+    return fig
+
+# --- FIM DO BLOCO ATUALIZADO ---
 # --- BLOCO 6: LÓGICA DO INDICADOR IDEX JGP (NOVO) ---
 @st.cache_data(ttl=3600*4) # Cache de 4 horas
 def carregar_dados_idex():
@@ -894,7 +904,7 @@ elif pagina_selecionada == "Ações BR":
         else:
             st.error("Falha ao processar dados de insiders.")
     st.markdown("---")
-    # Seção 3: Indicador de Amplitude de Mercado
+    # --- Seção 3: Indicador de Amplitude de Mercado (ATUALIZADO) ---
     st.subheader("Raio-X do Mercado (Market Breadth)")
     st.info(
         "Este indicador mostra a porcentagem de ações da B3 negociadas acima da Média Móvel de 200 dias. "
@@ -902,19 +912,33 @@ elif pagina_selecionada == "Ações BR":
         "- **Acima de 70%:** Pode indicar euforia ou sobrecompra.\n"
         "- **Abaixo de 30%:** Pode indicar pânico ou sobrevenda, geralmente associado a fundos de mercado."
     )
+
     if st.button("Analisar Amplitude do Mercado (Lento na 1ª vez)", use_container_width=True):
-        with st.spinner("Executando análise de amplitude... Este processo é demorado, por favor aguarde."):
+        with st.spinner("Executando análise de amplitude completa... Por favor, aguarde."):
             lista_tickers = obter_tickers_cvm_amplitude()
             if lista_tickers:
                 precos = obter_precos_historicos_amplitude(lista_tickers)
-                if not precos.empty:
-                    fig_amplitude = gerar_grafico_amplitude(precos)
+                dados_amplitude = calcular_dados_amplitude(precos) # Calcula os dados
+                
+                if not dados_amplitude.empty:
+                    # Gera os dois gráficos
+                    fig_amplitude = gerar_grafico_amplitude(dados_amplitude)
+                    fig_distribuicao = gerar_grafico_distribuicao_amplitude(dados_amplitude)
+                    # Salva ambos no estado da sessão
                     st.session_state.fig_amplitude = fig_amplitude
+                    st.session_state.fig_dist_amplitude = fig_distribuicao
                 else:
                     st.session_state.fig_amplitude = None
-                    st.error("Não foi possível gerar o gráfico de amplitude pois os dados de preços não foram baixados.")
+                    st.session_state.fig_dist_amplitude = None
+                    st.error("Não foi possível gerar os gráficos pois os dados de amplitude não puderam ser calculados.")
             else:
                 st.session_state.fig_amplitude = None
-                st.error("Não foi possível gerar o gráfico de amplitude pois a lista de tickers não foi obtida.")
+                st.session_state.fig_dist_amplitude = None
+    
+    # Exibe os gráficos lado a lado se eles existirem no estado da sessão
     if 'fig_amplitude' in st.session_state and st.session_state.fig_amplitude is not None:
-        st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
+        col1, col2 = st.columns([0.6, 0.4]) # Dando mais espaço para o gráfico de linha
+        with col1:
+            st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
+        with col2:
+            st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
