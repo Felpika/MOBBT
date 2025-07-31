@@ -681,7 +681,7 @@ with st.sidebar:
 
 # --- Roteamento de Páginas (com nomes atualizados) ---
 
-if pagina_selecionada == "NTN-Bs ✨":
+if pagina_selecionada == "NTN-Bs":
     st.header("Dashboard de Análise de NTN-Bs (Tesouro IPCA+)")
     st.markdown("---")
 
