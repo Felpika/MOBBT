@@ -8,3 +8,4 @@ python-bcb
 fredapi
 textblob
 openpyxl
+streamlit-option-menu
