@@ -531,15 +531,24 @@ def calcular_dados_amplitude(precos_fechamento):
     dados_filtrados = percentual_acima_media[percentual_acima_media.index >= '2014-01-01']
     return dados_filtrados
 
-def gerar_grafico_amplitude(dados_amplitude):
-    """Gera o gráfico de linha do indicador de amplitude."""
+def gerar_grafico_amplitude(dados_amplitude, mediana):
+    """Gera o gráfico de linha do indicador de amplitude, incluindo a linha da mediana."""
     if dados_amplitude.empty:
         return None
     st.info("Gerando o gráfico de linha...")
     fig = go.Figure()
-    fig.add_hline(y=70, line_color='red', line_dash='dash', annotation_text='Sobrecompra (70%)', annotation_position="bottom left")
-    fig.add_hline(y=50, line_color='gray', line_dash='dash', annotation_text='Linha Central (50%)', annotation_position="bottom left")
-    fig.add_hline(y=30, line_color='green', line_dash='dash', annotation_text='Sobrevenda (30%)', annotation_position="bottom left")
+    fig.add_hline(y=70, line_color='red', line_dash='dash', annotation_text='Sobrecompra (70%)', annotation_position="bottom right")
+    fig.add_hline(y=50, line_color='gray', line_dash='dash', annotation_text='Linha Central (50%)', annotation_position="bottom right")
+    
+    # --- LINHA DA MEDIANA ADICIONADA AQUI ---
+    fig.add_hline(
+        y=mediana, line_color="#a855f7", line_dash="dot",
+        annotation_text=f"Mediana ({mediana:.1f}%)",
+        annotation_position="bottom left",
+        annotation_font=dict(color="#a855f7")
+    )
+    
+    fig.add_hline(y=30, line_color='green', line_dash='dash', annotation_text='Sobrevenda (30%)', annotation_position="bottom right")
     fig.add_trace(go.Scatter(x=dados_amplitude.index, y=dados_amplitude, mode='lines', name='% Acima da MMA 200', line=dict(color='#636EFA', width=2)))
     fig.update_layout(
         title_text='Raio-X do Mercado (desde 2014)', title_x=0,
@@ -549,8 +558,8 @@ def gerar_grafico_amplitude(dados_amplitude):
     )
     return fig
 
-def gerar_grafico_distribuicao_amplitude(dados_amplitude):
-    """Gera um histograma da distribuição dos valores do indicador."""
+def gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana):
+    """Gera um histograma da distribuição dos valores do indicador, incluindo a mediana."""
     if dados_amplitude.empty:
         return None
     st.info("Gerando o gráfico de distribuição...")
@@ -565,7 +574,17 @@ def gerar_grafico_distribuicao_amplitude(dados_amplitude):
         xaxis_title="Percentual de Ações Acima da MMA 200",
         yaxis_title="Frequência (Dias)"
     )
-    # Adiciona linha vertical para indicar o valor atual
+
+    # --- LINHA DA MEDIANA ADICIONADA AQUI ---
+    fig.add_vline(
+        x=mediana, line_color="#a855f7", line_dash="dot",
+        annotation_text=f" Mediana: {mediana:.1f}% ",
+        annotation_position="top right",
+        annotation_font=dict(color="#a855f7", size=14),
+        annotation_bgcolor="rgba(0,0,0,0.7)"
+    )
+    
+    # Linha vertical para indicar o valor atual
     fig.add_vline(
         x=valor_atual, line_color="#fde047", line_dash="dash",
         annotation_text=f" Hoje: {valor_atual:.1f}% ",
@@ -903,8 +922,12 @@ elif pagina_selecionada == "Ações BR":
                 st.warning("Não foram encontrados dados de movimentação para Demais Insiders no último mês.")
         else:
             st.error("Falha ao processar dados de insiders.")
+    # elif pagina_selecionada == "Ações BR":
+# ... (código anterior da página de Ações BR) ...
+
     st.markdown("---")
-    # --- Seção 3: Indicador de Amplitude de Mercado (ATUALIZADO) ---
+
+    # --- Seção 3: Indicador de Amplitude de Mercado (ATUALIZADO COM MEDIANA) ---
     st.subheader("Raio-X do Mercado (Market Breadth)")
     st.info(
         "Este indicador mostra a porcentagem de ações da B3 negociadas acima da Média Móvel de 200 dias. "
@@ -918,13 +941,18 @@ elif pagina_selecionada == "Ações BR":
             lista_tickers = obter_tickers_cvm_amplitude()
             if lista_tickers:
                 precos = obter_precos_historicos_amplitude(lista_tickers)
-                dados_amplitude = calcular_dados_amplitude(precos) # Calcula os dados
+                dados_amplitude = calcular_dados_amplitude(precos)
                 
                 if not dados_amplitude.empty:
-                    # Gera os dois gráficos
-                    fig_amplitude = gerar_grafico_amplitude(dados_amplitude)
-                    fig_distribuicao = gerar_grafico_distribuicao_amplitude(dados_amplitude)
-                    # Salva ambos no estado da sessão
+                    # Calcula e salva a mediana
+                    mediana_amplitude = dados_amplitude.median()
+                    st.session_state.mediana_amplitude = mediana_amplitude
+                    st.session_state.dados_amplitude = dados_amplitude # Salva os dados para pegar o valor atual
+
+                    # Gera os dois gráficos, passando a mediana
+                    fig_amplitude = gerar_grafico_amplitude(dados_amplitude, mediana_amplitude)
+                    fig_distribuicao = gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana_amplitude)
+                    
                     st.session_state.fig_amplitude = fig_amplitude
                     st.session_state.fig_dist_amplitude = fig_distribuicao
                 else:
@@ -935,9 +963,19 @@ elif pagina_selecionada == "Ações BR":
                 st.session_state.fig_amplitude = None
                 st.session_state.fig_dist_amplitude = None
     
-    # Exibe os gráficos lado a lado se eles existirem no estado da sessão
+    # Exibe as métricas e os gráficos se eles existirem no estado da sessão
     if 'fig_amplitude' in st.session_state and st.session_state.fig_amplitude is not None:
-        col1, col2 = st.columns([0.6, 0.4]) # Dando mais espaço para o gráfico de linha
+        st.markdown("---")
+        # Exibe as métricas de destaque
+        col_metrica1, col_metrica2, _ = st.columns([0.3, 0.3, 0.4])
+        valor_atual = st.session_state.dados_amplitude.iloc[-1]
+        mediana_valor = st.session_state.mediana_amplitude
+        col_metrica1.metric("Valor Atual do Indicador", f"{valor_atual:.1f}%")
+        col_metrica2.metric("Mediana Histórica (desde 2014)", f"{mediana_valor:.1f}%")
+        st.markdown("---")
+
+        # Exibe os gráficos lado a lado
+        col1, col2 = st.columns([0.6, 0.4])
         with col1:
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
