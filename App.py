@@ -659,74 +659,52 @@ def gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana):
 @st.cache_data(ttl=3600*4) # Cache de 4 horas
 def carregar_dados_idex():
     """
-    Baixa e processa os dados do IDEX JGP para os índices Geral, Low Rated e INFRA.
-    (Versão Definitiva Corrigida com base na planilha)
+    Baixa e processa os dados do IDEX JGP para os índices Geral e Low Rated.
+    (Versão estável original)
     """
     st.info("Carregando dados do IDEX JGP... (Cache de 4h)")
-    
-    # Dicionário para gerenciar as fontes de dados
-    fontes_idex = {
-        "IDEX Geral (Filtrado)": "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_geral_datafile.xlsx",
-        "IDEX Low Rated (Filtrado)": "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_low_rated_datafile.xlsx",
-        "IDEX INFRA (Filtrado)": "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_infra_geral_datafile.xlsx"
-    }
-    
+    url_geral = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_geral_datafile.xlsx"
+    url_low_rated = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_low_rated_datafile.xlsx"
     emissores_para_remover = ['AMERICANAS SA', 'Light - Servicos de Eletricidade', 'Aeris', 'Viveo']
-    lista_dfs = []
 
-    # Itera sobre cada fonte, processando uma de cada vez
-    for nome_indice, url in fontes_idex.items():
-        try:
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            df = pd.read_excel(io.BytesIO(response.content), sheet_name='Detalhado')
-            df.columns = df.columns.str.strip()
+    def _processar_url(url):
+        response = requests.get(url)
+        response.raise_for_status()
+        df = pd.read_excel(io.BytesIO(response.content), sheet_name='Detalhado')
+        df.columns = df.columns.str.strip()
+        df_filtrado = df[~df['Emissor'].isin(emissores_para_remover)].copy()
+        df_filtrado['Data'] = pd.to_datetime(df_filtrado['Data'])
+        df_filtrado['weighted_spread'] = df_filtrado['Peso no índice (%)'] * df_filtrado['Spread de compra (%)']
+        
+        daily_spread = df_filtrado.groupby('Data').apply(
+            lambda x: x['weighted_spread'].sum() / x['Peso no índice (%)'].sum() if x['Peso no índice (%)'].sum() != 0 else 0
+        ).reset_index(name='spread')
+        
+        return daily_spread.set_index('Data')
 
-            # Define o nome da coluna de spread correto para cada tipo de arquivo
-            spread_col_name = 'MID spread (Bps/NTNB)' if 'idex_infra' in url else 'Spread de compra (%)'
+    try:
+        spread_geral = _processar_url(url_geral)
+        spread_low_rated = _processar_url(url_low_rated)
+        
+        df_final = pd.merge(spread_geral, spread_low_rated, on='Data', how='outer', suffixes=('_geral', '_low_rated'))
+        df_final.rename(columns={'spread_geral': 'IDEX Geral (Filtrado)', 'spread_low_rated': 'IDEX Low Rated (Filtrado)'}, inplace=True)
+        return df_final.sort_index()
 
-            if spread_col_name not in df.columns:
-                st.warning(f"AVISO: A coluna '{spread_col_name}' não foi encontrada para o índice '{nome_indice}'. Este índice não será exibido.")
-                continue
-
-            # Continua com o processamento normal
-            df_filtrado = df[~df['Emissor'].isin(emissores_para_remover)].copy()
-            df_filtrado['Data'] = pd.to_datetime(df_filtrado['Data'])
-            df_filtrado['weighted_spread'] = df_filtrado['Peso no índice (%)'] * df_filtrado[spread_col_name]
-            
-            daily_spread = df_filtrado.groupby('Data').apply(
-                lambda x: x['weighted_spread'].sum() / x['Peso no índice (%)'].sum() if x['Peso no índice (%)'].sum() != 0 else 0
-            ).reset_index(name=nome_indice) # Renomeia a coluna diretamente com o nome do índice
-            
-            lista_dfs.append(daily_spread.set_index('Data'))
-
-        except Exception as e:
-            st.warning(f"Falha ao carregar ou processar o índice '{nome_indice}': {e}")
-            continue
-
-    # Se a lista de dataframes processados com sucesso estiver vazia, retorna erro
-    if not lista_dfs:
-        st.error("Nenhum dado do IDEX pôde ser carregado com sucesso.")
+    except Exception as e:
+        st.error(f"Erro ao carregar dados do IDEX JGP: {e}")
         return pd.DataFrame()
-
-    # Junta todos os dataframes que foram processados com sucesso
-    df_final = pd.concat(lista_dfs, axis=1, join='outer')
-    
-    return df_final.sort_index()
 
 def gerar_grafico_idex(df_idex):
     """
-    Gera um gráfico Plotly comparando os spreads dos índices IDEX.
+    Gera um gráfico Plotly comparando os spreads do IDEX Geral e Low Rated.
+    (Versão estável original)
     """
     if df_idex.empty:
         return go.Figure().update_layout(title_text="Não foi possível gerar o gráfico do IDEX.")
 
-    # Lista de colunas a serem plotadas
-    colunas_plot = [col for col in ['IDEX Geral (Filtrado)', 'IDEX Low Rated (Filtrado)', 'IDEX INFRA (Filtrado)'] if col in df_idex.columns]
-
     fig = px.line(
         df_idex,
-        y=colunas_plot, # PLOTA TODAS AS COLUNAS PRESENTES
+        y=['IDEX Geral (Filtrado)', 'IDEX Low Rated (Filtrado)'],
         title='Histórico do Spread Médio Ponderado: IDEX JGP',
         template='plotly_dark'
     )
@@ -880,19 +858,15 @@ elif pagina_selecionada == "Crédito Privado":
     st.markdown("---")
     st.info(
         "O IDEX-CDI é um índice de debêntures calculado pela JGP. O gráfico mostra o spread médio (prêmio acima do CDI) "
-        "exigido pelo mercado para comprar esses títulos. \n\n"
-        "- **IDEX INFRA:** Debêntures incentivadas de projetos de infraestrutura. \n"
-        "- **IDEX Low Rated:** Títulos com rating menor que AA (maior risco). \n\n"
-        "Filtramos emissores que passaram por eventos de crédito relevantes (distress) para uma visão mais limpa da tendência geral."
+        "exigido pelo mercado para comprar esses títulos. Spreads maiores indicam maior percepção de risco. "
+        "Filtramos emissores que passaram por eventos de crédito relevantes (Americanas, Light, etc.) para uma visão mais limpa da tendência geral."
     )
-    
     df_idex = carregar_dados_idex()
     if not df_idex.empty:
         fig_idex = gerar_grafico_idex(df_idex)
         st.plotly_chart(fig_idex, use_container_width=True)
     else:
         st.warning("Não foi possível carregar os dados do IDEX para exibição.")
-
 
 elif pagina_selecionada == "Econômicos BR":
     st.header("Monitor de Indicadores Econômicos Nacionais")
@@ -1082,6 +1056,7 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
 
