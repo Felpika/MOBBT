@@ -683,7 +683,7 @@ def carregar_dados_idex():
             df.columns = df.columns.str.strip()
 
             # Define o nome da coluna de spread correto para cada tipo de arquivo
-            spread_col_name = 'Spread (%)' if 'idex_infra' in url else 'Spread de compra (%)'
+            spread_col_name = 'MID spread (Bps/NTNB)' if 'idex_infra' in url else 'Spread de compra (%)'
 
             if spread_col_name not in df.columns:
                 st.warning(f"AVISO: A coluna '{spread_col_name}' não foi encontrada para o índice '{nome_indice}'. Este índice não será exibido.")
@@ -1082,6 +1082,7 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
 
