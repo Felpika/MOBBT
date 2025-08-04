@@ -693,6 +693,64 @@ def carregar_dados_idex():
     except Exception as e:
         st.error(f"Erro ao carregar dados do IDEX JGP: {e}")
         return pd.DataFrame()
+# --- INÍCIO DO NOVO BLOCO DE CÓDIGO (PARA O BLOCO 6) ---
+
+@st.cache_data(ttl=3600*4) # Cache de 4 horas
+def carregar_dados_idex_infra():
+    """
+    Baixa e processa os dados do IDEX INFRA JGP.
+    """
+    st.info("Carregando dados do IDEX INFRA... (Cache de 4h)")
+    url_infra = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_infra_geral_datafile.xlsx"
+    
+    try:
+        response = requests.get(url_infra)
+        response.raise_for_status()
+        
+        # Lê a planilha 'Detalhado'
+        df = pd.read_excel(io.BytesIO(response.content), sheet_name='Detalhado')
+        df.columns = df.columns.str.strip()
+        
+        # Converte a data e calcula o spread ponderado
+        df['Data'] = pd.to_datetime(df['Data'])
+        df['weighted_spread'] = df['Peso no índice (%)'] * df['MID spread (Bps/NTNB)']
+        
+        # Agrupa por data para calcular o spread médio diário
+        daily_spread = df.groupby('Data').apply(
+            lambda x: x['weighted_spread'].sum() / x['Peso no índice (%)'].sum() if x['Peso no índice (%)'].sum() != 0 else 0
+        ).reset_index(name='spread_bps_ntnb')
+        
+        return daily_spread.set_index('Data').sort_index()
+
+    except Exception as e:
+        st.error(f"Erro ao carregar dados do IDEX INFRA: {e}")
+        return pd.DataFrame()
+
+def gerar_grafico_idex_infra(df_idex_infra):
+    """
+    Gera um gráfico Plotly para o spread do IDEX INFRA.
+    """
+    if df_idex_infra.empty:
+        return go.Figure().update_layout(title_text="Não foi possível gerar o gráfico do IDEX INFRA.")
+
+    fig = px.line(
+        df_idex_infra,
+        y='spread_bps_ntnb',
+        title='Histórico do Spread Médio Ponderado: IDEX INFRA',
+        template='plotly_dark'
+    )
+    
+    # Atualiza os eixos e a legenda
+    fig.update_layout(
+        title_x=0,
+        yaxis_title='Spread Médio (Bps sobre NTNB)',
+        xaxis_title='Data',
+        showlegend=False
+    )
+    return fig
+
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---
+
 
 def gerar_grafico_idex(df_idex):
     """
@@ -853,20 +911,37 @@ elif pagina_selecionada == "Curva de Juros":
     else:
         st.warning("Não foi possível carregar os dados do Tesouro Direto.")
 
+# --- INÍCIO DA SEÇÃO MODIFICADA ---
+
 elif pagina_selecionada == "Crédito Privado":
-    st.header("IDEX JGP - Indicador de Crédito Privado")
-    st.markdown("---")
+    # --- GRÁFICO 1: IDEX-CDI (CÓDIGO ORIGINAL) ---
+    st.header("IDEX JGP - Indicador de Crédito Privado (Spread/CDI)")
     st.info(
-        "O IDEX-CDI é um índice de debêntures calculado pela JGP. O gráfico mostra o spread médio (prêmio acima do CDI) "
-        "exigido pelo mercado para comprar esses títulos. Spreads maiores indicam maior percepção de risco. "
-        "Filtramos emissores que passaram por eventos de crédito relevantes (Americanas, Light, etc.) para uma visão mais limpa da tendência geral."
+        "O IDEX-CDI mostra o spread médio (prêmio acima do CDI) exigido pelo mercado para comprar debêntures. "
+        "Spreads maiores indicam maior percepção de risco. Filtramos emissores que passaram por eventos de crédito "
+        "relevantes (Americanas, Light, etc.) para uma visão mais limpa da tendência."
     )
     df_idex = carregar_dados_idex()
     if not df_idex.empty:
         fig_idex = gerar_grafico_idex(df_idex)
         st.plotly_chart(fig_idex, use_container_width=True)
     else:
-        st.warning("Não foi possível carregar os dados do IDEX para exibição.")
+        st.warning("Não foi possível carregar os dados do IDEX-CDI para exibição.")
+
+    st.markdown("---")
+
+    # --- GRÁFICO 2: IDEX-INFRA (NOVO GRÁFICO) ---
+    st.header("IDEX INFRA - Debêntures de Infraestrutura (Spread/NTN-B)")
+    st.info(
+        "O IDEX-INFRA mede o spread médio de debêntures incentivadas em relação aos títulos públicos de referência (NTN-Bs). "
+        "Ele reflete o prêmio de risco exigido para investir em dívida de projetos de infraestrutura."
+    )
+    df_idex_infra = carregar_dados_idex_infra()
+    if not df_idex_infra.empty:
+        fig_idex_infra = gerar_grafico_idex_infra(df_idex_infra)
+        st.plotly_chart(fig_idex_infra, use_container_width=True)
+    else:
+        st.warning("Não foi possível carregar os dados do IDEX INFRA para exibição.")
 
 elif pagina_selecionada == "Econômicos BR":
     st.header("Monitor de Indicadores Econômicos Nacionais")
@@ -1056,6 +1131,7 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
 
