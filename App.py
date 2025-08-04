@@ -657,38 +657,50 @@ def gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana):
 # --- FIM DO BLOCO ATUALIZADO ---
 # --- BLOCO 6: LÓGICA DO INDICADOR IDEX JGP (NOVO) ---
 @st.cache_data(ttl=3600*4) # Cache de 4 horas
+@st.cache_data(ttl=3600*4) # Cache de 4 horas
 def carregar_dados_idex():
     """
-    Baixa e processa os dados do IDEX JGP para os índices Geral e Low Rated.
+    Baixa e processa os dados do IDEX JGP para os índices Geral, Low Rated e INFRA.
     """
     st.info("Carregando dados do IDEX JGP... (Cache de 4h)")
     url_geral = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_geral_datafile.xlsx"
     url_low_rated = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_low_rated_datafile.xlsx"
+    url_infra = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_infra_geral_datafile.xlsx" # NOVA URL
     emissores_para_remover = ['AMERICANAS SA', 'Light - Servicos de Eletricidade', 'Aeris', 'Viveo']
 
     def _processar_url(url):
-        response = requests.get(url)
-        response.raise_for_status()
-        df = pd.read_excel(io.BytesIO(response.content), sheet_name='Detalhado')
-        df.columns = df.columns.str.strip()
-        df_filtrado = df[~df['Emissor'].isin(emissores_para_remover)].copy()
-        df_filtrado['Data'] = pd.to_datetime(df_filtrado['Data'])
-        df_filtrado['weighted_spread'] = df_filtrado['Peso no índice (%)'] * df_filtrado['Spread de compra (%)']
-        
-        # Agrupa por data e calcula o spread médio ponderado
-        daily_spread = df_filtrado.groupby('Data').apply(
-            lambda x: x['weighted_spread'].sum() / x['Peso no índice (%)'].sum() if x['Peso no índice (%)'].sum() != 0 else 0
-        ).reset_index(name='spread')
-        
-        return daily_spread.set_index('Data')
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            df = pd.read_excel(io.BytesIO(response.content), sheet_name='Detalhado')
+            df.columns = df.columns.str.strip()
+            df_filtrado = df[~df['Emissor'].isin(emissores_para_remover)].copy()
+            df_filtrado['Data'] = pd.to_datetime(df_filtrado['Data'])
+            df_filtrado['weighted_spread'] = df_filtrado['Peso no índice (%)'] * df_filtrado['Spread de compra (%)']
+            daily_spread = df_filtrado.groupby('Data').apply(
+                lambda x: x['weighted_spread'].sum() / x['Peso no índice (%)'].sum() if x['Peso no índice (%)'].sum() != 0 else 0
+            ).reset_index(name='spread')
+            return daily_spread.set_index('Data')
+        except Exception as e:
+            st.warning(f"Falha ao processar URL {url}: {e}")
+            return pd.DataFrame()
 
     try:
         spread_geral = _processar_url(url_geral)
         spread_low_rated = _processar_url(url_low_rated)
-        
-        # Unir os dois dataframes
+        spread_infra = _processar_url(url_infra) # NOVO PROCESSAMENTO
+
+        # Unir os três dataframes
         df_final = pd.merge(spread_geral, spread_low_rated, on='Data', how='outer', suffixes=('_geral', '_low_rated'))
-        df_final.rename(columns={'spread_geral': 'IDEX Geral (Filtrado)', 'spread_low_rated': 'IDEX Low Rated (Filtrado)'}, inplace=True)
+        df_final = pd.merge(df_final, spread_infra, on='Data', how='outer') # MERGE DO NOVO DF
+
+        # Renomear colunas
+        df_final.rename(columns={
+            'spread_geral': 'IDEX Geral (Filtrado)',
+            'spread_low_rated': 'IDEX Low Rated (Filtrado)',
+            'spread': 'IDEX INFRA (Filtrado)' # NOVA COLUNA
+        }, inplace=True)
+        
         return df_final.sort_index()
 
     except Exception as e:
@@ -698,23 +710,23 @@ def carregar_dados_idex():
 
 def gerar_grafico_idex(df_idex):
     """
-    Gera um gráfico Plotly comparando os spreads do IDEX Geral e Low Rated.
+    Gera um gráfico Plotly comparando os spreads dos índices IDEX.
     """
     if df_idex.empty:
         return go.Figure().update_layout(title_text="Não foi possível gerar o gráfico do IDEX.")
 
+    # Lista de colunas a serem plotadas
+    colunas_plot = [col for col in ['IDEX Geral (Filtrado)', 'IDEX Low Rated (Filtrado)', 'IDEX INFRA (Filtrado)'] if col in df_idex.columns]
+
     fig = px.line(
         df_idex,
-        y=['IDEX Geral (Filtrado)', 'IDEX Low Rated (Filtrado)'],
+        y=colunas_plot, # PLOTA TODAS AS COLUNAS PRESENTES
         title='Histórico do Spread Médio Ponderado: IDEX JGP',
         template='plotly_dark'
     )
 
-    # --- INÍCIO DA ALTERAÇÃO ---
-    # Formata os rótulos do eixo Y e do 'hover' para exibir como porcentagem com 2 casas decimais
     fig.update_yaxes(tickformat=".2%")
     fig.update_traces(hovertemplate='%{y:.2%}')
-    # --- FIM DA ALTERAÇÃO ---
 
     fig.update_layout(
         title_x=0,
@@ -724,7 +736,6 @@ def gerar_grafico_idex(df_idex):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     return fig
-
 # --- FIM DO NOVO BLOCO ---
 
 # --- CONSTRUÇÃO DA INTERFACE (LAYOUT FINAL COM OPTION_MENU) ---
@@ -863,15 +874,19 @@ elif pagina_selecionada == "Crédito Privado":
     st.markdown("---")
     st.info(
         "O IDEX-CDI é um índice de debêntures calculado pela JGP. O gráfico mostra o spread médio (prêmio acima do CDI) "
-        "exigido pelo mercado para comprar esses títulos. IDEX Low Rated: Rating menor que AA. "
+        "exigido pelo mercado para comprar esses títulos. \n\n"
+        "- **IDEX INFRA:** Debêntures incentivadas de projetos de infraestrutura. \n"
+        "- **IDEX Low Rated:** Títulos com rating menor que AA (maior risco). \n\n"
         "Filtramos emissores que passaram por eventos de crédito relevantes (distress) para uma visão mais limpa da tendência geral."
     )
+    
     df_idex = carregar_dados_idex()
     if not df_idex.empty:
         fig_idex = gerar_grafico_idex(df_idex)
         st.plotly_chart(fig_idex, use_container_width=True)
     else:
         st.warning("Não foi possível carregar os dados do IDEX para exibição.")
+
 
 elif pagina_selecionada == "Econômicos BR":
     st.header("Monitor de Indicadores Econômicos Nacionais")
@@ -1061,3 +1076,4 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
