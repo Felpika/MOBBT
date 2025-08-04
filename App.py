@@ -660,7 +660,7 @@ def gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana):
 def carregar_dados_idex():
     """
     Baixa e processa os dados do IDEX JGP para os índices Geral, Low Rated e INFRA.
-    (Versão Lógica Simplificada e Corrigida)
+    (Versão Definitiva Corrigida com base na planilha)
     """
     st.info("Carregando dados do IDEX JGP... (Cache de 4h)")
     
@@ -674,6 +674,7 @@ def carregar_dados_idex():
     emissores_para_remover = ['AMERICANAS SA', 'Light - Servicos de Eletricidade', 'Aeris', 'Viveo']
     lista_dfs = []
 
+    # Itera sobre cada fonte, processando uma de cada vez
     for nome_indice, url in fontes_idex.items():
         try:
             response = requests.get(url, timeout=30)
@@ -685,28 +686,30 @@ def carregar_dados_idex():
             spread_col_name = 'Spread (%)' if 'idex_infra' in url else 'Spread de compra (%)'
 
             if spread_col_name not in df.columns:
-                st.warning(f"Coluna '{spread_col_name}' não encontrada para o índice {nome_indice}. Pulando...")
+                st.warning(f"AVISO: A coluna '{spread_col_name}' não foi encontrada para o índice '{nome_indice}'. Este índice não será exibido.")
                 continue
 
+            # Continua com o processamento normal
             df_filtrado = df[~df['Emissor'].isin(emissores_para_remover)].copy()
             df_filtrado['Data'] = pd.to_datetime(df_filtrado['Data'])
             df_filtrado['weighted_spread'] = df_filtrado['Peso no índice (%)'] * df_filtrado[spread_col_name]
             
             daily_spread = df_filtrado.groupby('Data').apply(
                 lambda x: x['weighted_spread'].sum() / x['Peso no índice (%)'].sum() if x['Peso no índice (%)'].sum() != 0 else 0
-            ).reset_index(name=nome_indice) # Renomeia a coluna diretamente
+            ).reset_index(name=nome_indice) # Renomeia a coluna diretamente com o nome do índice
             
             lista_dfs.append(daily_spread.set_index('Data'))
 
         except Exception as e:
-            st.warning(f"Falha ao processar o índice {nome_indice}: {e}")
+            st.warning(f"Falha ao carregar ou processar o índice '{nome_indice}': {e}")
             continue
 
+    # Se a lista de dataframes processados com sucesso estiver vazia, retorna erro
     if not lista_dfs:
-        st.error("Nenhum dado do IDEX pôde ser carregado.")
+        st.error("Nenhum dado do IDEX pôde ser carregado com sucesso.")
         return pd.DataFrame()
 
-    # Junta todos os dataframes válidos da lista
+    # Junta todos os dataframes que foram processados com sucesso
     df_final = pd.concat(lista_dfs, axis=1, join='outer')
     
     return df_final.sort_index()
@@ -1079,6 +1082,7 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
 
