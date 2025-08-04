@@ -659,103 +659,57 @@ def gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana):
 @st.cache_data(ttl=3600*4) # Cache de 4 horas
 def carregar_dados_idex():
     """
-    Baixa e processa os dados do IDEX JGP para os índices Geral, Low Rated e INFRA,
-    tratando os diferentes nomes da coluna de spread.
+    Baixa e processa os dados do IDEX JGP para os índices Geral, Low Rated e INFRA.
+    (Versão Lógica Simplificada e Corrigida)
     """
     st.info("Carregando dados do IDEX JGP... (Cache de 4h)")
-    url_geral = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_geral_datafile.xlsx"
-    url_low_rated = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_low_rated_datafile.xlsx"
-    url_infra = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_infra_geral_datafile.xlsx"
+    
+    # Dicionário para gerenciar as fontes de dados
+    fontes_idex = {
+        "IDEX Geral (Filtrado)": "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_geral_datafile.xlsx",
+        "IDEX Low Rated (Filtrado)": "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_low_rated_datafile.xlsx",
+        "IDEX INFRA (Filtrado)": "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_infra_geral_datafile.xlsx"
+    }
+    
     emissores_para_remover = ['AMERICANAS SA', 'Light - Servicos de Eletricidade', 'Aeris', 'Viveo']
+    lista_dfs = []
 
-    def _processar_url(url):
+    for nome_indice, url in fontes_idex.items():
         try:
             response = requests.get(url, timeout=30)
             response.raise_for_status()
             df = pd.read_excel(io.BytesIO(response.content), sheet_name='Detalhado')
             df.columns = df.columns.str.strip()
 
-            # --- INÍCIO DA CORREÇÃO ---
             # Define o nome da coluna de spread correto para cada tipo de arquivo
-            if 'idex_infra' in url:
-                spread_col_name = 'Spread (%)'
-            else:
-                spread_col_name = 'Spread de compra (%)'
+            spread_col_name = 'Spread (%)' if 'idex_infra' in url else 'Spread de compra (%)'
 
-            # Verifica se a coluna realmente existe antes de continuar
             if spread_col_name not in df.columns:
-                raise KeyError(f"Coluna '{spread_col_name}' não encontrada no arquivo de {url}.")
-            # --- FIM DA CORREÇÃO ---
+                st.warning(f"Coluna '{spread_col_name}' não encontrada para o índice {nome_indice}. Pulando...")
+                continue
 
             df_filtrado = df[~df['Emissor'].isin(emissores_para_remover)].copy()
             df_filtrado['Data'] = pd.to_datetime(df_filtrado['Data'])
-            
-            # Usa a variável com o nome correto da coluna
             df_filtrado['weighted_spread'] = df_filtrado['Peso no índice (%)'] * df_filtrado[spread_col_name]
             
             daily_spread = df_filtrado.groupby('Data').apply(
                 lambda x: x['weighted_spread'].sum() / x['Peso no índice (%)'].sum() if x['Peso no índice (%)'].sum() != 0 else 0
-            ).reset_index(name='spread')
+            ).reset_index(name=nome_indice) # Renomeia a coluna diretamente
             
-            return daily_spread.set_index('Data')
-            
+            lista_dfs.append(daily_spread.set_index('Data'))
+
         except Exception as e:
-            st.warning(f"Falha ao processar URL {url}: {e}")
-            return pd.DataFrame()
+            st.warning(f"Falha ao processar o índice {nome_indice}: {e}")
+            continue
 
-    try:
-        spread_geral = _processar_url(url_geral)
-        spread_low_rated = _processar_url(url_low_rated)
-        spread_infra = _processar_url(url_infra)
-
-        df_final = pd.DataFrame(index=pd.to_datetime([]))
-        
-        # Junta os dataframes um a um para evitar erros com dataframes vazios
-        if not spread_geral.empty:
-            df_final = pd.merge(df_final, spread_geral, left_index=True, right_index=True, how='outer')
-        if not spread_low_rated.empty:
-            df_final = pd.merge(df_final, spread_low_rated, left_index=True, right_index=True, how='outer')
-        if not spread_infra.empty:
-            df_final = pd.merge(df_final, spread_infra, left_index=True, right_index=True, how='outer')
-
-        # Renomeia as colunas de forma segura
-        rename_map = {
-            'spread_x': 'IDEX Geral (Filtrado)',
-            'spread_y': 'IDEX Low Rated (Filtrado)',
-            'spread': 'IDEX INFRA (Filtrado)'
-        }
-        # Caso o primeiro df (geral) não exista, o segundo (low_rated) será 'spread' em vez de 'spread_y'
-        if 'spread_geral' not in df_final.columns and 'spread_low_rated' in df_final.columns:
-             rename_map = {
-                'spread': 'IDEX Low Rated (Filtrado)',
-                'spread_infra': 'IDEX INFRA (Filtrado)' # Exemplo
-            }
-
-        # Para simplificar, vamos renomear de forma mais robusta
-        dfs = {
-            'IDEX Geral (Filtrado)': spread_geral,
-            'IDEX Low Rated (Filtrado)': spread_low_rated,
-            'IDEX INFRA (Filtrado)': spread_infra
-        }
-        
-        final_dfs = []
-        for name, df_spread in dfs.items():
-            if not df_spread.empty:
-                df_spread.rename(columns={'spread': name}, inplace=True)
-                final_dfs.append(df_spread)
-
-        if not final_dfs:
-            return pd.DataFrame()
-        
-        df_merged = final_dfs[0]
-        for i in range(1, len(final_dfs)):
-            df_merged = pd.merge(df_merged, final_dfs[i], on='Data', how='outer')
-
-        return df_merged.sort_index()
-
-    except Exception as e:
-        st.error(f"Erro ao consolidar dados do IDEX JGP: {e}")
+    if not lista_dfs:
+        st.error("Nenhum dado do IDEX pôde ser carregado.")
         return pd.DataFrame()
+
+    # Junta todos os dataframes válidos da lista
+    df_final = pd.concat(lista_dfs, axis=1, join='outer')
+    
+    return df_final.sort_index()
 
 def gerar_grafico_idex(df_idex):
     """
@@ -1125,5 +1079,6 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
