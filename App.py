@@ -14,7 +14,24 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import io # Adicionado para a nova funcionalidade
 from streamlit_option_menu import option_menu
+# --- HTTP SESSION COM RETRY/BACKOFF ---
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
+def _http_session():
+    retry = Retry(
+        total=5, backoff_factor=0.8,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(['GET', 'POST'])
+    )
+    sess = requests.Session()
+    sess.headers.update({"User-Agent": "MOBBT/1.0"})
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=20, pool_maxsize=50)
+    sess.mount("http://", adapter); sess.mount("https://", adapter)
+    return sess
+
+HTTP = _http_session()
+DEFAULT_TIMEOUT = 30
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="MOBBT")
 
@@ -1131,3 +1148,4 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
