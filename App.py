@@ -38,14 +38,37 @@ st.set_page_config(layout="wide", page_title="MOBBT")
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
 @st.cache_data(ttl=3600*4)
 def obter_dados_tesouro():
-    # ... (código existente inalterado)
-    url = 'https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv'
+    url = ('https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/'
+           'resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv')
     st.info("Carregando dados do Tesouro Direto... (Cache de 4h)")
     try:
-        df = pd.read_csv(url, sep=';', decimal=',')
-        df['Data Vencimento'] = pd.to_datetime(df['Data Vencimento'], format='%d/%m/%Y')
-        df['Data Base'] = pd.to_datetime(df['Data Base'], format='%d/%m/%Y')
-        df['Tipo Titulo'] = df['Tipo Titulo'].astype('category')
+        resp = HTTP.get(url, timeout=DEFAULT_TIMEOUT)
+        resp.raise_for_status()
+        # Leitura robusta + tipos
+        df = pd.read_csv(
+            io.BytesIO(resp.content), sep=';', decimal=',',
+            dtype={'Tipo Titulo': 'category'},
+            encoding='latin1'
+        )
+        # Padronização de colunas que são usadas depois:
+        for col in ['Data Vencimento','Data Base']:
+            if col not in df.columns:
+                st.error(f"Coluna ausente no CSV: {col}")
+                return pd.DataFrame()
+        df['Data Vencimento'] = pd.to_datetime(df['Data Vencimento'], format='%d/%m/%Y', errors='coerce')
+        df['Data Base'] = pd.to_datetime(df['Data Base'], format='%d/%m/%Y', errors='coerce')
+        df = df.dropna(subset=['Data Vencimento','Data Base']).copy()
+
+        # Algumas bases têm 'PU Compra Manha' ausente; cria fallback se necessário:
+        if 'PU Compra Manha' not in df.columns and 'PU Compra' in df.columns:
+            df['PU Compra Manha'] = df['PU Compra']
+
+        # Checagem de métricas usadas lá na frente
+        for col in ['Taxa Compra Manha', 'PU Compra Manha']:
+            if col not in df.columns:
+                st.warning(f"Coluna '{col}' não encontrada na base. Alguns gráficos podem não aparecer.")
+                df[col] = np.nan
+
         return df
     except Exception as e:
         st.error(f"Erro ao baixar dados do Tesouro: {e}")
@@ -1148,4 +1171,5 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
