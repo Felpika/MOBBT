@@ -524,13 +524,23 @@ def gerar_graficos_insiders_plotly(df_dados, top_n=10):
     return fig_volume, fig_relevancia
 
 @st.cache_data
-def carregar_dados_acoes(tickers, period="max"):
-    # ... (código existente inalterado)
+def carregar_dados_acoes(tickers, period="max", interval="1d"):
     try:
-        data = yf.download(tickers, period=period, auto_adjust=True)['Close']
-        if isinstance(data, pd.Series): 
-            data = data.to_frame(tickers[0])
-        return data.dropna()
+        data = yf.download(
+            tickers=tickers, period=period, interval=interval,
+            auto_adjust=True, group_by='ticker', progress=False, threads=True
+        )
+        # Normaliza para sempre entregar DataFrame de Close com colunas = tickers
+        if isinstance(data.columns, pd.MultiIndex):
+            df_close = pd.concat(
+                {t: data[t]['Close'] for t in tickers if (t in data) and ('Close' in data[t])},
+                axis=1
+            )
+        else:
+            df_close = data['Close'] if 'Close' in data else data
+        if isinstance(df_close, pd.Series):
+            df_close = df_close.to_frame(tickers[0])
+        return df_close.dropna(how='all').astype('float32')
     except Exception:
         return pd.DataFrame()
 
@@ -1171,5 +1181,6 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
