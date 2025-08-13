@@ -1058,15 +1058,15 @@ if pagina_selecionada == "NTN-Bs":
     else:
         st.warning("Não foi possível carregar os dados do Tesouro Direto para exibir esta página.")
          # --- KPIs de Z-score (Timing Tático) ---
-    try:
-        if not df_fred_br_tab.empty:
-            zdict = calcular_zscores_chave(df_tesouro, df_fred_br_tab)
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Z 2s10s NTN-F", f"{zdict['Z 2s10s NTN-F']:+.2f}")
-            c2.metric("Z Breakeven IPCA (med.)", f"{zdict['Z Breakeven IPCA (mediana)']:+.2f}")
-            c3.metric("Z Spread BR10Y-UST10Y", f"{zdict['Z Spread BR10Y-UST10Y']:+.2f}")
-    except Exception:
-        pass
+try:
+    if not df_fred_br_tab.empty:
+        zdict = calcular_zscores_chave(df_tesouro, df_fred_br_tab)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Z 2s10s NTN-F", f"{zdict['Z 2s10s NTN-F']:+.2f}")
+        c2.metric("Z Breakeven IPCA (med.)", f"{zdict['Z Breakeven IPCA (mediana)']:+.2f}")
+        c3.metric("Z Spread BR10Y-UST10Y", f"{zdict['Z Spread BR10Y-UST10Y']:+.2f}")
+except Exception:
+    pass
         
 elif pagina_selecionada == "Curva de Juros":
     st.header("Estrutura a Termo da Taxa de Juros (ETTJ)")
@@ -1301,6 +1301,7 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
 
