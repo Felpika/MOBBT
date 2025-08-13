@@ -199,6 +199,117 @@ def gerar_grafico_spread_juros(df):
     fig = px.area(df_spread, y='Spread', title=f'Spread de Juros: NTN-F ~10 Anos ({pd.to_datetime(venc_longo).year}) vs ~2 Anos ({pd.to_datetime(venc_curto).year})', template='plotly_dark')
     fig.update_layout(title_x=0, yaxis_title="Diferença (Basis Points)", xaxis_title="Data", showlegend=False)
     return fig
+# --- Z-SCORES DE INDICADORES DE JUROS/SPREADS ---
+
+def _zscore(series: pd.Series, window: int = 252) -> pd.Series:
+    s = series.dropna()
+    if s.empty: 
+        return pd.Series(dtype=float)
+    m = s.rolling(window).mean()
+    sd = s.rolling(window).std()
+    return (s - m) / sd
+
+def _series_spread_ntnf_2s10s(df: pd.DataFrame) -> pd.Series:
+    """Constroi a série histórica do spread 10y-2y (NTN-F), em p.p."""
+    df_ntnf = df[df['Tipo Titulo'] == 'Tesouro Prefixado com Juros Semestrais'].copy()
+    if df_ntnf.empty:
+        return pd.Series(dtype=float)
+    out = []
+
+    for data_ref, dia in df_ntnf.groupby('Data Base'):
+        vcts = sorted(dia['Data Vencimento'].unique())
+        if not vcts:
+            continue
+        v2  = min(vcts, key=lambda d: abs(d - (data_ref + pd.DateOffset(years=2))))
+        v10 = min(vcts, key=lambda d: abs(d - (data_ref + pd.DateOffset(years=10))))
+        if v2 == v10:
+            continue
+        s2  = dia[dia['Data Vencimento'] == v2]['Taxa Compra Manha']
+        s10 = dia[dia['Data Vencimento'] == v10]['Taxa Compra Manha']
+        if s2.empty or s10.empty: 
+            continue
+        out.append((data_ref, float(s10.iloc[0]) - float(s2.iloc[0])))
+    if not out:
+        return pd.Series(dtype=float)
+    return pd.Series({d: v for d, v in out}).sort_index()
+
+def _series_breakeven_mediana_diaria(df: pd.DataFrame) -> pd.Series:
+    """
+    Mediana diária do breakeven IPCA (prefixado vs IPCA+) por dia.
+    Retorna em FRAÇÃO (ex.: 0.055 = 5,5%).
+    """
+    tipos_ipca = ['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+']
+    ipca = df[df['Tipo Titulo'].isin(tipos_ipca)][['Data Base','Data Vencimento','Taxa Compra Manha']].copy()
+    pre  = df[df['Tipo Titulo']=='Tesouro Prefixado'][['Data Base','Data Vencimento','Taxa Compra Manha']].copy()
+    if ipca.empty or pre.empty:
+        return pd.Series(dtype=float)
+
+    be_list = []
+    idx = []
+    for d in sorted(set(ipca['Data Base']).intersection(pre['Data Base'])):
+        ip = ipca[ipca['Data Base']==d].set_index('Data Vencimento')['Taxa Compra Manha']
+        pr = pre[pre['Data Base']==d].set_index('Data Vencimento')['Taxa Compra Manha']
+        if ip.empty or pr.empty:
+            continue
+        vals = []
+        for v in pr.index:
+            v2 = min(ip.index, key=lambda x: abs(x - v))
+            taxa_pre = pr.loc[v] / 100.0
+            taxa_ipc = ip.loc[v2] / 100.0
+            vals.append(((1 + taxa_pre)/(1 + taxa_ipc) - 1))  # fração
+        if vals:
+            be_list.append(np.median(vals))
+            idx.append(d)
+    if not be_list:
+        return pd.Series(dtype=float)
+    return pd.Series(be_list, index=idx).sort_index()
+
+def _series_spread_br10y_ust10y(df_tesouro: pd.DataFrame, df_fred: pd.DataFrame) -> pd.Series:
+    """
+    Spread BR10Y - UST10Y em p.p. (ambos em % a.a.).
+    Requer df_fred com coluna 'DGS10' e BR10Y via calcular_juro_10a_br.
+    """
+    if 'DGS10' not in df_fred.columns:
+        return pd.Series(dtype=float)
+    br10 = calcular_juro_10a_br(df_tesouro)   # série em % a.a.
+    us10 = df_fred['DGS10']                   # série em % a.a.
+    if br10.empty or us10.dropna().empty:
+        return pd.Series(dtype=float)
+    s = pd.concat([br10.rename('BR10Y'), us10.rename('UST10Y')], axis=1).dropna()
+    if s.empty:
+        return pd.Series(dtype=float)
+    return (s['BR10Y'] - s['UST10Y']).rename('Spread')
+
+def calcular_zscores_chave(df_tesouro: pd.DataFrame, df_fred: pd.DataFrame) -> dict:
+    """
+    Retorna os Z-scores atuais dos principais indicadores:
+    - Z 2s10s NTN-F (p.p.)
+    - Z Breakeven IPCA (mediana diária, fração)
+    - Z Spread BR10Y - UST10Y (p.p.)
+    """
+    out = {
+        'Z 2s10s NTN-F': np.nan,
+        'Z Breakeven IPCA (mediana)': np.nan,
+        'Z Spread BR10Y-UST10Y': np.nan
+    }
+    s_curve = _series_spread_ntnf_2s10s(df_tesouro)
+    if not s_curve.empty:
+        z = _zscore(s_curve)
+        if not z.empty:
+            out['Z 2s10s NTN-F'] = z.iloc[-1]
+
+    s_be = _series_breakeven_mediana_diaria(df_tesouro)
+    if not s_be.empty:
+        z = _zscore(s_be)  # já está em fração
+        if not z.empty:
+            out['Z Breakeven IPCA (mediana)'] = z.iloc[-1]
+
+    s_spread = _series_spread_br10y_ust10y(df_tesouro, df_fred)
+    if not s_spread.empty:
+        z = _zscore(s_spread)
+        if not z.empty:
+            out['Z Spread BR10Y-UST10Y'] = z.iloc[-1]
+    return out
 
 def gerar_grafico_ettj_curto_prazo(df):
     # ... (código existente inalterado)
@@ -940,6 +1051,16 @@ if pagina_selecionada == "NTN-Bs":
                 if not df_juro_br.empty:
                     fig_spread_br_eua = gerar_grafico_spread_br_eua(df_juro_br, df_fred_br_tab)
                     st.plotly_chart(fig_spread_br_eua, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
+                    # --- KPIs de Z-score (Timing Tático) ---
+                    try:
+                        if not df_fred_br_tab.empty:
+                            zdict = calcular_zscores_chave(df_tesouro, df_fred_br_tab)
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Z 2s10s NTN-F", f"{zdict['Z 2s10s NTN-F']:+.2f}")
+                            c2.metric("Z Breakeven IPCA (med.)", f"{zdict['Z Breakeven IPCA (mediana)']:+.2f}")
+                            c3.metric("Z Spread BR10Y-UST10Y", f"{zdict['Z Spread BR10Y-UST10Y']:+.2f}")
+                    except Exception:
+                        pass
                 else:
                     st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
             else:
@@ -1181,6 +1302,7 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
 
