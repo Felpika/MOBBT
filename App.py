@@ -358,6 +358,40 @@ def gerar_grafico_ettj_longo_prazo(df):
         fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
     fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
+# --- CARRY & ROLL-DOWN APROX. (PREFIXADOS) ---
+
+def _carry_diario_pct(taxa_aa: float) -> float:
+    """Retorna carry diário em fração (ex.: 0.0003 = 0,03%/dia) a partir de % a.a."""
+    return (1 + taxa_aa/100.0)**(1/252) - 1
+
+def estimar_carry_rolldown_prefixados(df: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    Produz tabela do dia com:
+    - Yield (% a.a.)
+    - Carry diário (fração)
+    - Roll-down de 3 meses (aprox., fração)
+    """
+    dfp = df[df['Tipo Titulo']=='Tesouro Prefixado'].copy()
+    if dfp.empty:
+        return None
+    dref = dfp['Data Base'].max()
+    hoje = dfp[dfp['Data Base']==dref].copy().sort_values('Data Vencimento')
+    if hoje.empty:
+        return None
+
+    hoje['anos'] = (hoje['Data Vencimento'] - dref).dt.days / 365.25
+    x = hoje['anos'].values
+    y = hoje['Taxa Compra Manha'].values
+    if len(x) < 3:
+        return None
+
+    # Inclinação local da curva (taxa ~ anos)
+    slope, intercept = np.polyfit(x, y, 1)
+    # métricas
+    hoje['Carry (dia)'] = hoje['Taxa Compra Manha'].apply(_carry_diario_pct)  # fração
+    hoje['Roll-down 3m'] = (slope * 0.25) / 100.0  # fração (0.25 ano ~ 3m)
+
+    return hoje[['Data Vencimento', 'Taxa Compra Manha', 'Carry (dia)', 'Roll-down 3m']].reset_index(drop=True)
 
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS ---
 @st.cache_data(ttl=3600*4)
@@ -910,7 +944,28 @@ def gerar_grafico_idex_infra(df_idex_infra):
     )
     return fig
 
-# --- FIM DO NOVO BLOCO DE CÓDIGO ---
+# --- CORRELAÇÃO ROLANTE IDEX x IBOV ---
+
+@st.cache_data
+def correlacao_rolante_idex_ibov(df_idex: pd.DataFrame, janela: int = 90) -> pd.Series:
+    """
+    Correlação rolante (janela em dias úteis) entre retornos do IDEX Geral (filtrado) e do Ibovespa (^BVSP).
+    """
+    if df_idex.empty or 'IDEX Geral (Filtrado)' not in df_idex.columns:
+        return pd.Series(dtype=float)
+
+    df_ibov = carregar_dados_acoes(['^BVSP'], period="20y")
+    if df_ibov.empty:
+        return pd.Series(dtype=float)
+
+    ret_idex = df_idex['IDEX Geral (Filtrado)'].pct_change().dropna()
+    ret_ibov = df_ibov.iloc[:, 0].pct_change().dropna()
+
+    ret_idex, ret_ibov = ret_idex.align(ret_ibov, join='inner')
+    if ret_idex.empty:
+        return pd.Series(dtype=float)
+
+    return ret_idex.rolling(janela).corr(ret_ibov).dropna()
 
 
 def gerar_grafico_idex(df_idex):
@@ -1076,6 +1131,19 @@ elif pagina_selecionada == "Curva de Juros":
         st.subheader("Comparativo de Curto Prazo (Últimos 5 Dias)")
         st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
         st.markdown("---")
+        st.subheader("Carry & Roll-down (aproximação) — Prefixados")
+        tbl = estimar_carry_rolldown_prefixados(df_tesouro)
+        if tbl is not None and not tbl.empty:
+            _show = tbl.copy()
+            _show.rename(columns={'Data Vencimento':'Vencimento','Taxa Compra Manha':'Yield (% a.a.)'}, inplace=True)
+            _show['Yield (% a.a.)'] = _show['Yield (% a.a.)'].map(lambda v: f"{v:.2f}%")
+            _show['Carry (dia)'] = _show['Carry (dia)'].map(lambda v: f"{v*100:.02f}%/dia")
+            _show['Roll-down 3m'] = _show['Roll-down 3m)'] if 'Roll-down 3m)' in _show.columns else _show['Roll-down 3m']
+            _show['Roll-down 3m'] = _show['Roll-down 3m'].map(lambda v: f"{v*100:.02f}%")
+            st.dataframe(_show, use_container_width=True)
+        else:
+            st.info("Sem dados suficientes para estimar Carry & Roll-down hoje.")
+
         st.subheader("Comparativo de Longo Prazo (Histórico)")
         st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
     else:
@@ -1112,6 +1180,19 @@ elif pagina_selecionada == "Crédito Privado":
         st.plotly_chart(fig_idex_infra, use_container_width=True)
     else:
         st.warning("Não foi possível carregar os dados do IDEX INFRA para exibição.")
+    st.markdown("---")
+    st.subheader("Correlação Rolante: IDEX (Geral) x Ibovespa")
+    try:
+        if not df_idex.empty:
+            corr = correlacao_rolante_idex_ibov(df_idex, janela=90)
+            if not corr.empty:
+                fig_corr = px.line(corr, title="Correlação 90 dias (retornos diários)", template='plotly_dark')
+                fig_corr.update_layout(title_x=0, yaxis_title="Correlação", xaxis_title="Data")
+                st.plotly_chart(fig_corr, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale','toImage']})
+            else:
+                st.info("Sem dados suficientes para calcular a correlação no período.")
+    except Exception:
+        st.warning("Não foi possível calcular a correlação IDEX x Ibovespa.")
 
 elif pagina_selecionada == "Econômicos BR":
     st.header("Monitor de Indicadores Econômicos Nacionais")
@@ -1301,6 +1382,7 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
 
