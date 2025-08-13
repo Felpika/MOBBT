@@ -14,61 +14,21 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import io # Adicionado para a nova funcionalidade
 from streamlit_option_menu import option_menu
-# --- HTTP SESSION COM RETRY/BACKOFF ---
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-def _http_session():
-    retry = Retry(
-        total=5, backoff_factor=0.8,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset(['GET', 'POST'])
-    )
-    sess = requests.Session()
-    sess.headers.update({"User-Agent": "MOBBT/1.0"})
-    adapter = HTTPAdapter(max_retries=retry, pool_connections=20, pool_maxsize=50)
-    sess.mount("http://", adapter); sess.mount("https://", adapter)
-    return sess
-
-HTTP = _http_session()
-DEFAULT_TIMEOUT = 30
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="MOBBT")
 
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
 @st.cache_data(ttl=3600*4)
 def obter_dados_tesouro():
-    url = ('https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/'
-           'resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv')
+    # ... (código existente inalterado)
+    url = 'https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv'
     st.info("Carregando dados do Tesouro Direto... (Cache de 4h)")
     try:
-        resp = HTTP.get(url, timeout=DEFAULT_TIMEOUT)
-        resp.raise_for_status()
-        # Leitura robusta + tipos
-        df = pd.read_csv(
-            io.BytesIO(resp.content), sep=';', decimal=',',
-            dtype={'Tipo Titulo': 'category'},
-            encoding='latin1'
-        )
-        # Padronização de colunas que são usadas depois:
-        for col in ['Data Vencimento','Data Base']:
-            if col not in df.columns:
-                st.error(f"Coluna ausente no CSV: {col}")
-                return pd.DataFrame()
-        df['Data Vencimento'] = pd.to_datetime(df['Data Vencimento'], format='%d/%m/%Y', errors='coerce')
-        df['Data Base'] = pd.to_datetime(df['Data Base'], format='%d/%m/%Y', errors='coerce')
-        df = df.dropna(subset=['Data Vencimento','Data Base']).copy()
-
-        # Algumas bases têm 'PU Compra Manha' ausente; cria fallback se necessário:
-        if 'PU Compra Manha' not in df.columns and 'PU Compra' in df.columns:
-            df['PU Compra Manha'] = df['PU Compra']
-
-        # Checagem de métricas usadas lá na frente
-        for col in ['Taxa Compra Manha', 'PU Compra Manha']:
-            if col not in df.columns:
-                st.warning(f"Coluna '{col}' não encontrada na base. Alguns gráficos podem não aparecer.")
-                df[col] = np.nan
-
+        df = pd.read_csv(url, sep=';', decimal=',')
+        df['Data Vencimento'] = pd.to_datetime(df['Data Vencimento'], format='%d/%m/%Y')
+        df['Data Base'] = pd.to_datetime(df['Data Base'], format='%d/%m/%Y')
+        df['Tipo Titulo'] = df['Tipo Titulo'].astype('category')
         return df
     except Exception as e:
         st.error(f"Erro ao baixar dados do Tesouro: {e}")
@@ -199,117 +159,6 @@ def gerar_grafico_spread_juros(df):
     fig = px.area(df_spread, y='Spread', title=f'Spread de Juros: NTN-F ~10 Anos ({pd.to_datetime(venc_longo).year}) vs ~2 Anos ({pd.to_datetime(venc_curto).year})', template='plotly_dark')
     fig.update_layout(title_x=0, yaxis_title="Diferença (Basis Points)", xaxis_title="Data", showlegend=False)
     return fig
-# --- Z-SCORES DE INDICADORES DE JUROS/SPREADS ---
-
-def _zscore(series: pd.Series, window: int = 252) -> pd.Series:
-    s = series.dropna()
-    if s.empty: 
-        return pd.Series(dtype=float)
-    m = s.rolling(window).mean()
-    sd = s.rolling(window).std()
-    return (s - m) / sd
-
-def _series_spread_ntnf_2s10s(df: pd.DataFrame) -> pd.Series:
-    """Constroi a série histórica do spread 10y-2y (NTN-F), em p.p."""
-    df_ntnf = df[df['Tipo Titulo'] == 'Tesouro Prefixado com Juros Semestrais'].copy()
-    if df_ntnf.empty:
-        return pd.Series(dtype=float)
-    out = []
-
-    for data_ref, dia in df_ntnf.groupby('Data Base'):
-        vcts = sorted(dia['Data Vencimento'].unique())
-        if not vcts:
-            continue
-        v2  = min(vcts, key=lambda d: abs(d - (data_ref + pd.DateOffset(years=2))))
-        v10 = min(vcts, key=lambda d: abs(d - (data_ref + pd.DateOffset(years=10))))
-        if v2 == v10:
-            continue
-        s2  = dia[dia['Data Vencimento'] == v2]['Taxa Compra Manha']
-        s10 = dia[dia['Data Vencimento'] == v10]['Taxa Compra Manha']
-        if s2.empty or s10.empty: 
-            continue
-        out.append((data_ref, float(s10.iloc[0]) - float(s2.iloc[0])))
-    if not out:
-        return pd.Series(dtype=float)
-    return pd.Series({d: v for d, v in out}).sort_index()
-
-def _series_breakeven_mediana_diaria(df: pd.DataFrame) -> pd.Series:
-    """
-    Mediana diária do breakeven IPCA (prefixado vs IPCA+) por dia.
-    Retorna em FRAÇÃO (ex.: 0.055 = 5,5%).
-    """
-    tipos_ipca = ['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+']
-    ipca = df[df['Tipo Titulo'].isin(tipos_ipca)][['Data Base','Data Vencimento','Taxa Compra Manha']].copy()
-    pre  = df[df['Tipo Titulo']=='Tesouro Prefixado'][['Data Base','Data Vencimento','Taxa Compra Manha']].copy()
-    if ipca.empty or pre.empty:
-        return pd.Series(dtype=float)
-
-    be_list = []
-    idx = []
-    for d in sorted(set(ipca['Data Base']).intersection(pre['Data Base'])):
-        ip = ipca[ipca['Data Base']==d].set_index('Data Vencimento')['Taxa Compra Manha']
-        pr = pre[pre['Data Base']==d].set_index('Data Vencimento')['Taxa Compra Manha']
-        if ip.empty or pr.empty:
-            continue
-        vals = []
-        for v in pr.index:
-            v2 = min(ip.index, key=lambda x: abs(x - v))
-            taxa_pre = pr.loc[v] / 100.0
-            taxa_ipc = ip.loc[v2] / 100.0
-            vals.append(((1 + taxa_pre)/(1 + taxa_ipc) - 1))  # fração
-        if vals:
-            be_list.append(np.median(vals))
-            idx.append(d)
-    if not be_list:
-        return pd.Series(dtype=float)
-    return pd.Series(be_list, index=idx).sort_index()
-
-def _series_spread_br10y_ust10y(df_tesouro: pd.DataFrame, df_fred: pd.DataFrame) -> pd.Series:
-    """
-    Spread BR10Y - UST10Y em p.p. (ambos em % a.a.).
-    Requer df_fred com coluna 'DGS10' e BR10Y via calcular_juro_10a_br.
-    """
-    if 'DGS10' not in df_fred.columns:
-        return pd.Series(dtype=float)
-    br10 = calcular_juro_10a_br(df_tesouro)   # série em % a.a.
-    us10 = df_fred['DGS10']                   # série em % a.a.
-    if br10.empty or us10.dropna().empty:
-        return pd.Series(dtype=float)
-    s = pd.concat([br10.rename('BR10Y'), us10.rename('UST10Y')], axis=1).dropna()
-    if s.empty:
-        return pd.Series(dtype=float)
-    return (s['BR10Y'] - s['UST10Y']).rename('Spread')
-
-def calcular_zscores_chave(df_tesouro: pd.DataFrame, df_fred: pd.DataFrame) -> dict:
-    """
-    Retorna os Z-scores atuais dos principais indicadores:
-    - Z 2s10s NTN-F (p.p.)
-    - Z Breakeven IPCA (mediana diária, fração)
-    - Z Spread BR10Y - UST10Y (p.p.)
-    """
-    out = {
-        'Z 2s10s NTN-F': np.nan,
-        'Z Breakeven IPCA (mediana)': np.nan,
-        'Z Spread BR10Y-UST10Y': np.nan
-    }
-    s_curve = _series_spread_ntnf_2s10s(df_tesouro)
-    if not s_curve.empty:
-        z = _zscore(s_curve)
-        if not z.empty:
-            out['Z 2s10s NTN-F'] = z.iloc[-1]
-
-    s_be = _series_breakeven_mediana_diaria(df_tesouro)
-    if not s_be.empty:
-        z = _zscore(s_be)  # já está em fração
-        if not z.empty:
-            out['Z Breakeven IPCA (mediana)'] = z.iloc[-1]
-
-    s_spread = _series_spread_br10y_ust10y(df_tesouro, df_fred)
-    if not s_spread.empty:
-        z = _zscore(s_spread)
-        if not z.empty:
-            out['Z Spread BR10Y-UST10Y'] = z.iloc[-1]
-    return out
 
 def gerar_grafico_ettj_curto_prazo(df):
     # ... (código existente inalterado)
@@ -358,40 +207,6 @@ def gerar_grafico_ettj_longo_prazo(df):
         fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
     fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
-# --- CARRY & ROLL-DOWN APROX. (PREFIXADOS) ---
-
-def _carry_diario_pct(taxa_aa: float) -> float:
-    """Retorna carry diário em fração (ex.: 0.0003 = 0,03%/dia) a partir de % a.a."""
-    return (1 + taxa_aa/100.0)**(1/252) - 1
-
-def estimar_carry_rolldown_prefixados(df: pd.DataFrame) -> pd.DataFrame | None:
-    """
-    Produz tabela do dia com:
-    - Yield (% a.a.)
-    - Carry diário (fração)
-    - Roll-down de 3 meses (aprox., fração)
-    """
-    dfp = df[df['Tipo Titulo']=='Tesouro Prefixado'].copy()
-    if dfp.empty:
-        return None
-    dref = dfp['Data Base'].max()
-    hoje = dfp[dfp['Data Base']==dref].copy().sort_values('Data Vencimento')
-    if hoje.empty:
-        return None
-
-    hoje['anos'] = (hoje['Data Vencimento'] - dref).dt.days / 365.25
-    x = hoje['anos'].values
-    y = hoje['Taxa Compra Manha'].values
-    if len(x) < 3:
-        return None
-
-    # Inclinação local da curva (taxa ~ anos)
-    slope, intercept = np.polyfit(x, y, 1)
-    # métricas
-    hoje['Carry (dia)'] = hoje['Taxa Compra Manha'].apply(_carry_diario_pct)  # fração
-    hoje['Roll-down 3m'] = (slope * 0.25) / 100.0  # fração (0.25 ano ~ 3m)
-
-    return hoje[['Data Vencimento', 'Taxa Compra Manha', 'Carry (dia)', 'Roll-down 3m']].reset_index(drop=True)
 
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS ---
 @st.cache_data(ttl=3600*4)
@@ -669,23 +484,13 @@ def gerar_graficos_insiders_plotly(df_dados, top_n=10):
     return fig_volume, fig_relevancia
 
 @st.cache_data
-def carregar_dados_acoes(tickers, period="max", interval="1d"):
+def carregar_dados_acoes(tickers, period="max"):
+    # ... (código existente inalterado)
     try:
-        data = yf.download(
-            tickers=tickers, period=period, interval=interval,
-            auto_adjust=True, group_by='ticker', progress=False, threads=True
-        )
-        # Normaliza para sempre entregar DataFrame de Close com colunas = tickers
-        if isinstance(data.columns, pd.MultiIndex):
-            df_close = pd.concat(
-                {t: data[t]['Close'] for t in tickers if (t in data) and ('Close' in data[t])},
-                axis=1
-            )
-        else:
-            df_close = data['Close'] if 'Close' in data else data
-        if isinstance(df_close, pd.Series):
-            df_close = df_close.to_frame(tickers[0])
-        return df_close.dropna(how='all').astype('float32')
+        data = yf.download(tickers, period=period, auto_adjust=True)['Close']
+        if isinstance(data, pd.Series): 
+            data = data.to_frame(tickers[0])
+        return data.dropna()
     except Exception:
         return pd.DataFrame()
 
@@ -944,28 +749,7 @@ def gerar_grafico_idex_infra(df_idex_infra):
     )
     return fig
 
-# --- CORRELAÇÃO ROLANTE IDEX x IBOV ---
-
-@st.cache_data
-def correlacao_rolante_idex_ibov(df_idex: pd.DataFrame, janela: int = 90) -> pd.Series:
-    """
-    Correlação rolante (janela em dias úteis) entre retornos do IDEX Geral (filtrado) e do Ibovespa (^BVSP).
-    """
-    if df_idex.empty or 'IDEX Geral (Filtrado)' not in df_idex.columns:
-        return pd.Series(dtype=float)
-
-    df_ibov = carregar_dados_acoes(['^BVSP'], period="20y")
-    if df_ibov.empty:
-        return pd.Series(dtype=float)
-
-    ret_idex = df_idex['IDEX Geral (Filtrado)'].pct_change().dropna()
-    ret_ibov = df_ibov.iloc[:, 0].pct_change().dropna()
-
-    ret_idex, ret_ibov = ret_idex.align(ret_ibov, join='inner')
-    if ret_idex.empty:
-        return pd.Series(dtype=float)
-
-    return ret_idex.rolling(janela).corr(ret_ibov).dropna()
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---
 
 
 def gerar_grafico_idex(df_idex):
@@ -1106,23 +890,14 @@ if pagina_selecionada == "NTN-Bs":
                 if not df_juro_br.empty:
                     fig_spread_br_eua = gerar_grafico_spread_br_eua(df_juro_br, df_fred_br_tab)
                     st.plotly_chart(fig_spread_br_eua, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
-                    try:
-                        if not df_fred_br_tab.empty:
-                            zdict = calcular_zscores_chave(df_tesouro, df_fred_br_tab)
-                            c1, c2, c3 = st.columns(3)
-                            c1.metric("Z 2s10s NTN-F", f"{zdict['Z 2s10s NTN-F']:+.2f}")
-                            c2.metric("Z Breakeven IPCA (med.)", f"{zdict['Z Breakeven IPCA (mediana)']:+.2f}")
-                            c3.metric("Z Spread BR10Y-UST10Y", f"{zdict['Z Spread BR10Y-UST10Y']:+.2f}")
-                    except Exception:
-                        pass
                 else:
                     st.warning("Não foi possível calcular a série de juros de 10 anos para o Brasil.")
             else:
                 st.warning("Não foi possível carregar os dados de juros dos EUA.")
     else:
         st.warning("Não foi possível carregar os dados do Tesouro Direto para exibir esta página.")
-         # --- KPIs de Z-score (Timing Tático) ---
-        
+
+
 elif pagina_selecionada == "Curva de Juros":
     st.header("Estrutura a Termo da Taxa de Juros (ETTJ)")
     st.info("Esta página foca na análise dos títulos públicos prefixados (LTNs e NTN-Fs), que formam a curva de juros nominal da economia.")
@@ -1131,19 +906,6 @@ elif pagina_selecionada == "Curva de Juros":
         st.subheader("Comparativo de Curto Prazo (Últimos 5 Dias)")
         st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
         st.markdown("---")
-        st.subheader("Carry & Roll-down (aproximação) — Prefixados")
-        tbl = estimar_carry_rolldown_prefixados(df_tesouro)
-        if tbl is not None and not tbl.empty:
-            _show = tbl.copy()
-            _show.rename(columns={'Data Vencimento':'Vencimento','Taxa Compra Manha':'Yield (% a.a.)'}, inplace=True)
-            _show['Yield (% a.a.)'] = _show['Yield (% a.a.)'].map(lambda v: f"{v:.2f}%")
-            _show['Carry (dia)'] = _show['Carry (dia)'].map(lambda v: f"{v*100:.02f}%/dia")
-            _show['Roll-down 3m'] = _show['Roll-down 3m)'] if 'Roll-down 3m)' in _show.columns else _show['Roll-down 3m']
-            _show['Roll-down 3m'] = _show['Roll-down 3m'].map(lambda v: f"{v*100:.02f}%")
-            st.dataframe(_show, use_container_width=True)
-        else:
-            st.info("Sem dados suficientes para estimar Carry & Roll-down hoje.")
-
         st.subheader("Comparativo de Longo Prazo (Histórico)")
         st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
     else:
@@ -1180,19 +942,6 @@ elif pagina_selecionada == "Crédito Privado":
         st.plotly_chart(fig_idex_infra, use_container_width=True)
     else:
         st.warning("Não foi possível carregar os dados do IDEX INFRA para exibição.")
-    st.markdown("---")
-    st.subheader("Correlação Rolante: IDEX (Geral) x Ibovespa")
-    try:
-        if not df_idex.empty:
-            corr = correlacao_rolante_idex_ibov(df_idex, janela=90)
-            if not corr.empty:
-                fig_corr = px.line(corr, title="Correlação 90 dias (retornos diários)", template='plotly_dark')
-                fig_corr.update_layout(title_x=0, yaxis_title="Correlação", xaxis_title="Data")
-                st.plotly_chart(fig_corr, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale','toImage']})
-            else:
-                st.info("Sem dados suficientes para calcular a correlação no período.")
-    except Exception:
-        st.warning("Não foi possível calcular a correlação IDEX x Ibovespa.")
 
 elif pagina_selecionada == "Econômicos BR":
     st.header("Monitor de Indicadores Econômicos Nacionais")
@@ -1382,12 +1131,3 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
-
-
-
-
-
-
-
-
-
