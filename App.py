@@ -140,24 +140,63 @@ def calcular_inflacao_implicita(df):
 
 @st.cache_data
 def gerar_grafico_spread_juros(df):
-    # ... (código existente inalterado)
     df_ntnf = df[df['Tipo Titulo'] == 'Tesouro Prefixado com Juros Semestrais'].copy()
     if df_ntnf.empty: return go.Figure().update_layout(title_text="Não há dados de Tesouro Prefixado com Juros Semestrais.")
+
     data_recente = df_ntnf['Data Base'].max()
     titulos_disponiveis_hoje = df_ntnf[df_ntnf['Data Base'] == data_recente]
     vencimentos_atuais = sorted(titulos_disponiveis_hoje['Data Vencimento'].unique())
+
     if len(vencimentos_atuais) < 2: return go.Figure().update_layout(title_text="Menos de duas NTN-Fs disponíveis para calcular o spread.")
-    target_2y, target_10y = data_recente + pd.DateOffset(years=2), data_recente + pd.DateOffset(years=10)
+
+    target_2y = data_recente + pd.DateOffset(years=2)
+    target_10y = data_recente + pd.DateOffset(years=10)
+
     venc_curto = min(vencimentos_atuais, key=lambda d: abs(d - target_2y))
     venc_longo = min(vencimentos_atuais, key=lambda d: abs(d - target_10y))
+
     if venc_curto == venc_longo: return go.Figure().update_layout(title_text="Não foi possível encontrar vértices de 2 e 10 anos distintos.")
+
     df_curto_hist = df_ntnf[df_ntnf['Data Vencimento'] == venc_curto][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
     df_longo_hist = df_ntnf[df_ntnf['Data Vencimento'] == venc_longo][['Data Base', 'Taxa Compra Manha']].set_index('Data Base')
+
     df_spread = pd.merge(df_curto_hist, df_longo_hist, on='Data Base', suffixes=('_curto', '_longo')).dropna()
+
     if df_spread.empty: return go.Figure().update_layout(title_text=f"Não há histórico comum entre as NTN-Fs.")
+
     df_spread['Spread'] = (df_spread['Taxa Compra Manha_longo'] - df_spread['Taxa Compra Manha_curto']) * 100
+
     fig = px.area(df_spread, y='Spread', title=f'Spread de Juros: NTN-F ~10 Anos ({pd.to_datetime(venc_longo).year}) vs ~2 Anos ({pd.to_datetime(venc_curto).year})', template='plotly_dark')
-    fig.update_layout(title_x=0, yaxis_title="Diferença (Basis Points)", xaxis_title="Data", showlegend=False)
+
+    end_date = df_spread.index.max()
+    buttons = []
+    periods = {'1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
+
+    for label, days in periods.items():
+        start_date = df_spread.index.min() if days == 'max' else end_date - timedelta(days=days)
+        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
+
+    fig.update_layout(
+        title_x=0, 
+        yaxis_title="Diferença (Basis Points)", 
+        xaxis_title="Data", 
+        showlegend=False,
+        updatemenus=[dict(
+            type="buttons",
+            direction="right",
+            showactive=True,
+            x=1,
+            xanchor="right",
+            y=1.05,
+            yanchor="bottom",
+            buttons=buttons
+        )]
+    )
+
+    # Define a visualização inicial padrão para os últimos 5 anos
+    start_date_5y = end_date - pd.DateOffset(years=5)
+    fig.update_xaxes(range=[start_date_5y, end_date])
+
     return fig
 
 def gerar_grafico_ettj_curto_prazo(df):
@@ -1135,4 +1174,5 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
