@@ -213,12 +213,31 @@ def gerar_grafico_spread_juros(df):
         )]
     )
     
+    # --- INÍCIO DA CORREÇÃO DE ESCALA ---
     # Define a visualização inicial padrão para os últimos 5 anos
-    start_date_5y_calculada = end_date - pd.DateOffset(years=2)
+    start_date_5y_calculada = end_date - pd.DateOffset(years=5)
     start_date_default = max(start_date_5y_calculada, start_date_real)
     fig.update_xaxes(range=[start_date_default, end_date])
 
+    # Filtra o dataframe para o período de visualização padrão
+    df_visible = df_spread_final.loc[start_date_default:end_date]
+
+    if not df_visible.empty:
+        # Calcula o mínimo e máximo do período visível
+        min_y = df_visible['Spread'].min()
+        max_y = df_visible['Spread'].max()
+        
+        # Adiciona uma margem (padding) para não ficar colado nas bordas
+        padding = (max_y - min_y) * 0.10
+        if padding < 10: # Garante uma margem mínima
+            padding = 10
+            
+        # Define o range do eixo Y para a visualização inicial
+        fig.update_yaxes(range=[min_y - padding, max_y + padding])
+    # --- FIM DA CORREÇÃO DE ESCALA ---
+
     return fig
+
 
 def gerar_grafico_ettj_curto_prazo(df):
     # ... (código existente inalterado)
@@ -1195,6 +1214,7 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
 
