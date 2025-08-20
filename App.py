@@ -214,7 +214,7 @@ def gerar_grafico_spread_juros(df):
     )
     
     # Define a visualização inicial padrão para os últimos 5 anos
-    start_date_5y_calculada = end_date - pd.DateOffset(years=5)
+    start_date_5y_calculada = end_date - pd.DateOffset(years=2)
     start_date_default = max(start_date_5y_calculada, start_date_real)
     fig.update_xaxes(range=[start_date_default, end_date])
 
@@ -1195,6 +1195,7 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
 
 
 
