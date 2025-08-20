@@ -908,6 +908,10 @@ elif pagina_selecionada == "Curva de Juros":
         st.markdown("---")
         st.subheader("Comparativo de Longo Prazo (Histórico)")
         st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
+        st.markdown("---")
+        st.subheader("Spread de Juros (10 Anos vs. 2 Anos)")
+        st.info("Este gráfico mostra a diferença (spread) entre as taxas dos títulos prefixados com juros semestrais (NTN-Fs) com vencimentos próximos de 10 e 2 anos. Um spread positivo indica uma curva inclinada, o que é típico. Spreads negativos (curva invertida) são raros e podem sinalizar expectativas de recessão.")
+        st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True)
     else:
         st.warning("Não foi possível carregar os dados do Tesouro Direto.")
 
@@ -1131,3 +1135,4 @@ elif pagina_selecionada == "Ações BR":
             st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
         with col2:
             st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
