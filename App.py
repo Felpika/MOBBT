@@ -732,8 +732,68 @@ def gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana):
         annotation_bgcolor="rgba(0,0,0,0.7)"
     )
     return fig
+# --- INÍCIO DO NOVO CÓDIGO (FUNÇÕES IFR) ---
 
-# --- FIM DO BLOCO ATUALIZADO ---
+@st.cache_data(ttl=86400) # Cache de 1 dia
+def calcular_amplitude_ifr(precos_fechamento, rsi_periodo=14):
+    """
+    Calcula a amplitude de mercado com base no IFR.
+    Retorna o percentual de ações sobrecompradas (>70), sobrevendidas (<30) e neutras.
+    """
+    if precos_fechamento.empty:
+        return pd.DataFrame()
+
+    st.info("Calculando o indicador de amplitude por IFR...")
+    # A biblioteca pandas_ta precisa ser instalada: pip install pandas_ta
+    import pandas_ta as ta
+
+    ifr_df = precos_fechamento.apply(lambda x: ta.rsi(x, length=rsi_periodo), axis=0)
+    total_valido = ifr_df.notna().sum(axis=1)
+    sobrecompradas = (ifr_df > 70).sum(axis=1) / total_valido * 100
+    sobrevendidas = (ifr_df < 30).sum(axis=1) / total_valido * 100
+    neutras = 100 - sobrecompradas - sobrevendidas
+
+    amplitude_ifr = pd.DataFrame({
+        'IFR > 70 (Sobrecompradas)': sobrecompradas,
+        'IFR < 30 (Sobrevendidas)': sobrevendidas,
+        'IFR Neutro (30-70)': neutras
+    })
+    st.success("Cálculo da amplitude por IFR concluído.")
+    return amplitude_ifr.dropna()
+
+def gerar_grafico_amplitude_ifr(df_ifr_breadth):
+    """
+    Cria um gráfico de área empilhada para visualizar a evolução das faixas de IFR.
+    """
+    if df_ifr_breadth.empty:
+        return go.Figure().update_layout(title_text="Não foi possível gerar o gráfico de IFR.")
+
+    st.info("Gerando o gráfico de IFR...")
+    df_plot = df_ifr_breadth.tail(252) # Filtra para o último ano
+    colunas_ordenadas = ['IFR < 30 (Sobrevendidas)', 'IFR Neutro (30-70)', 'IFR > 70 (Sobrecompradas)']
+
+    fig = px.area(
+        df_plot,
+        x=df_plot.index,
+        y=colunas_ordenadas,
+        title='Amplitude de Mercado (IFR) - % de Ações por Faixa (Último Ano)',
+        labels={'value': '% de Ações', 'variable': 'Faixa de IFR', 'index': 'Data'},
+        color_discrete_map={
+            'IFR < 30 (Sobrevendidas)': '#2ca02c',  # Verde
+            'IFR Neutro (30-70)': '#7f7f7f',      # Cinza
+            'IFR > 70 (Sobrecompradas)': '#d62728'   # Vermelho
+        }
+    )
+    fig.update_layout(
+        template='plotly_dark',
+        yaxis_range=[0, 100],
+        legend_title_text='Faixas de IFR',
+        title_x=0
+    )
+    return fig
+
+# --- FIM DO NOVO CÓDIGO ---
+
 # --- BLOCO 6: LÓGICA DO INDICADOR IDEX JGP (NOVO) ---
 @st.cache_data(ttl=3600*4) # Cache de 4 horas
 def carregar_dados_idex():
@@ -1170,50 +1230,61 @@ elif pagina_selecionada == "Ações BR":
         "- **Abaixo de 30%:** Pode indicar pânico ou sobrevenda, geralmente associado a fundos de mercado."
     )
 
-    if st.button("Analisar Amplitude do Mercado (Lento na 1ª vez)", use_container_width=True):
-        with st.spinner("Executando análise de amplitude completa... Por favor, aguarde."):
-            lista_tickers = obter_tickers_cvm_amplitude()
-            if lista_tickers:
-                precos = obter_precos_historicos_amplitude(lista_tickers)
-                dados_amplitude = calcular_dados_amplitude(precos)
-                
-                if not dados_amplitude.empty:
-                    # Calcula e salva a mediana
-                    mediana_amplitude = dados_amplitude.median()
-                    st.session_state.mediana_amplitude = mediana_amplitude
-                    st.session_state.dados_amplitude = dados_amplitude # Salva os dados para pegar o valor atual
+    # Substitua o bloco do botão e da exibição pelo código abaixo
 
-                    # Gera os dois gráficos, passando a mediana
-                    fig_amplitude = gerar_grafico_amplitude(dados_amplitude, mediana_amplitude)
-                    fig_distribuicao = gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana_amplitude)
-                    
-                    st.session_state.fig_amplitude = fig_amplitude
-                    st.session_state.fig_dist_amplitude = fig_distribuicao
-                else:
-                    st.session_state.fig_amplitude = None
-                    st.session_state.fig_dist_amplitude = None
-                    st.error("Não foi possível gerar os gráficos pois os dados de amplitude não puderam ser calculados.")
+if st.button("Analisar Amplitude do Mercado (Lento na 1ª vez)", use_container_width=True):
+    with st.spinner("Executando análise de amplitude completa... Por favor, aguarde."):
+        lista_tickers = obter_tickers_cvm_amplitude()
+        if lista_tickers:
+            precos = obter_precos_historicos_amplitude(lista_tickers)
+            
+            # --- Análise MMA 200 (Existente) ---
+            dados_amplitude = calcular_dados_amplitude(precos)
+            if not dados_amplitude.empty:
+                mediana_amplitude = dados_amplitude.median()
+                st.session_state.mediana_amplitude = mediana_amplitude
+                st.session_state.dados_amplitude = dados_amplitude
+                st.session_state.fig_amplitude = gerar_grafico_amplitude(dados_amplitude, mediana_amplitude)
+                st.session_state.fig_dist_amplitude = gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana_amplitude)
             else:
                 st.session_state.fig_amplitude = None
                 st.session_state.fig_dist_amplitude = None
-    
-    # Exibe as métricas e os gráficos se eles existirem no estado da sessão
-    if 'fig_amplitude' in st.session_state and st.session_state.fig_amplitude is not None:
-        st.markdown("---")
-        # Exibe as métricas de destaque
-        col_metrica1, col_metrica2, _ = st.columns([0.3, 0.3, 0.4])
-        valor_atual = st.session_state.dados_amplitude.iloc[-1]
-        mediana_valor = st.session_state.mediana_amplitude
-        col_metrica1.metric("Valor Atual do Indicador", f"{valor_atual:.1f}%")
-        col_metrica2.metric("Mediana Histórica (desde 2014)", f"{mediana_valor:.1f}%")
-        st.markdown("---")
+                st.error("Não foi possível calcular os dados de amplitude (MMA 200).")
 
-        # Exibe os gráficos lado a lado
-        col1, col2 = st.columns([0.6, 0.4])
-        with col1:
-            st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
-        with col2:
-            st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+            # --- NOVA ANÁLISE IFR ---
+            dados_ifr = calcular_amplitude_ifr(precos)
+            if not dados_ifr.empty:
+                st.session_state.fig_ifr_amplitude = gerar_grafico_amplitude_ifr(dados_ifr)
+            else:
+                st.session_state.fig_ifr_amplitude = None
+                st.error("Não foi possível calcular os dados de amplitude (IFR).")
+                
+        else:
+            st.session_state.fig_amplitude = None
+            st.session_state.fig_dist_amplitude = None
+            st.session_state.fig_ifr_amplitude = None
+
+# Exibe as métricas e os gráficos se eles existirem no estado da sessão
+if 'fig_amplitude' in st.session_state and st.session_state.fig_amplitude is not None:
+    st.markdown("---")
+    # Exibe as métricas de destaque
+    col_metrica1, col_metrica2, _ = st.columns([0.3, 0.3, 0.4])
+    valor_atual = st.session_state.dados_amplitude.iloc[-1]
+    mediana_valor = st.session_state.mediana_amplitude
+    col_metrica1.metric("Valor Atual (MMA 200)", f"{valor_atual:.1f}%")
+    col_metrica2.metric("Mediana Histórica (desde 2014)", f"{mediana_valor:.1f}%")
+    st.markdown("---")
+
+    # Exibe os gráficos lado a lado
+    col1, col2 = st.columns([0.6, 0.4])
+    with col1:
+        st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
+    with col2:
+        st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+
+# --- Exibe o NOVO GRÁFICO IFR ---
+if 'fig_ifr_amplitude' in st.session_state and st.session_state.fig_ifr_amplitude is not None:
+    st.plotly_chart(st.session_state.fig_ifr_amplitude, use_container_width=True)
 
 
 
