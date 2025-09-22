@@ -1,4 +1,5 @@
-# requirements.txt (versão simples)
+# requirements.txt
+
 streamlit
 pandas
 numpy
@@ -9,3 +10,4 @@ fredapi
 textblob
 openpyxl
 streamlit-option-menu
+pandas-ta
