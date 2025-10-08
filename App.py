@@ -1348,21 +1348,22 @@ elif pagina_selecionada == "Ações BR":
             st.error("Falha ao processar dados de insiders.")
     # elif pagina_selecionada == "Ações BR":
 # ... (código anterior da página de Ações BR) ...
-st.markdown("---")
+    st.markdown("---")
+    
+    # --- Seção 3: Indicador de Amplitude de Mercado (NOVO) ---
+    st.subheader("Raio-X do Mercado (Market Breadth)")
+    st.info(
+        "Esta seção executa a análise completa de amplitude de mercado, incluindo o indicador de % de ações "
+        "acima da MM200 e a análise de IFR. A saída será exibida no console e os gráficos serão mostrados "
+        "se a função for adaptada para o Streamlit."
+    )
+    
+    if st.button("Executar Análise de Amplitude Profissional", use_container_width=True):
+        with st.spinner("Executando a análise... Isso pode ser demorado e a saída aparecerá no console/terminal."):
+            # Chamar a função principal para gerar o dashboard
+            gerar_dashboard_profissional()
+        st.success("Análise concluída! Verifique o console para os resultados detalhados.")
 
-# --- Seção 3: Indicador de Amplitude de Mercado (NOVO) ---
-st.subheader("Raio-X do Mercado (Market Breadth)")
-st.info(
-    "Esta seção executa a análise completa de amplitude de mercado, incluindo o indicador de % de ações "
-    "acima da MM200 e a análise de IFR. A saída será exibida no console e os gráficos serão mostrados "
-    "se a função for adaptada para o Streamlit."
-)
-
-if st.button("Executar Análise de Amplitude Profissional", use_container_width=True):
-    with st.spinner("Executando a análise... Isso pode ser demorado e a saída aparecerá no console/terminal."):
-        # Chamar a função principal para gerar o dashboard
-        gerar_dashboard_profissional()
-    st.success("Análise concluída! Verifique o console para os resultados detalhados.")
 
 
 
