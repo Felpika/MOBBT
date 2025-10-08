@@ -791,7 +791,67 @@ def gerar_grafico_amplitude_ifr(df_ifr_breadth):
         title_x=0
     )
     return fig
+# --- INÍCIO DAS NOVAS FUNÇÕES DE ANÁLISE DE AMPLITUDE (HEATMAPS) ---
 
+def analisar_retornos_por_faixa(df_precos, df_indicador, nome_indicador, periodos_retorno, passo):
+    """
+    Analisa os retornos futuros de um ativo com base em faixas de um indicador de amplitude.
+    """
+    df_analise = pd.DataFrame(df_precos['Close'])
+    df_analise = df_analise.join(df_indicador)
+
+    # Calcula os retornos futuros para cada período
+    for nome_periodo, dias in periodos_retorno.items():
+        df_analise[f'retorno_{nome_periodo}'] = df_analise['Close'].pct_change(periods=dias).shift(-dias) * 100
+    df_analise.dropna(inplace=True)
+
+    # Define as faixas do indicador
+    sufixo = '%' if nome_indicador == 'market_breadth' else ''
+    bins = list(range(0, 101, passo))
+    labels = [f'{i}-{i+passo}{sufixo}' for i in range(0, 100, passo)]
+    df_analise[f'faixa_{nome_indicador}'] = pd.cut(df_analise[nome_indicador], bins=bins, labels=labels, right=False, include_lowest=True)
+
+    colunas_retorno = [f'retorno_{p}' for p in periodos_retorno.keys()]
+    grouped = df_analise.groupby(f'faixa_{nome_indicador}', observed=True)
+    
+    # Calcula o retorno médio e a taxa de acerto
+    media_resultados = grouped[colunas_retorno].mean()
+    positivos = grouped[colunas_retorno].agg(lambda x: (x > 0).sum())
+    totais = grouped[colunas_retorno].count()
+    acerto_resultados = (positivos / totais * 100).fillna(0)
+
+    return media_resultados, acerto_resultados
+
+def gerar_heatmap_retornos(df_resultados, titulo, faixa_atual):
+    """
+    Gera um gráfico de heatmap para visualizar os retornos ou taxas de acerto.
+    """
+    df_plot = df_resultados.copy()
+    df_plot.columns = df_plot.columns.str.replace('retorno_', '').replace('_', ' ')
+    
+    fig = go.Figure(data=go.Heatmap(
+        z=df_plot.values,
+        x=df_plot.columns,
+        y=df_plot.index,
+        hoverongaps=False,
+        colorscale='RdYlGn',
+        text=df_plot.map(lambda x: f'{x:.1f}%').values,
+        texttemplate="%{text}"
+    ))
+
+    # Destaca a faixa atual do indicador
+    faixas_y = list(df_plot.index)
+    if faixa_atual in faixas_y:
+        y_pos = faixas_y.index(faixa_atual)
+        fig.add_shape(type="rect", xref="paper", yref="y",
+                      x0=0, y0=y_pos-0.5, x1=1, y1=y_pos+0.5,
+                      line=dict(color="White", width=3),
+                      fillcolor="rgba(255,255,255,0.1)")
+
+    fig.update_layout(title=titulo, template='plotly_dark', title_x=0)
+    return fig
+
+# --- FIM DAS NOVAS FUNÇÕES DE ANÁLISE DE AMPLITUDE ---
 # --- FIM DO NOVO CÓDIGO ---
 
 # --- BLOCO 6: LÓGICA DO INDICADOR IDEX JGP (NOVO) ---
@@ -1153,7 +1213,8 @@ elif pagina_selecionada == "Internacional":
 elif pagina_selecionada == "Ações BR":
     st.header("Ferramentas de Análise de Ações Brasileiras")
     st.markdown("---")
-    # Seção 1: Análise de Ratio
+    
+    # Seção 1: Análise de Ratio (código original mantido)
     st.subheader("Análise de Ratio de Ativos (Long & Short)")
     st.info("Esta ferramenta calcula o ratio entre o preço de dois ativos. "
             "**Interpretação:** Quando o ratio está alto, o Ativo A está caro em relação ao Ativo B. "
@@ -1188,7 +1249,8 @@ elif pagina_selecionada == "Ações BR":
     if st.session_state.get('fig_ratio'):
         st.plotly_chart(st.session_state.fig_ratio, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
     st.markdown("---")
-    # Seção 2: Análise de Insiders
+    
+    # Seção 2: Análise de Insiders (código original mantido)
     st.subheader("Radar de Insiders (Movimentações CVM)")
     st.info("Analisa as movimentações de compra e venda de ações feitas por pessoas ligadas à empresa (Controladores, Diretores, etc.), com base nos dados públicos da CVM. Grandes volumes de compra podem indicar confiança na empresa.")
     if st.button("Analisar Movimentações de Insiders do Mês", use_container_width=True):
@@ -1216,72 +1278,143 @@ elif pagina_selecionada == "Ações BR":
                 st.warning("Não foram encontrados dados de movimentação para Demais Insiders no último mês.")
         else:
             st.error("Falha ao processar dados de insiders.")
-    # elif pagina_selecionada == "Ações BR":
-# ... (código anterior da página de Ações BR) ...
 
     st.markdown("---")
 
-    # --- Seção 3: Indicador de Amplitude de Mercado (ATUALIZADO COM MEDIANA) ---
-    st.subheader("Raio-X do Mercado (Market Breadth)")
+    # --- Seção 3: Indicador de Amplitude de Mercado (ATUALIZADO COM TODAS AS NOVAS ANÁLISES) ---
+    st.subheader("Raio-X do Mercado (Análise de Amplitude)")
     st.info(
-        "Este indicador mostra a porcentagem de ações da B3 negociadas acima da Média Móvel de 200 dias. "
-        "É uma ferramenta para medir a saúde interna do mercado.\n\n"
-        "- **Acima de 70%:** Pode indicar euforia ou sobrecompra.\n"
-        "- **Abaixo de 30%:** Pode indicar pânico ou sobrevenda, geralmente associado a fundos de mercado."
+        "Esta seção analisa a saúde interna do mercado através de indicadores de amplitude. "
+        "Calculamos o comportamento histórico do Ibovespa (via BOVA11) quando os indicadores atingem "
+        "diferentes níveis, fornecendo uma base estatística para a tomada de decisão."
     )
 
-    # Substitua o bloco do botão e da exibição pelo código abaixo
-
-if st.button("Analisar Amplitude do Mercado (Lento na 1ª vez)", use_container_width=True):
-    with st.spinner("Executando análise de amplitude completa... Por favor, aguarde."):
-        lista_tickers = obter_tickers_cvm_amplitude()
-        if lista_tickers:
-            precos = obter_precos_historicos_amplitude(lista_tickers)
-            
-            # --- Análise MMA 200 (Existente) ---
-            dados_amplitude = calcular_dados_amplitude(precos)
-            if not dados_amplitude.empty:
-                mediana_amplitude = dados_amplitude.median()
-                st.session_state.mediana_amplitude = mediana_amplitude
-                st.session_state.dados_amplitude = dados_amplitude
-                st.session_state.fig_amplitude = gerar_grafico_amplitude(dados_amplitude, mediana_amplitude)
-                st.session_state.fig_dist_amplitude = gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana_amplitude)
-            else:
-                st.session_state.fig_amplitude = None
-                st.session_state.fig_dist_amplitude = None
-                st.error("Não foi possível calcular os dados de amplitude (MMA 200).")
-
-            # --- NOVA ANÁLISE IFR ---
-            dados_ifr = calcular_amplitude_ifr(precos)
-            if not dados_ifr.empty:
-                st.session_state.fig_ifr_amplitude = gerar_grafico_amplitude_ifr(dados_ifr)
-            else:
-                st.session_state.fig_ifr_amplitude = None
-                st.error("Não foi possível calcular os dados de amplitude (IFR).")
+    if st.button("Executar Análise de Amplitude Completa (Lento na 1ª vez)", use_container_width=True):
+        with st.spinner("Executando análise de amplitude... Isso pode levar vários minutos na primeira execução do dia."):
+            # 1. Obtenção dos dados base
+            lista_tickers = obter_tickers_cvm_amplitude()
+            if lista_tickers:
+                precos = obter_precos_historicos_amplitude(lista_tickers, anos_historico=10)
+                bova11 = yf.download('BOVA11.SA', start=precos.index.min(), end=precos.index.max(), auto_adjust=True)
                 
-        else:
-            st.session_state.fig_amplitude = None
-            st.session_state.fig_dist_amplitude = None
-            st.session_state.fig_ifr_amplitude = None
+                # Armazena tudo no session_state para evitar reprocessamento
+                st.session_state.amplitude_data = {'precos': precos, 'bova11': bova11}
+                st.success("Dados carregados. Iniciando cálculos...")
 
-# Exibe as métricas e os gráficos se eles existirem no estado da sessão
-if 'fig_amplitude' in st.session_state and st.session_state.fig_amplitude is not None:
-    st.markdown("---")
-    # Exibe as métricas de destaque
-    col_metrica1, col_metrica2, _ = st.columns([0.3, 0.3, 0.4])
-    valor_atual = st.session_state.dados_amplitude.iloc[-1]
-    mediana_valor = st.session_state.mediana_amplitude
-    col_metrica1.metric("Valor Atual (MMA 200)", f"{valor_atual:.1f}%")
-    col_metrica2.metric("Mediana Histórica (desde 2014)", f"{mediana_valor:.1f}%")
-    st.markdown("---")
+                # 2. Análise de Market Breadth (MMA 200)
+                dados_amplitude = calcular_dados_amplitude(precos)
+                dados_amplitude.name = 'market_breadth'
+                if not dados_amplitude.empty:
+                    st.session_state.amplitude_data['dados_mm200'] = dados_amplitude
+                
+                # 3. Análise de Amplitude (IFR)
+                ifr_individual = precos.apply(lambda x: ta.rsi(x, length=14), axis=0)
+                media_geral_ifr = ifr_individual.mean(axis=1).dropna()
+                media_geral_ifr.name = 'media_ifr_geral'
+                if not media_geral_ifr.empty:
+                    st.session_state.amplitude_data['dados_ifr'] = media_geral_ifr
+                
+                dados_ifr_empilhado = calcular_amplitude_ifr(ifr_individual)
+                if not dados_ifr_empilhado.empty:
+                    st.session_state.amplitude_data['ifr_empilhado'] = dados_ifr_empilhado
 
-    # Exibe os gráficos lado a lado
-    col1, col2 = st.columns([0.6, 0.4])
-    with col1:
-        st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
-    with col2:
-        st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
+                st.success("Análise concluída!")
+            else:
+                st.error("Falha ao obter a lista de tickers da CVM.")
+                st.session_state.amplitude_data = None
 
-# --- Exibe o NOVO GRÁFICO IFR ---
-if 'fig_ifr_amplitude' in st.session_state and st.session_state.fig_ifr_amplitude is not None:
-    st.plotly_chart(st.session_state.fig_ifr_amplitude, use_container_width=True)
+    # Exibe os resultados se os dados já foram processados e estão na sessão
+    if 'amplitude_data' in st.session_state and st.session_state.amplitude_data:
+        
+        # Parâmetros da análise
+        PERIODOS_RETORNO = {'1 Mês': 21, '3 Meses': 63, '6 Meses': 126, '1 Ano': 252}
+        bova11 = st.session_state.amplitude_data['bova11']
+        
+        st.markdown("---")
+        st.subheader("Análise de Market Breadth (% de Ações acima da MM200)")
+
+        if 'dados_mm200' in st.session_state.amplitude_data:
+            dados_mm200 = st.session_state.amplitude_data['dados_mm200']
+            
+            # Métricas Estatísticas
+            valor_atual = dados_mm200.iloc[-1]
+            media_hist = dados_mm200.mean()
+            z_score = (valor_atual - media_hist) / dados_mm200.std()
+            percentil = stats.percentileofscore(dados_mm200, valor_atual)
+
+            cols_metricas, col_hist = st.columns([0.6, 0.4])
+            with cols_metricas:
+                st.metric("Valor Atual", f"{valor_atual:.2f}%")
+                st.metric("Média Histórica", f"{media_hist:.2f}%")
+                st.metric("Z-Score (Desvios da Média)", f"{z_score:.2f}")
+                st.metric("Percentil Histórico", f"{percentil:.2f}%")
+            
+            with col_hist:
+                fig_dist = gerar_grafico_distribuicao_amplitude(dados_mm200, media_hist)
+                st.plotly_chart(fig_dist, use_container_width=True)
+
+            # Análise de Retornos e Heatmaps
+            passo = 10
+            ret_medio, tx_acerto = analisar_retornos_por_faixa(bova11, dados_mm200, 'market_breadth', PERIODOS_RETORNO, passo)
+            
+            faixa_atual_valor = int(valor_atual // passo) * passo
+            faixa_atual_str = f'{faixa_atual_valor}-{faixa_atual_valor + passo}%'
+
+            st.markdown(f"O valor atual (**{valor_atual:.2f}%**) se enquadra na faixa **{faixa_atual_str}**. Historicamente, o comportamento do BOVA11 nesta faixa foi:")
+            
+            col_heat1, col_heat2 = st.columns(2)
+            with col_heat1:
+                fig_hm_ret = gerar_heatmap_retornos(ret_medio, "Heatmap de Retorno Médio (%) do BOVA11", faixa_atual_str)
+                st.plotly_chart(fig_hm_ret, use_container_width=True)
+            with col_heat2:
+                fig_hm_tx = gerar_heatmap_retornos(tx_acerto, "Heatmap de Taxa de Acerto (%) do BOVA11", faixa_atual_str)
+                st.plotly_chart(fig_hm_tx, use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("Análise de Amplitude por IFR (Média Geral)")
+
+        if 'dados_ifr' in st.session_state.amplitude_data and 'ifr_empilhado' in st.session_state.amplitude_data:
+            dados_ifr = st.session_state.amplitude_data['dados_ifr']
+            dados_ifr_empilhado = st.session_state.amplitude_data['ifr_empilhado']
+
+            # Gráfico de Área Empilhada
+            fig_ifr_area = gerar_grafico_amplitude_ifr(dados_ifr_empilhado)
+            st.plotly_chart(fig_ifr_area, use_container_width=True)
+
+            # Métricas Estatísticas da Média do IFR
+            valor_atual_ifr = dados_ifr.iloc[-1]
+            media_hist_ifr = dados_ifr.mean()
+            z_score_ifr = (valor_atual_ifr - media_hist_ifr) / dados_ifr.std()
+            percentil_ifr = stats.percentileofscore(dados_ifr, valor_atual_ifr)
+
+            cols_metricas_ifr, col_hist_ifr = st.columns([0.6, 0.4])
+            with cols_metricas_ifr:
+                st.metric("Valor Atual (Média IFR)", f"{valor_atual_ifr:.2f}")
+                st.metric("Média Histórica (Média IFR)", f"{media_hist_ifr:.2f}")
+                st.metric("Z-Score (Desvios da Média)", f"{z_score_ifr:.2f}")
+                st.metric("Percentil Histórico", f"{percentil_ifr:.2f}%")
+            
+            with col_hist_ifr:
+                fig_dist_ifr = px.histogram(dados_ifr, nbins=50, title='Distribuição da Média do IFR', template='plotly_dark')
+                fig_dist_ifr.add_vline(x=media_hist_ifr, line_color="gray", line_dash="dash", annotation_text=f"Média: {media_hist_ifr:.1f}")
+                fig_dist_ifr.add_vline(x=valor_atual_ifr, line_color="#fde047", line_dash="dot", annotation_text=f"Atual: {valor_atual_ifr:.1f}")
+                fig_dist_ifr.update_layout(showlegend=False, title_x=0)
+                st.plotly_chart(fig_dist_ifr, use_container_width=True)
+
+            # Análise de Retornos e Heatmaps para o IFR
+            passo_ifr = 5
+            ret_medio_ifr, tx_acerto_ifr = analisar_retornos_por_faixa(bova11, dados_ifr, 'media_ifr_geral', PERIODOS_RETORNO, passo_ifr)
+            
+            faixa_atual_valor_ifr = int(valor_atual_ifr // passo_ifr) * passo_ifr
+            faixa_atual_str_ifr = f'{faixa_atual_valor_ifr}-{faixa_atual_valor_ifr + passo_ifr}'
+
+            st.markdown(f"A média do IFR atual (**{valor_atual_ifr:.2f}**) está na faixa **{faixa_atual_str_ifr}**. Historicamente, o comportamento do BOVA11 nesta faixa foi:")
+
+            col_heat_ifr1, col_heat_ifr2 = st.columns(2)
+            with col_heat_ifr1:
+                fig_hm_ret_ifr = gerar_heatmap_retornos(ret_medio_ifr, "Heatmap de Retorno Médio (%) do BOVA11", faixa_atual_str_ifr)
+                st.plotly_chart(fig_hm_ret_ifr, use_container_width=True)
+            with col_heat_ifr2:
+                fig_hm_tx_ifr = gerar_heatmap_retornos(tx_acerto_ifr, "Heatmap de Taxa de Acerto (%) do BOVA11", faixa_atual_str_ifr)
+                st.plotly_chart(fig_hm_tx_ifr, use_container_width=True)
+
