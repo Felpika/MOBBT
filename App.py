@@ -1314,6 +1314,8 @@ elif pagina_selecionada == "Ações BR":
                 # para garantir um DataFrame com índice de coluna de nível único.
                 bova11_raw = yf.download('BOVA11.SA', start=precos.index.min(), end=precos.index.max(), auto_adjust=True)
                 if not bova11_raw.empty:
+                    # Esta linha seleciona apenas a coluna de fechamento e cria uma cópia,
+                    # o que efetivamente remove o multi-nível das colunas.
                     bova11 = bova11_raw[['Close']].copy()
                     # --- FIM DA CORREÇÃO ---
                     
