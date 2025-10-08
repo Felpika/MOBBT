@@ -1349,23 +1349,21 @@ elif pagina_selecionada == "Ações BR":
             lista_tickers = obter_tickers_cvm_amplitude()
             if lista_tickers:
                 precos = obter_precos_historicos_amplitude(lista_tickers, anos_historico=ANOS_HISTORICO)
-                
-                # --- VERIFICAÇÃO CRÍTICA ---
                 if precos.empty:
                     st.error("Não foi possível obter os dados históricos dos ativos da CVM. A análise não pode continuar.")
-                    st.stop() # Interrompe a execução
+                    st.stop()
 
                 dados_bova11 = yf.download(ATIVO_ANALISE, start=precos.index.min(), end=precos.index.max(), auto_adjust=True, progress=False)
-
-                # --- VERIFICAÇÃO CRÍTICA PARA O ATIVO DE ANÁLISE (BOVA11) ---
                 if dados_bova11.empty or 'Close' not in dados_bova11.columns:
-                    st.error(f"Falha ao baixar os dados do ativo de referência ({ATIVO_ANALISE}). Verifique o ticker e sua conexão. A análise não pode continuar.")
-                    st.stop() # Interrompe a execução
-                
+                    st.error(f"Falha ao baixar os dados do ativo de referência ({ATIVO_ANALISE}). A análise não pode continuar.")
+                    st.stop()
+
                 # --- 2. Análise Market Breadth (MM200) ---
                 st.info("Processando Indicador MM200...")
                 market_breadth = calcular_dados_amplitude(precos)
-                df_analise_mb = pd.DataFrame(dados_bova11['Close']) # Esta linha agora é segura
+                
+                # CORREÇÃO: Criação segura do DataFrame de análise
+                df_analise_mb = dados_bova11[['Close']].copy()
                 df_analise_mb = df_analise_mb.join(market_breadth.rename('market_breadth'))
                 for nome_periodo, dias in PERIODOS_RETORNO.items():
                     df_analise_mb[f'retorno_{nome_periodo}'] = df_analise_mb['Close'].pct_change(periods=dias).shift(-dias) * 100
@@ -1386,7 +1384,8 @@ elif pagina_selecionada == "Ações BR":
                 ifr_amplitude_df = calcular_amplitude_ifr(precos, rsi_periodo=RSI_PERIODO)
                 media_geral_ifr = ifr_amplitude_df['Média IFR Geral']
                 
-                df_analise_ifr = pd.DataFrame(dados_bova11['Close'])
+                # CORREÇÃO: Criação segura do DataFrame de análise
+                df_analise_ifr = dados_bova11[['Close']].copy()
                 df_analise_ifr = df_analise_ifr.join(media_geral_ifr.rename('media_ifr_geral'))
                 for nome_periodo, dias in PERIODOS_RETORNO.items():
                     df_analise_ifr[f'retorno_{nome_periodo}'] = df_analise_ifr['Close'].pct_change(periods=dias).shift(-dias) * 100
@@ -1406,6 +1405,7 @@ elif pagina_selecionada == "Ações BR":
                 st.session_state.analise_amplitude_executada = True
             else:
                 st.error("Falha ao obter lista de tickers da CVM. A análise não pôde ser concluída.")
+
 
 
 
