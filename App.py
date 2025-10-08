@@ -1380,9 +1380,10 @@ elif pagina_selecionada == "Ações BR":
                 st.info("Processando Indicador MM200...")
                 market_breadth = calcular_dados_amplitude(precos)
                 
-                # CORREÇÃO DEFINITIVA: Garante que o DataFrame tem uma estrutura de coluna simples
-                df_analise_mb = pd.DataFrame(dados_bova11['Close'])
+                # CORREÇÃO DEFINITIVA: Explicitamente cria e nomeia a coluna 'Close'
+                df_analise_mb = pd.DataFrame(dados_bova11['Close'].values, index=dados_bova11.index, columns=['Close'])
                 df_analise_mb = df_analise_mb.join(market_breadth.rename('market_breadth'))
+                
                 for nome_periodo, dias in PERIODOS_RETORNO.items():
                     df_analise_mb[f'retorno_{nome_periodo}'] = df_analise_mb['Close'].pct_change(periods=dias).shift(-dias) * 100
                 df_analise_mb.dropna(inplace=True)
@@ -1402,9 +1403,10 @@ elif pagina_selecionada == "Ações BR":
                 ifr_amplitude_df = calcular_amplitude_ifr(precos, rsi_periodo=RSI_PERIODO)
                 media_geral_ifr = ifr_amplitude_df['Média IFR Geral']
                 
-                # CORREÇÃO DEFINITIVA: Garante que o DataFrame tem uma estrutura de coluna simples
-                df_analise_ifr = pd.DataFrame(dados_bova11['Close'])
+                # CORREÇÃO DEFINITIVA: Explicitamente cria e nomeia a coluna 'Close'
+                df_analise_ifr = pd.DataFrame(dados_bova11['Close'].values, index=dados_bova11.index, columns=['Close'])
                 df_analise_ifr = df_analise_ifr.join(media_geral_ifr.rename('media_ifr_geral'))
+
                 for nome_periodo, dias in PERIODOS_RETORNO.items():
                     df_analise_ifr[f'retorno_{nome_periodo}'] = df_analise_ifr['Close'].pct_change(periods=dias).shift(-dias) * 100
                 df_analise_ifr.dropna(inplace=True)
@@ -1423,6 +1425,7 @@ elif pagina_selecionada == "Ações BR":
                 st.session_state.analise_amplitude_executada = True
             else:
                 st.error("Falha ao obter lista de tickers da CVM. A análise não pôde ser concluída.")
+
 
 
 
