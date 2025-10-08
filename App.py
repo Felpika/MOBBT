@@ -1230,6 +1230,19 @@ elif pagina_selecionada == "Amplitude":
             
             fig_ifr = gerar_grafico_amplitude_ifr(ifr_amplitude_df, media_geral_ifr)
             st.plotly_chart(fig_ifr, use_container_width=True)
+            
+            # --- INÍCIO DA SEÇÃO ADICIONADA: HISTOGRAMAS ---
+            st.markdown("---")
+            st.subheader("Distribuição Histórica dos Indicadores")
+            col1_hist, col2_hist = st.columns(2)
+            with col1_hist:
+                fig_hist_mb_dist = gerar_histograma_com_metricas(market_breadth, "Distribuição do Market Breadth", valor_atual_mb, media_hist_mb)
+                st.plotly_chart(fig_hist_mb_dist, use_container_width=True)
+            with col2_hist:
+                fig_hist_ifr_dist = gerar_histograma_com_metricas(media_geral_ifr, "Distribuição da Média Geral do IFR", valor_atual_ifr, media_hist_ifr)
+                st.plotly_chart(fig_hist_ifr_dist, use_container_width=True)
+            # --- FIM DA SEÇÃO ADICIONADA ---
+
 
             # --- Heatmaps de Retorno Futuro ---
             st.markdown("---")
@@ -1267,5 +1280,4 @@ elif pagina_selecionada == "Amplitude":
             with col2:
                 fig_heatmap_ifr = plotar_heatmap_com_indicador_atual(resultados_ifr['Retorno Médio'], faixa_atual_ifr, "Heatmap de Retorno Médio vs. Média Geral do IFR")
                 st.plotly_chart(fig_heatmap_ifr, use_container_width=True)
-
 
