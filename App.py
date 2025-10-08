@@ -1380,8 +1380,8 @@ elif pagina_selecionada == "Ações BR":
                 st.info("Processando Indicador MM200...")
                 market_breadth = calcular_dados_amplitude(precos)
                 
-                # CORREÇÃO: Criação segura do DataFrame de análise
-                df_analise_mb = dados_bova11[['Close']].copy()
+                # CORREÇÃO DEFINITIVA: Garante que o DataFrame tem uma estrutura de coluna simples
+                df_analise_mb = pd.DataFrame(dados_bova11['Close'])
                 df_analise_mb = df_analise_mb.join(market_breadth.rename('market_breadth'))
                 for nome_periodo, dias in PERIODOS_RETORNO.items():
                     df_analise_mb[f'retorno_{nome_periodo}'] = df_analise_mb['Close'].pct_change(periods=dias).shift(-dias) * 100
@@ -1402,8 +1402,8 @@ elif pagina_selecionada == "Ações BR":
                 ifr_amplitude_df = calcular_amplitude_ifr(precos, rsi_periodo=RSI_PERIODO)
                 media_geral_ifr = ifr_amplitude_df['Média IFR Geral']
                 
-                # CORREÇÃO: Criação segura do DataFrame de análise
-                df_analise_ifr = dados_bova11[['Close']].copy()
+                # CORREÇÃO DEFINITIVA: Garante que o DataFrame tem uma estrutura de coluna simples
+                df_analise_ifr = pd.DataFrame(dados_bova11['Close'])
                 df_analise_ifr = df_analise_ifr.join(media_geral_ifr.rename('media_ifr_geral'))
                 for nome_periodo, dias in PERIODOS_RETORNO.items():
                     df_analise_ifr[f'retorno_{nome_periodo}'] = df_analise_ifr['Close'].pct_change(periods=dias).shift(-dias) * 100
