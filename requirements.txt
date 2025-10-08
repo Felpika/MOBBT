@@ -11,3 +11,4 @@ textblob
 openpyxl
 streamlit-option-menu
 pandas-ta
+scipy
