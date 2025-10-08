@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import io # Adicionado para a nova funcionalidade
 from streamlit_option_menu import option_menu
 import pandas_ta as ta
+from scipy import stats
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="MOBBT")
@@ -1418,5 +1419,6 @@ elif pagina_selecionada == "Ações BR":
             with col_heat_ifr2:
                 fig_hm_tx_ifr = gerar_heatmap_retornos(tx_acerto_ifr, "Heatmap de Taxa de Acerto (%) do BOVA11", faixa_atual_str_ifr)
                 st.plotly_chart(fig_hm_tx_ifr, use_container_width=True)
+
 
 
