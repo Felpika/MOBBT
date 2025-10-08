@@ -1319,9 +1319,6 @@ elif pagina_selecionada == "Ações BR":
 
     st.markdown("---")
 
-    # --- Seção 3: Indicador de Amplitude de Mercado (ATUALIZADO COM MEDIANA) ---
-  st.markdown("---")
-
     # --- Seção 3: Indicador de Amplitude de Mercado (ANÁLISE COMPLETA) ---
     st.subheader("Raio-X do Mercado (Market Breadth)")
     st.info(
@@ -1461,6 +1458,7 @@ if st.session_state.get('analise_amplitude_executada', False):
     with g4:
         fig_heat_ifr = plotar_heatmap_com_indicador_atual(st.session_state.resultados_ifr['Retorno Médio'], st.session_state.faixa_atual_ifr, "Heatmap de Retorno Médio vs. Média do IFR")
         st.plotly_chart(fig_heat_ifr, use_container_width=True)
+
 
 
 
