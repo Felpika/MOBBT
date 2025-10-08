@@ -642,19 +642,37 @@ def obter_tickers_cvm_amplitude():
 
 @st.cache_data(ttl=86400) # Cache de 1 dia
 def obter_precos_historicos_amplitude(tickers, anos_historico=15):
-    """Baixa os dados históricos de preços usando yfinance e o cache do Streamlit."""
+    """
+    Baixa os dados históricos de preços, tratando a estrutura de colunas do yfinance
+    para garantir um DataFrame simples e evitar MergeError.
+    """
     st.info(f"Buscando {anos_historico} anos de dados de preços para {len(tickers)} ativos... (Pode ser MUITO lento na primeira execução do dia)")
     tickers_sa = [ticker + ".SA" for ticker in tickers]
     data_final = datetime.now()
     data_inicial = data_final - timedelta(days=anos_historico*365)
     
-    # Adicionado tratamento de exceção para o download em massa
     try:
         dados_completos = yf.download(tickers=tickers_sa, start=data_inicial, end=data_final, auto_adjust=True, progress=False)
+        
         if not dados_completos.empty:
-            precos_fechamento = dados_completos['Close']
-            # Remove colunas que só contêm valores nulos (tickers que falharam)
+            # Seleciona a coluna 'Close'. O resultado pode ser uma Series (1 ticker) ou DataFrame (múltiplos tickers).
+            if 'Close' in dados_completos.columns:
+                 precos_fechamento = dados_completos['Close']
+            else:
+                 st.error("ERRO: A coluna 'Close' não foi encontrada nos dados baixados.")
+                 return pd.DataFrame()
+
+            # Garante que o resultado seja sempre um DataFrame
+            if isinstance(precos_fechamento, pd.Series):
+                precos_fechamento = precos_fechamento.to_frame(tickers_sa[0])
+            
+            # Remove colunas que contenham apenas dados nulos (falhas no download de tickers específicos)
             precos_fechamento.dropna(axis=1, how='all', inplace=True)
+            
+            if precos_fechamento.empty:
+                st.error("ERRO: Nenhum dado de preço válido foi retornado após a limpeza.")
+                return pd.DataFrame()
+
             st.success(f"Download concluído. {precos_fechamento.shape[1]} ativos com dados válidos.")
             return precos_fechamento.astype('float32')
         else:
@@ -1405,6 +1423,7 @@ elif pagina_selecionada == "Ações BR":
                 st.session_state.analise_amplitude_executada = True
             else:
                 st.error("Falha ao obter lista de tickers da CVM. A análise não pôde ser concluída.")
+
 
 
 
