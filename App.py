@@ -795,12 +795,22 @@ def gerar_grafico_amplitude_ifr(df_ifr_breadth):
     return fig
 # --- INÍCIO DAS NOVAS FUNÇÕES DE ANÁLISE DE AMPLITUDE (HEATMAPS) ---
 
+# --- INÍCIO DAS NOVAS FUNÇÕES DE ANÁLISE DE AMPLITUDE (HEATMAPS) ---
+
 def analisar_retornos_por_faixa(df_precos, df_indicador, nome_indicador, periodos_retorno, passo):
     """
     Analisa os retornos futuros de um ativo com base em faixas de um indicador de amplitude.
     """
-    df_analise = pd.DataFrame(df_precos['Close'])
+    # --- CORREÇÃO APLICADA AQUI ---
+    # Em vez de criar um novo DataFrame, vamos trabalhar com uma cópia do original
+    # para garantir que a coluna 'Close' seja preservada corretamente.
+    df_analise = df_precos.copy()
     df_analise = df_analise.join(df_indicador)
+    
+    # Mantém apenas as colunas necessárias para a análise
+    colunas_necessarias = ['Close', nome_indicador]
+    df_analise = df_analise[colunas_necessarias]
+    # --- FIM DA CORREÇÃO ---
 
     # Calcula os retornos futuros para cada período
     for nome_periodo, dias in periodos_retorno.items():
@@ -854,6 +864,7 @@ def gerar_heatmap_retornos(df_resultados, titulo, faixa_atual):
     return fig
 
 # --- FIM DAS NOVAS FUNÇÕES DE ANÁLISE DE AMPLITUDE ---
+
 # --- FIM DO NOVO CÓDIGO ---
 
 # --- BLOCO 6: LÓGICA DO INDICADOR IDEX JGP (NOVO) ---
@@ -1419,6 +1430,7 @@ elif pagina_selecionada == "Ações BR":
             with col_heat_ifr2:
                 fig_hm_tx_ifr = gerar_heatmap_retornos(tx_acerto_ifr, "Heatmap de Taxa de Acerto (%) do BOVA11", faixa_atual_str_ifr)
                 st.plotly_chart(fig_hm_tx_ifr, use_container_width=True)
+
 
 
 
