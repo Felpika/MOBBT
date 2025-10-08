@@ -1353,7 +1353,7 @@ elif pagina_selecionada == "Ações BR":
         "A análise mostra o retorno futuro do BOVA11.SA quando os indicadores estavam nas mesmas faixas no passado."
     )
 
-    if st.button("Executar Análise de Amplitude Completa (Lento na 1ª vez)", use_container_width=True):
+   if st.button("Executar Análise de Amplitude Completa (Lento na 1ª vez)", use_container_width=True):
         st.session_state.analise_amplitude_executada = False
         with st.spinner("Executando análise completa... Isso pode levar vários minutos. Por favor, aguarde."):
             # Parâmetros
@@ -1380,51 +1380,138 @@ elif pagina_selecionada == "Ações BR":
                 st.info("Processando Indicador MM200...")
                 market_breadth = calcular_dados_amplitude(precos)
                 
-                # CORREÇÃO DEFINITIVA: Explicitamente cria e nomeia a coluna 'Close'
-                df_analise_mb = pd.DataFrame(dados_bova11['Close'].values, index=dados_bova11.index, columns=['Close'])
+                # CORREÇÃO: Padroniza os índices de data para evitar problemas de fuso horário
+                if dados_bova11.index.tz is not None:
+                    dados_bova11.index = dados_bova11.index.tz_localize(None)
+                if market_breadth.index.tz is not None:
+                    market_breadth.index = market_breadth.index.tz_localize(None)
+
+                df_analise_mb = pd.DataFrame(dados_bova11['Close'])
                 df_analise_mb = df_analise_mb.join(market_breadth.rename('market_breadth'))
-                
                 for nome_periodo, dias in PERIODOS_RETORNO.items():
                     df_analise_mb[f'retorno_{nome_periodo}'] = df_analise_mb['Close'].pct_change(periods=dias).shift(-dias) * 100
                 df_analise_mb.dropna(inplace=True)
                 
-                st.session_state.resultados_mb = analisar_por_faixa(df_analise_mb.copy(), 'market_breadth', colunas_retorno)
-                st.session_state.valor_atual_mb = market_breadth.iloc[-1]
-                st.session_state.media_hist_mb = market_breadth.mean()
-                st.session_state.z_score_mb = (st.session_state.valor_atual_mb - st.session_state.media_hist_mb) / market_breadth.std()
-                st.session_state.percentil_mb = stats.percentileofscore(market_breadth, st.session_state.valor_atual_mb)
-                passo_mb = 10
-                faixa_atual_valor_mb = int(st.session_state.valor_atual_mb // passo_mb) * passo_mb
-                st.session_state.faixa_atual_mb = f'{faixa_atual_valor_mb}-{faixa_atual_valor_mb + passo_mb}%'
-                st.session_state.market_breadth_series = market_breadth
+                # Adiciona verificação para garantir que há dados para analisar
+                if not df_analise_mb.empty:
+                    st.session_state.resultados_mb = analisar_por_faixa(df_analise_mb.copy(), 'market_breadth', colunas_retorno)
+                    st.session_state.valor_atual_mb = market_breadth.iloc[-1]
+                    st.session_state.media_hist_mb = market_breadth.mean()
+                    st.session_state.z_score_mb = (st.session_state.valor_atual_mb - st.session_state.media_hist_mb) / market_breadth.std()
+                    st.session_state.percentil_mb = stats.percentileofscore(market_breadth, st.session_state.valor_atual_mb)
+                    passo_mb = 10
+                    faixa_atual_valor_mb = int(st.session_state.valor_atual_mb // passo_mb) * passo_mb
+                    st.session_state.faixa_atual_mb = f'{faixa_atual_valor_mb}-{faixa_atual_valor_mb + passo_mb}%'
+                    st.session_state.market_breadth_series = market_breadth
+                else:
+                    st.warning("Análise MM200: Nenhum dado correspondente encontrado após a limpeza. Não é possível gerar os resultados.")
+                    st.session_state.resultados_mb = None
+
 
                 # --- 3. Análise Amplitude IFR ---
                 st.info("Processando Indicador IFR...")
                 ifr_amplitude_df = calcular_amplitude_ifr(precos, rsi_periodo=RSI_PERIODO)
                 media_geral_ifr = ifr_amplitude_df['Média IFR Geral']
+                if media_geral_ifr.index.tz is not None:
+                    media_geral_ifr.index = media_geral_ifr.index.tz_localize(None)
                 
-                # CORREÇÃO DEFINITIVA: Explicitamente cria e nomeia a coluna 'Close'
-                df_analise_ifr = pd.DataFrame(dados_bova11['Close'].values, index=dados_bova11.index, columns=['Close'])
+                df_analise_ifr = pd.DataFrame(dados_bova11['Close'])
                 df_analise_ifr = df_analise_ifr.join(media_geral_ifr.rename('media_ifr_geral'))
-
                 for nome_periodo, dias in PERIODOS_RETORNO.items():
                     df_analise_ifr[f'retorno_{nome_periodo}'] = df_analise_ifr['Close'].pct_change(periods=dias).shift(-dias) * 100
                 df_analise_ifr.dropna(inplace=True)
 
-                st.session_state.resultados_ifr = analisar_por_faixa(df_analise_ifr.copy(), 'media_ifr_geral', colunas_retorno)
-                st.session_state.valor_atual_ifr = media_geral_ifr.iloc[-1]
-                st.session_state.media_hist_ifr = media_geral_ifr.mean()
-                st.session_state.z_score_ifr = (st.session_state.valor_atual_ifr - st.session_state.media_hist_ifr) / media_geral_ifr.std()
-                st.session_state.percentil_ifr = stats.percentileofscore(media_geral_ifr, st.session_state.valor_atual_ifr)
-                passo_ifr = 5
-                faixa_atual_valor_ifr = int(st.session_state.valor_atual_ifr // passo_ifr) * passo_ifr
-                st.session_state.faixa_atual_ifr = f'{faixa_atual_valor_ifr}-{faixa_atual_valor_ifr + passo_ifr}'
-                st.session_state.media_geral_ifr_series = media_geral_ifr
-                st.session_state.ifr_amplitude_df = ifr_amplitude_df
+                if not df_analise_ifr.empty:
+                    st.session_state.resultados_ifr = analisar_por_faixa(df_analise_ifr.copy(), 'media_ifr_geral', colunas_retorno)
+                    st.session_state.valor_atual_ifr = media_geral_ifr.iloc[-1]
+                    st.session_state.media_hist_ifr = media_geral_ifr.mean()
+                    st.session_state.z_score_ifr = (st.session_state.valor_atual_ifr - st.session_state.media_hist_ifr) / media_geral_ifr.std()
+                    st.session_state.percentil_ifr = stats.percentileofscore(media_geral_ifr, st.session_state.valor_atual_ifr)
+                    passo_ifr = 5
+                    faixa_atual_valor_ifr = int(st.session_state.valor_atual_ifr // passo_ifr) * passo_ifr
+                    st.session_state.faixa_atual_ifr = f'{faixa_atual_valor_ifr}-{faixa_atual_valor_ifr + passo_ifr}'
+                    st.session_state.media_geral_ifr_series = media_geral_ifr
+                    st.session_state.ifr_amplitude_df = ifr_amplitude_df
+                else:
+                    st.warning("Análise IFR: Nenhum dado correspondente encontrado após a limpeza. Não é possível gerar os resultados.")
+                    st.session_state.resultados_ifr = None
 
                 st.session_state.analise_amplitude_executada = True
             else:
                 st.error("Falha ao obter lista de tickers da CVM. A análise não pôde ser concluída.")
+
+# --- Lógica de Exibição dos Resultados (Atualizada com verificação) ---
+if st.session_state.get('analise_amplitude_executada', False):
+
+    # --- Bloco de Resultados do Market Breadth (MM200) ---
+    if st.session_state.get('resultados_mb') is not None:
+        st.markdown("---")
+        st.subheader("Análise de Market Breadth (% Ações acima da MM200)")
+        
+        # Texto de análise
+        st.markdown(f"O valor **atual** do indicador é de **{st.session_state.valor_atual_mb:.2f}%**.")
+        st.markdown(
+            f"""
+            - **Posição vs Média:** Está **{'ACIMA' if st.session_state.valor_atual_mb > st.session_state.media_hist_mb else 'ABAIXO'}** da média histórica de {st.session_state.media_hist_mb:.2f}%.
+            - **Z-Score:** Está a **{st.session_state.z_score_mb:.2f} desvios-padrão** {'acima' if st.session_state.z_score_mb > 0 else 'abaixo'} da média.
+            - **Percentil Histórico:** O nível atual é **maior do que {st.session_state.percentil_mb:.2f}%** de todas as observações históricas.
+            """
+        )
+        st.markdown(f"O valor atual se enquadra na faixa **{st.session_state.faixa_atual_mb}**. Historicamente, nesta faixa:")
+        try:
+            dados_historicos = st.session_state.resultados_mb.loc[st.session_state.faixa_atual_mb]
+            st.dataframe(dados_historicos.T.style.format("{:.2f}%"), use_container_width=True)
+        except KeyError:
+            st.warning("Não há dados históricos suficientes para esta faixa.")
+
+        # Gráficos MM200
+        fig_hist_mb = px.line(st.session_state.market_breadth_series.tail(252*10), title=f'Histórico Recente do Market Breadth (10 Anos)', template='plotly_dark')
+        fig_hist_mb.add_hline(y=st.session_state.media_hist_mb, line_dash="dash", line_color="gray", annotation_text="Média Hist.")
+        fig_hist_mb.add_hline(y=st.session_state.valor_atual_mb, line_dash="dot", line_color="yellow", annotation_text=f"Atual")
+        fig_hist_mb.update_layout(showlegend=False, title_x=0)
+        st.plotly_chart(fig_hist_mb, use_container_width=True)
+
+        g1, g2 = st.columns(2)
+        with g1:
+            fig_dist_mb = gerar_histograma_com_metricas(st.session_state.market_breadth_series, "Distribuição Histórica (MM200)", st.session_state.valor_atual_mb, st.session_state.media_hist_mb)
+            st.plotly_chart(fig_dist_mb, use_container_width=True)
+        with g2:
+            fig_heat_mb = plotar_heatmap_com_indicador_atual(st.session_state.resultados_mb['Retorno Médio'], st.session_state.faixa_atual_mb, "Heatmap de Retorno Médio vs. Market Breadth")
+            st.plotly_chart(fig_heat_mb, use_container_width=True)
+
+    # --- Bloco de Resultados da Amplitude do IFR ---
+    if st.session_state.get('resultados_ifr') is not None:
+        st.markdown("---")
+        st.subheader("Análise de Amplitude da Média do IFR")
+
+        # Texto de análise IFR
+        st.markdown(f"O valor **atual** da média do IFR de todos os ativos é de **{st.session_state.valor_atual_ifr:.2f}**.")
+        st.markdown(
+            f"""
+            - **Posição vs Média:** Está **{'ACIMA' if st.session_state.valor_atual_ifr > st.session_state.media_hist_ifr else 'ABAIXO'}** da média histórica de {st.session_state.media_hist_ifr:.2f}.
+            - **Z-Score:** Está a **{st.session_state.z_score_ifr:.2f} desvios-padrão** {'acima' if st.session_state.z_score_ifr > 0 else 'abaixo'} da média.
+            - **Percentil Histórico:** O nível atual é **maior do que {st.session_state.percentil_ifr:.2f}%** de todas as observações históricas.
+            """
+        )
+        st.markdown(f"O valor atual se enquadra na faixa **{st.session_state.faixa_atual_ifr}**. Historicamente, nesta faixa:")
+        try:
+            dados_historicos_ifr = st.session_state.resultados_ifr.loc[st.session_state.faixa_atual_ifr]
+            st.dataframe(dados_historicos_ifr.T.style.format("{:.2f}%"), use_container_width=True)
+        except KeyError:
+            st.warning("Não há dados históricos suficientes para esta faixa.")
+
+        # Gráficos IFR
+        fig_ifr_area = gerar_grafico_amplitude_ifr(st.session_state.ifr_amplitude_df)
+        st.plotly_chart(fig_ifr_area, use_container_width=True)
+
+        g3, g4 = st.columns(2)
+        with g3:
+            fig_dist_ifr = gerar_histograma_com_metricas(st.session_state.media_geral_ifr_series, "Distribuição Histórica (Média IFR)", st.session_state.valor_atual_ifr, st.session_state.media_hist_ifr)
+            st.plotly_chart(fig_dist_ifr, use_container_width=True)
+        with g4:
+            fig_heat_ifr = plotar_heatmap_com_indicador_atual(st.session_state.resultados_ifr['Retorno Médio'], st.session_state.faixa_atual_ifr, "Heatmap de Retorno Médio vs. Média do IFR")
+            st.plotly_chart(fig_heat_ifr, use_container_width=True)
+
 
 
 
