@@ -616,138 +616,69 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     fig.update_layout(title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}', template='plotly_dark', title_x=0, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
-# --- INÍCIO DO BLOCO: LÓGICA DO INDICADOR DE AMPLITUDE (ATUALIZADO) ---
+# --- INÍCIO DO BLOCO: LÓGICA DO INDICADOR DE AMPLITUDE (SUBSTITUÍDO) ---
+import pandas_ta as ta # Biblioteca para o cálculo do IFR
+from IPython.display import display, Markdown
+from scipy import stats
 
-@st.cache_data(ttl=86400) # Cache de 1 dia
+# --- Funções de Cálculo do Market Breadth ---
 def obter_tickers_cvm_amplitude():
-    """Obtém a lista de tickers da CVM, usando o cache do Streamlit."""
-    st.info("Buscando lista de tickers da CVM... (rápido se em cache diário)")
+    """Esta função busca a lista de tickers da CVM."""
     ano = datetime.now().year
     url = f'https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ano}.zip'
-    nome_arquivo_csv = f'fca_cia_aberta_valor_mobiliario_{ano}.csv'
     try:
         response = requests.get(url, stream=True)
         response.raise_for_status()
         with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-            with z.open(nome_arquivo_csv) as f:
+            with z.open(f'fca_cia_aberta_valor_mobiliario_{ano}.csv') as f:
                 df = pd.read_csv(f, sep=';', encoding='ISO-8859-1', dtype={'Valor_Mobiliario': 'category', 'Mercado': 'category'})
         df_filtrado = df[(df['Valor_Mobiliario'].isin(['Ações Ordinárias', 'Ações Preferenciais'])) & (df['Mercado'] == 'Bolsa')]
-        tickers = df_filtrado['Codigo_Negociacao'].dropna().unique().tolist()
-        st.success(f"{len(tickers)} tickers encontrados na CVM.")
-        return tickers
+        return df_filtrado['Codigo_Negociacao'].dropna().unique().tolist()
     except Exception as e:
-        st.error(f"ERRO: Não foi possível obter os dados da CVM. {e}")
+        print(f"Erro ao obter tickers da CVM: {e}")
         return None
 
-@st.cache_data(ttl=86400) # Cache de 1 dia
-def obter_precos_historicos_amplitude(tickers, anos_historico=15):
-    """Baixa os dados históricos de preços usando yfinance e o cache do Streamlit."""
-    st.info(f"Buscando {anos_historico} anos de dados de preços para {len(tickers)} ativos... (Pode ser MUITO lento na primeira execução do dia)")
-    tickers_sa = [ticker + ".SA" for ticker in tickers]
-    data_final = datetime.now()
-    data_inicial = data_final - timedelta(days=anos_historico*365)
-    dados_completos = yf.download(tickers=tickers_sa, start=data_inicial, end=data_final, auto_adjust=True, progress=False)
-    if not dados_completos.empty:
-        precos_fechamento = dados_completos['Close'].astype('float32')
-        st.success("Download dos dados de preços concluído.")
-        return precos_fechamento
-    else:
-        st.error("ERRO: Falha no download dos dados de preços.")
-        return pd.DataFrame()
+def obter_precos_historicos_amplitude(tickers, anos_historico=10):
+    """Esta função baixa os preços históricos, usando o cache para ser rápida."""
+    NOME_ARQUIVO_CACHE = 'cache_precos_historicos.parquet'
+    if os.path.exists(NOME_ARQUIVO_CACHE):
+        print("Market Breadth: Carregando dados de preços do cache local...")
+        return pd.read_parquet(NOME_ARQUIVO_CACHE)
 
-@st.cache_data(ttl=86400) # Cache de 1 dia
+    print(f"Market Breadth: Cache não encontrado. Iniciando download...")
+    tickers_sa = [ticker + ".SA" for ticker in tickers]
+    dados_completos = yf.download(tickers=tickers_sa, start=datetime.now() - timedelta(days=anos_historico*365), end=datetime.now(), auto_adjust=True, progress=True, group_by='ticker')
+    if not dados_completos.empty:
+        precos_fechamento = dados_completos.stack(level=0, future_stack=True)['Close'].unstack(level=1)
+        precos_fechamento.to_parquet(NOME_ARQUIVO_CACHE)
+        return precos_fechamento.astype('float32')
+    return pd.DataFrame()
+
 def calcular_dados_amplitude(precos_fechamento):
-    """Calcula o indicador de amplitude e retorna a série de dados a partir de 2014."""
-    if precos_fechamento.empty:
-        return pd.Series()
-    st.info("Calculando o indicador de amplitude...")
-    mma200 = precos_fechamento.rolling(window=200).mean()
+    """Esta função calcula o indicador de Market Breadth (MM200)."""
+    if precos_fechamento.empty: return pd.Series()
+    print("Market Breadth: Calculando indicador...")
+    mma200 = precos_fechamento.rolling(window=200, min_periods=50).mean()
     acima_da_media = precos_fechamento > mma200
     percentual_acima_media = (acima_da_media.sum(axis=1) / precos_fechamento.notna().sum(axis=1)) * 100
-    percentual_acima_media.dropna(inplace=True)
-    
-    # Filtra os dados para começar em 2014
-    dados_filtrados = percentual_acima_media[percentual_acima_media.index >= '2014-01-01']
-    return dados_filtrados
+    percentual_acima_media.name = 'market_breadth'
+    return percentual_acima_media.dropna()
 
-def gerar_grafico_amplitude(dados_amplitude, mediana):
-    """Gera o gráfico de linha do indicador de amplitude, incluindo a linha da mediana."""
-    if dados_amplitude.empty:
-        return None
-    st.info("Gerando o gráfico de linha...")
-    fig = go.Figure()
-    fig.add_hline(y=70, line_color='red', line_dash='dash', annotation_text='Sobrecompra (70%)', annotation_position="bottom right")
-    fig.add_hline(y=50, line_color='gray', line_dash='dash', annotation_text='Linha Central (50%)', annotation_position="bottom right")
-    
-    # --- LINHA DA MEDIANA ADICIONADA AQUI ---
-    fig.add_hline(
-        y=mediana, line_color="#a855f7", line_dash="dot",
-        annotation_text=f"Mediana ({mediana:.1f}%)",
-        annotation_position="bottom left",
-        annotation_font=dict(color="#a855f7")
-    )
-    
-    fig.add_hline(y=30, line_color='green', line_dash='dash', annotation_text='Sobrevenda (30%)', annotation_position="bottom right")
-    fig.add_trace(go.Scatter(x=dados_amplitude.index, y=dados_amplitude, mode='lines', name='% Acima da MMA 200', line=dict(color='#636EFA', width=2)))
-    fig.update_layout(
-        title_text='Raio-X do Mercado (desde 2014)', title_x=0,
-        yaxis_title='Percentual de Ativos (%)', xaxis_title='Data',
-        template='plotly_dark', yaxis_range=[0, 100],
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-    return fig
-
-def gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana):
-    """Gera um histograma da distribuição dos valores do indicador, incluindo a mediana."""
-    if dados_amplitude.empty:
-        return None
-    st.info("Gerando o gráfico de distribuição...")
-    valor_atual = dados_amplitude.iloc[-1]
-    fig = px.histogram(
-        dados_amplitude, nbins=50, 
-        title='Distribuição Histórica do Indicador',
-        template='plotly_dark'
-    )
-    fig.update_layout(
-        showlegend=False, title_x=0,
-        xaxis_title="Percentual de Ações Acima da MMA 200",
-        yaxis_title="Frequência (Dias)"
-    )
-
-    # --- LINHA DA MEDIANA ADICIONADA AQUI ---
-    fig.add_vline(
-        x=mediana, line_color="#a855f7", line_dash="dot",
-        annotation_text=f" Mediana: {mediana:.1f}% ",
-        annotation_position="top right",
-        annotation_font=dict(color="#a855f7", size=14),
-        annotation_bgcolor="rgba(0,0,0,0.7)"
-    )
-    
-    # Linha vertical para indicar o valor atual
-    fig.add_vline(
-        x=valor_atual, line_color="#fde047", line_dash="dash",
-        annotation_text=f" Hoje: {valor_atual:.1f}% ",
-        annotation_position="top left",
-        annotation_font=dict(color="#fde047", size=14),
-        annotation_bgcolor="rgba(0,0,0,0.7)"
-    )
-    return fig
-# --- INÍCIO DO NOVO CÓDIGO (FUNÇÕES IFR) ---
-
-@st.cache_data(ttl=86400) # Cache de 1 dia
-def calcular_amplitude_ifr(precos_fechamento, rsi_periodo=14):
+# --- INÍCIO DAS FUNÇÕES DE IFR USANDO PANDAS_TA ---
+def calcular_ifr_com_pandasta(precos, periodo=14):
     """
-    Calcula a amplitude de mercado com base no IFR.
-    Retorna o percentual de ações sobrecompradas (>70), sobrevendidas (<30) e neutras.
+    Calcula o IFR para todas as colunas de um DataFrame de preços usando a biblioteca pandas_ta.
     """
-    if precos_fechamento.empty:
-        return pd.DataFrame()
+    print("IFR: Calculando para todos os ativos com a biblioteca pandas_ta...")
+    # Aplica o cálculo do IFR a cada coluna (ativo) de forma eficiente
+    ifr_df = precos.apply(lambda x: ta.rsi(x, length=periodo), axis=0)
+    return ifr_df
 
-    st.info("Calculando o indicador de amplitude por IFR...")
-    # A biblioteca pandas_ta precisa ser instalada: pip install pandas_ta
-    import pandas_ta as ta
-
-    ifr_df = precos_fechamento.apply(lambda x: ta.rsi(x, length=rsi_periodo), axis=0)
+def calcular_amplitude_ifr(ifr_df):
+    """
+    Agrega um DataFrame de valores de IFR nas faixas sobrecomprada, sobrevendida e neutra.
+    """
+    print("IFR: Agregando dados de amplitude...")
     total_valido = ifr_df.notna().sum(axis=1)
     sobrecompradas = (ifr_df > 70).sum(axis=1) / total_valido * 100
     sobrevendidas = (ifr_df < 30).sum(axis=1) / total_valido * 100
@@ -758,41 +689,240 @@ def calcular_amplitude_ifr(precos_fechamento, rsi_periodo=14):
         'IFR < 30 (Sobrevendidas)': sobrevendidas,
         'IFR Neutro (30-70)': neutras
     })
-    st.success("Cálculo da amplitude por IFR concluído.")
     return amplitude_ifr.dropna()
 
 def gerar_grafico_amplitude_ifr(df_ifr_breadth):
     """
-    Cria um gráfico de área empilhada para visualizar a evolução das faixas de IFR.
+    Cria um gráfico de área empilhada para visualizar a evolução das faixas de IFR no último ano,
+    incluindo uma linha para a média geral do IFR.
     """
     if df_ifr_breadth.empty:
-        return go.Figure().update_layout(title_text="Não foi possível gerar o gráfico de IFR.")
+        print("Não foi possível gerar o gráfico de IFR: DataFrame vazio.")
+        return
 
-    st.info("Gerando o gráfico de IFR...")
-    df_plot = df_ifr_breadth.tail(252) # Filtra para o último ano
-    colunas_ordenadas = ['IFR < 30 (Sobrevendidas)', 'IFR Neutro (30-70)', 'IFR > 70 (Sobrecompradas)']
+    print("IFR: Gerando o gráfico...")
+    display(Markdown("---"))
+    display(Markdown("### Gráfico de Evolução da Amplitude do IFR (Último Ano)"))
 
-    fig = px.area(
-        df_plot,
-        x=df_plot.index,
-        y=colunas_ordenadas,
-        title='Amplitude de Mercado (IFR) - % de Ações por Faixa (Último Ano)',
-        labels={'value': '% de Ações', 'variable': 'Faixa de IFR', 'index': 'Data'},
-        color_discrete_map={
-            'IFR < 30 (Sobrevendidas)': '#2ca02c',  # Verde
-            'IFR Neutro (30-70)': '#7f7f7f',      # Cinza
-            'IFR > 70 (Sobrecompradas)': '#d62728'   # Vermelho
-        }
-    )
+    df_plot = df_ifr_breadth.tail(252)
+
+    fig = go.Figure()
+
+    # Adiciona as áreas empilhadas
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot['IFR < 30 (Sobrevendidas)'],
+        mode='lines', line=dict(width=0), stackgroup='one', name='IFR < 30 (Oportunidade)',
+        fillcolor='#2ca02c'
+    ))
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot['IFR Neutro (30-70)'],
+        mode='lines', line=dict(width=0), stackgroup='one', name='IFR Neutro',
+        fillcolor='#7f7f7f'
+    ))
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot['IFR > 70 (Sobrecompradas)'],
+        mode='lines', line=dict(width=0), stackgroup='one', name='IFR > 70 (Risco)',
+        fillcolor='#d62728'
+    ))
+
+    # Adiciona a linha da média geral do IFR no eixo secundário
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot['Média IFR Geral'],
+        mode='lines', line=dict(color='yellow', width=2.5), name='Média Geral do IFR',
+        yaxis='y2'
+    ))
+
+    # Atualiza o layout para incluir o eixo secundário
     fig.update_layout(
+        title='Amplitude de Mercado (IFR) - % de Ações por Faixa vs. Média (Último Ano)',
         template='plotly_dark',
-        yaxis_range=[0, 100],
         legend_title_text='Faixas de IFR',
-        title_x=0
+        title_x=0.5,
+        yaxis=dict(title='Percentual de Ações (%)', range=[0, 100]),
+        yaxis2=dict(
+            title='Média Geral do IFR',
+            overlaying='y',
+            side='right',
+            range=[0, 100],
+            showgrid=False
+        ),
+        hovermode='x unified'
     )
-    return fig
+    fig.show()
 
-# --- FIM DO NOVO CÓDIGO ---
+# --- FIM DAS FUNÇÕES DE IFR ---
+
+# --- FUNÇÃO PARA GERAR HISTOGRAMAS ---
+def gerar_histograma_com_metricas(series_dados, titulo, valor_atual, media_hist):
+    """Gera um histograma de uma série de dados com linhas verticais para o valor atual e a média."""
+    fig = px.histogram(series_dados, title=titulo, nbins=50)
+    fig.add_vline(x=media_hist, line_dash="dash", line_color="gray",
+                  annotation_text=f"Média Hist: {media_hist:.2f}",
+                  annotation_position="top left")
+    fig.add_vline(x=valor_atual, line_dash="dot", line_color="yellow",
+                  annotation_text=f"Atual: {valor_atual:.2f}",
+                  annotation_position="top right")
+    fig.update_layout(template='plotly_dark', showlegend=False)
+    fig.show()
+
+
+# --- Função Principal do Dashboard ---
+def gerar_dashboard_profissional():
+    """Consolida e aprofunda as análises para criar um dashboard profissional de apoio à decisão."""
+    # --- Parâmetros Gerais ---
+    ATIVO_ANALISE = 'BOVA11.SA'
+    ANOS_HISTORICO = 10
+    RSI_PERIODO = 14
+    PERIODOS_RETORNO = {'1 Mês': 21, '3 Meses': 63, '6 Meses': 126, '1 Ano': 252}
+    colunas_retorno = [f'retorno_{nome}' for nome in PERIODOS_RETORNO.keys()]
+
+    # --- 1. OBTENÇÃO DOS DADOS BASE ---
+    tickers = obter_tickers_cvm_amplitude()
+    if not tickers:
+        print("Não foi possível obter a lista de tickers da CVM.")
+        return
+    precos = obter_precos_historicos_amplitude(tickers, anos_historico=ANOS_HISTORICO)
+
+    print(f"Baixando dados do {ATIVO_ANALISE} para análise de retorno...")
+    dados_bova11 = yf.download(ATIVO_ANALISE, start=datetime.now() - timedelta(days=ANOS_HISTORICO*365), end=datetime.now(), auto_adjust=True, progress=False)
+
+
+    # --- 2. FUNÇÕES AUXILIARES DE ANÁLISE ---
+    def analisar_por_faixa(df, nome_coluna_indicador):
+        # <<< ALTERAÇÃO AQUI: PASSO DIFERENTE PARA O IFR >>>
+        if nome_coluna_indicador == 'media_ifr_geral':
+            passo = 5  # Faixas menores para o IFR
+        else:
+            passo = 10 # Mantém o padrão para outros indicadores
+
+        sufixo = '%' if nome_coluna_indicador == 'market_breadth' else ''
+        bins = list(range(0, 101, passo))
+        labels = [f'{i}-{i+passo}{sufixo}' for i in range(0, 100, passo)]
+        df[f'faixa_{nome_coluna_indicador}'] = pd.cut(df[nome_coluna_indicador], bins=bins, labels=labels, right=False, include_lowest=True)
+
+        grouped = df.groupby(f'faixa_{nome_coluna_indicador}', observed=True)
+        media_resultados = grouped[colunas_retorno].mean()
+
+        positivos = grouped[colunas_retorno].agg(lambda x: (x > 0).sum())
+        totais = grouped[colunas_retorno].count()
+        acerto_resultados = (positivos / totais * 100).fillna(0)
+
+        return pd.concat([media_resultados, acerto_resultados], axis=1, keys=['Retorno Médio', 'Taxa de Acerto'])
+
+    def plotar_heatmap_com_indicador_atual(tabela_media, faixa_atual, titulo):
+        fig = go.Figure(data=go.Heatmap(
+                            z=tabela_media.values,
+                            x=tabela_media.columns.str.replace('retorno_', ''),
+                            y=tabela_media.index,
+                            hoverongaps=False, colorscale='RdYlGn',
+                            text=tabela_media.map(lambda x: f'{x:.1f}%').values,
+                            texttemplate="%{text}"))
+
+        faixas_y = list(tabela_media.index)
+        if faixa_atual in faixas_y:
+            y_pos = faixas_y.index(faixa_atual)
+            fig.add_shape(type="rect", xref="paper", yref="y",
+                          x0=0, y0=y_pos-0.5, x1=1, y1=y_pos+0.5,
+                          line=dict(color="White", width=3))
+
+        fig.update_layout(title=titulo, template='plotly_dark', yaxis_title='Faixa do Indicador')
+        fig.show()
+
+    # --- 3. GERAÇÃO DO DASHBOARD ---
+    display(Markdown("# Painel de Apoio à Decisão - Indicadores de Amplitude"))
+    display(Markdown(f"**Data da Análise:** {datetime.now().strftime('%d/%m/%Y')}"))
+
+    # Parte 3.1: Dashboard do Market Breadth (MM200)
+    market_breadth = calcular_dados_amplitude(precos)
+    df_analise_mb = pd.DataFrame(dados_bova11['Close'])
+    df_analise_mb.columns = ['Close']
+    df_analise_mb = df_analise_mb.join(market_breadth)
+    for nome_periodo, dias in PERIODOS_RETORNO.items():
+        df_analise_mb[f'retorno_{nome_periodo}'] = df_analise_mb['Close'].pct_change(periods=dias, fill_method=None).shift(-dias) * 100
+    df_analise_mb.dropna(inplace=True)
+    resultados_mb = analisar_por_faixa(df_analise_mb.copy(), 'market_breadth')
+
+    valor_atual_mb = market_breadth.iloc[-1]
+    media_hist_mb = market_breadth.mean()
+    std_hist_mb = market_breadth.std()
+    z_score_mb = (valor_atual_mb - media_hist_mb) / std_hist_mb
+    percentil_mb = stats.percentileofscore(market_breadth, valor_atual_mb)
+    passo_mb = 10
+    faixa_atual_valor_mb = int(valor_atual_mb // passo_mb) * passo_mb
+    faixa_atual_mb = f'{faixa_atual_valor_mb}-{faixa_atual_valor_mb + passo_mb}%'
+
+    display(Markdown("---"))
+    display(Markdown("## Análise de Market Breadth (% Ações acima da MM200)"))
+    display(Markdown(f"O valor **atual** é de **{valor_atual_mb:.2f}%**."))
+    display(Markdown(f"- **Posição vs Média:** Está **{'ACIMA' if valor_atual_mb > media_hist_mb else 'ABAIXO'}** da média histórica de {media_hist_mb:.2f}%."))
+    display(Markdown(f"- **Z-Score:** Está a **{z_score_mb:.2f} desvios-padrão** {'acima' if z_score_mb > 0 else 'abaixo'} da média."))
+    display(Markdown(f"- **Percentil Histórico:** O nível atual é **maior do que {percentil_mb:.2f}%** de todas as observações históricas."))
+    display(Markdown(f"\nO valor atual se enquadra na faixa **{faixa_atual_mb}**. Historicamente, nesta faixa:"))
+    try:
+        dados_historicos = resultados_mb.loc[faixa_atual_mb]
+        for nome, dias in PERIODOS_RETORNO.items():
+            ret_medio = dados_historicos[('Retorno Médio', f'retorno_{nome}')]
+            tx_acerto = dados_historicos[('Taxa de Acerto', f'retorno_{nome}')]
+            display(Markdown(f"   - **Retorno em {nome}:** A média foi de **{ret_medio:.2f}%**, com taxa de acerto de **{tx_acerto:.2f}%**."))
+    except KeyError:
+        display(Markdown("_Não há dados históricos suficientes para esta faixa._"))
+
+    df_plot_mb = market_breadth.tail(252*10)
+    fig_hist_mb = px.line(df_plot_mb, title=f'Histórico Recente do Market Breadth (10 Anos)')
+    fig_hist_mb.add_hline(y=media_hist_mb, line_dash="dash", line_color="gray", annotation_text="Média Hist.")
+    fig_hist_mb.add_hline(y=valor_atual_mb, line_dash="dot", line_color="yellow", annotation_text=f"Atual: {valor_atual_mb:.2f}")
+    fig_hist_mb.update_layout(template='plotly_dark', showlegend=False)
+    fig_hist_mb.show()
+
+    gerar_histograma_com_metricas(market_breadth, "Distribuição Histórica do Market Breadth (% Ações acima da MM200)", valor_atual_mb, media_hist_mb)
+    plotar_heatmap_com_indicador_atual(resultados_mb['Retorno Médio'], faixa_atual_mb, "Heatmap de Retorno Médio vs. Market Breadth")
+
+    # Parte 3.2: Dashboard da Amplitude do IFR
+    ifr_individual_df = calcular_ifr_com_pandasta(precos, periodo=RSI_PERIODO)
+    ifr_amplitude_df = calcular_amplitude_ifr(ifr_individual_df)
+    media_geral_ifr = ifr_individual_df.mean(axis=1).dropna()
+    ifr_amplitude_df['Média IFR Geral'] = media_geral_ifr
+
+    df_analise_ifr = pd.DataFrame(dados_bova11['Close'])
+    df_analise_ifr.columns = ['Close']
+    df_analise_ifr = df_analise_ifr.join(media_geral_ifr.rename('media_ifr_geral'))
+    for nome_periodo, dias in PERIODOS_RETORNO.items():
+        df_analise_ifr[f'retorno_{nome_periodo}'] = df_analise_ifr['Close'].pct_change(periods=dias, fill_method=None).shift(-dias) * 100
+    df_analise_ifr.dropna(inplace=True)
+    resultados_ifr = analisar_por_faixa(df_analise_ifr.copy(), 'media_ifr_geral')
+
+    valor_atual_ifr_medio = media_geral_ifr.iloc[-1]
+    media_hist_ifr_medio = media_geral_ifr.mean()
+    std_hist_ifr_medio = media_geral_ifr.std()
+    z_score_ifr = (valor_atual_ifr_medio - media_hist_ifr_medio) / std_hist_ifr_medio
+    percentil_ifr = stats.percentileofscore(media_geral_ifr, valor_atual_ifr_medio)
+
+    # <<< ALTERAÇÃO AQUI: AJUSTE DO PASSO PARA A FAIXA ATUAL >>>
+    passo_ifr = 5
+    faixa_atual_valor_ifr = int(valor_atual_ifr_medio // passo_ifr) * passo_ifr
+    faixa_atual_ifr = f'{faixa_atual_valor_ifr}-{faixa_atual_valor_ifr + passo_ifr}' # Sem o '%'
+
+    display(Markdown("---"))
+    display(Markdown("## Análise de Amplitude da Média do IFR"))
+    display(Markdown(f"O valor **atual** da média do IFR é de **{valor_atual_ifr_medio:.2f}**."))
+    display(Markdown(f"- **Posição vs Média:** Está **{'ACIMA' if valor_atual_ifr_medio > media_hist_ifr_medio else 'ABAIXO'}** da média histórica de {media_hist_ifr_medio:.2f}."))
+    display(Markdown(f"- **Z-Score:** Está a **{z_score_ifr:.2f} desvios-padrão** {'acima' if z_score_ifr > 0 else 'abaixo'} da média."))
+    display(Markdown(f"- **Percentil Histórico:** O nível atual é **maior do que {percentil_ifr:.2f}%** de todas as observações históricas."))
+    display(Markdown(f"\nO valor atual se enquadra na faixa **{faixa_atual_ifr}**. Historicamente, nesta faixa:"))
+    try:
+        dados_historicos_ifr = resultados_ifr.loc[faixa_atual_ifr]
+        for nome, dias in PERIODOS_RETORNO.items():
+            ret_medio = dados_historicos_ifr[('Retorno Médio', f'retorno_{nome}')]
+            tx_acerto = dados_historicos_ifr[('Taxa de Acerto', f'retorno_{nome}')]
+            display(Markdown(f"   - **Retorno em {nome}:** A média foi de **{ret_medio:.2f}%**, com taxa de acerto de **{tx_acerto:.2f}%**."))
+    except KeyError:
+        display(Markdown("_Não há dados históricos suficientes para esta faixa._"))
+
+    gerar_grafico_amplitude_ifr(ifr_amplitude_df)
+    gerar_histograma_com_metricas(media_geral_ifr, "Distribuição Histórica da Média Geral do IFR", valor_atual_ifr_medio, media_hist_ifr_medio)
+    plotar_heatmap_com_indicador_atual(resultados_ifr['Retorno Médio'], faixa_atual_ifr, "Heatmap de Retorno Médio vs. Média Geral do IFR")
+
+# --- FIM DO BLOCO SUBSTITUÍDO ---
 
 # --- BLOCO 6: LÓGICA DO INDICADOR IDEX JGP (NOVO) ---
 @st.cache_data(ttl=3600*4) # Cache de 4 horas
@@ -1218,74 +1348,21 @@ elif pagina_selecionada == "Ações BR":
             st.error("Falha ao processar dados de insiders.")
     # elif pagina_selecionada == "Ações BR":
 # ... (código anterior da página de Ações BR) ...
+st.markdown("---")
 
-    st.markdown("---")
+# --- Seção 3: Indicador de Amplitude de Mercado (NOVO) ---
+st.subheader("Raio-X do Mercado (Market Breadth)")
+st.info(
+    "Esta seção executa a análise completa de amplitude de mercado, incluindo o indicador de % de ações "
+    "acima da MM200 e a análise de IFR. A saída será exibida no console e os gráficos serão mostrados "
+    "se a função for adaptada para o Streamlit."
+)
 
-    # --- Seção 3: Indicador de Amplitude de Mercado (ATUALIZADO COM MEDIANA) ---
-    st.subheader("Raio-X do Mercado (Market Breadth)")
-    st.info(
-        "Este indicador mostra a porcentagem de ações da B3 negociadas acima da Média Móvel de 200 dias. "
-        "É uma ferramenta para medir a saúde interna do mercado.\n\n"
-        "- **Acima de 70%:** Pode indicar euforia ou sobrecompra.\n"
-        "- **Abaixo de 30%:** Pode indicar pânico ou sobrevenda, geralmente associado a fundos de mercado."
-    )
-
-    # Substitua o bloco do botão e da exibição pelo código abaixo
-
-if st.button("Analisar Amplitude do Mercado (Lento na 1ª vez)", use_container_width=True):
-    with st.spinner("Executando análise de amplitude completa... Por favor, aguarde."):
-        lista_tickers = obter_tickers_cvm_amplitude()
-        if lista_tickers:
-            precos = obter_precos_historicos_amplitude(lista_tickers)
-            
-            # --- Análise MMA 200 (Existente) ---
-            dados_amplitude = calcular_dados_amplitude(precos)
-            if not dados_amplitude.empty:
-                mediana_amplitude = dados_amplitude.median()
-                st.session_state.mediana_amplitude = mediana_amplitude
-                st.session_state.dados_amplitude = dados_amplitude
-                st.session_state.fig_amplitude = gerar_grafico_amplitude(dados_amplitude, mediana_amplitude)
-                st.session_state.fig_dist_amplitude = gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana_amplitude)
-            else:
-                st.session_state.fig_amplitude = None
-                st.session_state.fig_dist_amplitude = None
-                st.error("Não foi possível calcular os dados de amplitude (MMA 200).")
-
-            # --- NOVA ANÁLISE IFR ---
-            dados_ifr = calcular_amplitude_ifr(precos)
-            if not dados_ifr.empty:
-                st.session_state.fig_ifr_amplitude = gerar_grafico_amplitude_ifr(dados_ifr)
-            else:
-                st.session_state.fig_ifr_amplitude = None
-                st.error("Não foi possível calcular os dados de amplitude (IFR).")
-                
-        else:
-            st.session_state.fig_amplitude = None
-            st.session_state.fig_dist_amplitude = None
-            st.session_state.fig_ifr_amplitude = None
-
-# Exibe as métricas e os gráficos se eles existirem no estado da sessão
-if 'fig_amplitude' in st.session_state and st.session_state.fig_amplitude is not None:
-    st.markdown("---")
-    # Exibe as métricas de destaque
-    col_metrica1, col_metrica2, _ = st.columns([0.3, 0.3, 0.4])
-    valor_atual = st.session_state.dados_amplitude.iloc[-1]
-    mediana_valor = st.session_state.mediana_amplitude
-    col_metrica1.metric("Valor Atual (MMA 200)", f"{valor_atual:.1f}%")
-    col_metrica2.metric("Mediana Histórica (desde 2014)", f"{mediana_valor:.1f}%")
-    st.markdown("---")
-
-    # Exibe os gráficos lado a lado
-    col1, col2 = st.columns([0.6, 0.4])
-    with col1:
-        st.plotly_chart(st.session_state.fig_amplitude, use_container_width=True)
-    with col2:
-        st.plotly_chart(st.session_state.fig_dist_amplitude, use_container_width=True)
-
-# --- Exibe o NOVO GRÁFICO IFR ---
-if 'fig_ifr_amplitude' in st.session_state and st.session_state.fig_ifr_amplitude is not None:
-    st.plotly_chart(st.session_state.fig_ifr_amplitude, use_container_width=True)
-
+if st.button("Executar Análise de Amplitude Profissional", use_container_width=True):
+    with st.spinner("Executando a análise... Isso pode ser demorado e a saída aparecerá no console/terminal."):
+        # Chamar a função principal para gerar o dashboard
+        gerar_dashboard_profissional()
+    st.success("Análise concluída! Verifique o console para os resultados detalhados.")
 
 
 
