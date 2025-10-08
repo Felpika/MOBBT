@@ -738,58 +738,93 @@ def gerar_grafico_distribuicao_amplitude(dados_amplitude, mediana):
 def calcular_amplitude_ifr(precos_fechamento, rsi_periodo=14):
     """
     Calcula a amplitude de mercado com base no IFR.
-    Retorna o percentual de ações sobrecompradas (>70), sobrevendidas (<30) e neutras.
+    Retorna o percentual de ações sobrecompradas (>70), sobrevendidas (<30), neutras,
+    e também a média geral do IFR de todos os ativos.
     """
     if precos_fechamento.empty:
         return pd.DataFrame()
 
-    st.info("Calculando o indicador de amplitude por IFR...")
-    # A biblioteca pandas_ta precisa ser instalada: pip install pandas_ta
+    st.info("Calculando o indicador de amplitude por IFR (com média)...")
+    # A biblioteca pandas_ta precisa ser instalada
     import pandas_ta as ta
 
+    # Calcula o IFR para cada ativo individualmente
     ifr_df = precos_fechamento.apply(lambda x: ta.rsi(x, length=rsi_periodo), axis=0)
+
+    # Calcula a média geral do IFR no tempo
+    media_geral_ifr = ifr_df.mean(axis=1)
+
+    # Calcula as faixas de amplitude
     total_valido = ifr_df.notna().sum(axis=1)
     sobrecompradas = (ifr_df > 70).sum(axis=1) / total_valido * 100
     sobrevendidas = (ifr_df < 30).sum(axis=1) / total_valido * 100
     neutras = 100 - sobrecompradas - sobrevendidas
 
+    # Monta o DataFrame final
     amplitude_ifr = pd.DataFrame({
         'IFR > 70 (Sobrecompradas)': sobrecompradas,
         'IFR < 30 (Sobrevendidas)': sobrevendidas,
-        'IFR Neutro (30-70)': neutras
+        'IFR Neutro (30-70)': neutras,
+        'Média IFR Geral': media_geral_ifr # Nova coluna
     })
+
     st.success("Cálculo da amplitude por IFR concluído.")
     return amplitude_ifr.dropna()
 
 def gerar_grafico_amplitude_ifr(df_ifr_breadth):
     """
-    Cria um gráfico de área empilhada para visualizar a evolução das faixas de IFR.
+    Cria um gráfico de área empilhada para visualizar a evolução das faixas de IFR,
+    incluindo uma linha para a média geral do IFR em um eixo secundário.
     """
-    if df_ifr_breadth.empty:
+    if df_ifr_breadth.empty or 'Média IFR Geral' not in df_ifr_breadth.columns:
         return go.Figure().update_layout(title_text="Não foi possível gerar o gráfico de IFR.")
 
     st.info("Gerando o gráfico de IFR...")
     df_plot = df_ifr_breadth.tail(252) # Filtra para o último ano
-    colunas_ordenadas = ['IFR < 30 (Sobrevendidas)', 'IFR Neutro (30-70)', 'IFR > 70 (Sobrecompradas)']
 
-    fig = px.area(
-        df_plot,
-        x=df_plot.index,
-        y=colunas_ordenadas,
-        title='Amplitude de Mercado (IFR) - % de Ações por Faixa (Último Ano)',
-        labels={'value': '% de Ações', 'variable': 'Faixa de IFR', 'index': 'Data'},
-        color_discrete_map={
-            'IFR < 30 (Sobrevendidas)': '#2ca02c',  # Verde
-            'IFR Neutro (30-70)': '#7f7f7f',      # Cinza
-            'IFR > 70 (Sobrecompradas)': '#d62728'   # Vermelho
-        }
-    )
+    fig = go.Figure()
+
+    # Adiciona as áreas empilhadas
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot['IFR < 30 (Sobrevendidas)'],
+        mode='lines', line=dict(width=0), stackgroup='one', name='IFR < 30 (Oportunidade)',
+        fillcolor='#2ca02c'
+    ))
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot['IFR Neutro (30-70)'],
+        mode='lines', line=dict(width=0), stackgroup='one', name='IFR Neutro',
+        fillcolor='#7f7f7f'
+    ))
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot['IFR > 70 (Sobrecompradas)'],
+        mode='lines', line=dict(width=0), stackgroup='one', name='IFR > 70 (Risco)',
+        fillcolor='#d62728'
+    ))
+
+    # Adiciona a linha da média geral do IFR no eixo secundário
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot['Média IFR Geral'],
+        mode='lines', line=dict(color='yellow', width=2.5), name='Média Geral do IFR',
+        yaxis='y2'
+    ))
+
+    # Atualiza o layout para incluir o eixo secundário
     fig.update_layout(
+        title='Amplitude de Mercado (IFR) - % de Ações por Faixa vs. Média (Último Ano)',
         template='plotly_dark',
-        yaxis_range=[0, 100],
         legend_title_text='Faixas de IFR',
-        title_x=0
+        title_x=0,
+        yaxis=dict(title='Percentual de Ações (%)', range=[0, 100]),
+        yaxis2=dict(
+            title='Média Geral do IFR',
+            overlaying='y',
+            side='right',
+            range=[0, 100],
+            showgrid=False
+        ),
+        hovermode='x unified'
     )
+
     return fig
 
 # --- FIM DO NOVO CÓDIGO ---
@@ -1285,6 +1320,7 @@ if 'fig_amplitude' in st.session_state and st.session_state.fig_amplitude is not
 # --- Exibe o NOVO GRÁFICO IFR ---
 if 'fig_ifr_amplitude' in st.session_state and st.session_state.fig_ifr_amplitude is not None:
     st.plotly_chart(st.session_state.fig_ifr_amplitude, use_container_width=True)
+
 
 
 
