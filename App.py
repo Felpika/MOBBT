@@ -1352,8 +1352,7 @@ elif pagina_selecionada == "Ações BR":
         "acima da Média Móvel de 200 dias (MM200) e a Média do Índice de Força Relativa (IFR) de todas as ações. "
         "A análise mostra o retorno futuro do BOVA11.SA quando os indicadores estavam nas mesmas faixas no passado."
     )
-
-   if st.button("Executar Análise de Amplitude Completa (Lento na 1ª vez)", use_container_width=True):
+    if st.button("Executar Análise de Amplitude Completa (Lento na 1ª vez)", use_container_width=True):
         st.session_state.analise_amplitude_executada = False
         with st.spinner("Executando análise completa... Isso pode levar vários minutos. Por favor, aguarde."):
             # Parâmetros
@@ -1511,6 +1510,7 @@ if st.session_state.get('analise_amplitude_executada', False):
         with g4:
             fig_heat_ifr = plotar_heatmap_com_indicador_atual(st.session_state.resultados_ifr['Retorno Médio'], st.session_state.faixa_atual_ifr, "Heatmap de Retorno Médio vs. Média do IFR")
             st.plotly_chart(fig_heat_ifr, use_container_width=True)
+
 
 
 
