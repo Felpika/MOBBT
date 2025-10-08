@@ -1308,30 +1308,40 @@ elif pagina_selecionada == "Ações BR":
             lista_tickers = obter_tickers_cvm_amplitude()
             if lista_tickers:
                 precos = obter_precos_historicos_amplitude(lista_tickers, anos_historico=10)
-                bova11 = yf.download('BOVA11.SA', start=precos.index.min(), end=precos.index.max(), auto_adjust=True)
                 
-                # Armazena tudo no session_state para evitar reprocessamento
-                st.session_state.amplitude_data = {'precos': precos, 'bova11': bova11}
-                st.success("Dados carregados. Iniciando cálculos...")
+                # --- CORREÇÃO APLICADA AQUI ---
+                # Baixa os dados brutos e depois seleciona apenas a coluna 'Close'
+                # para garantir um DataFrame com índice de coluna de nível único.
+                bova11_raw = yf.download('BOVA11.SA', start=precos.index.min(), end=precos.index.max(), auto_adjust=True)
+                if not bova11_raw.empty:
+                    bova11 = bova11_raw[['Close']].copy()
+                    # --- FIM DA CORREÇÃO ---
+                    
+                    # Armazena tudo no session_state para evitar reprocessamento
+                    st.session_state.amplitude_data = {'precos': precos, 'bova11': bova11}
+                    st.success("Dados carregados. Iniciando cálculos...")
 
-                # 2. Análise de Market Breadth (MMA 200)
-                dados_amplitude = calcular_dados_amplitude(precos)
-                dados_amplitude.name = 'market_breadth'
-                if not dados_amplitude.empty:
-                    st.session_state.amplitude_data['dados_mm200'] = dados_amplitude
-                
-                # 3. Análise de Amplitude (IFR)
-                ifr_individual = precos.apply(lambda x: ta.rsi(x, length=14), axis=0)
-                media_geral_ifr = ifr_individual.mean(axis=1).dropna()
-                media_geral_ifr.name = 'media_ifr_geral'
-                if not media_geral_ifr.empty:
-                    st.session_state.amplitude_data['dados_ifr'] = media_geral_ifr
-                
-                dados_ifr_empilhado = calcular_amplitude_ifr(ifr_individual)
-                if not dados_ifr_empilhado.empty:
-                    st.session_state.amplitude_data['ifr_empilhado'] = dados_ifr_empilhado
+                    # 2. Análise de Market Breadth (MMA 200)
+                    dados_amplitude = calcular_dados_amplitude(precos)
+                    dados_amplitude.name = 'market_breadth'
+                    if not dados_amplitude.empty:
+                        st.session_state.amplitude_data['dados_mm200'] = dados_amplitude
+                    
+                    # 3. Análise de Amplitude (IFR)
+                    ifr_individual = precos.apply(lambda x: ta.rsi(x, length=14), axis=0)
+                    media_geral_ifr = ifr_individual.mean(axis=1).dropna()
+                    media_geral_ifr.name = 'media_ifr_geral'
+                    if not media_geral_ifr.empty:
+                        st.session_state.amplitude_data['dados_ifr'] = media_geral_ifr
+                    
+                    dados_ifr_empilhado = calcular_amplitude_ifr(ifr_individual)
+                    if not dados_ifr_empilhado.empty:
+                        st.session_state.amplitude_data['ifr_empilhado'] = dados_ifr_empilhado
 
-                st.success("Análise concluída!")
+                    st.success("Análise concluída!")
+                else:
+                    st.error("Falha ao baixar os dados do BOVA11.")
+                    st.session_state.amplitude_data = None
             else:
                 st.error("Falha ao obter a lista de tickers da CVM.")
                 st.session_state.amplitude_data = None
@@ -1430,7 +1440,4 @@ elif pagina_selecionada == "Ações BR":
             with col_heat_ifr2:
                 fig_hm_tx_ifr = gerar_heatmap_retornos(tx_acerto_ifr, "Heatmap de Taxa de Acerto (%) do BOVA11", faixa_atual_str_ifr)
                 st.plotly_chart(fig_hm_tx_ifr, use_container_width=True)
-
-
-
 
