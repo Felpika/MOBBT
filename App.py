@@ -616,11 +616,6 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     fig.update_layout(title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}', template='plotly_dark', title_x=0, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
-# --- INÍCIO DO BLOCO: LÓGICA DO INDICADOR DE AMPLITUDE (SUBSTITUÍDO) ---
-import pandas_ta as ta # Biblioteca para o cálculo do IFR
-from IPython.display import display, Markdown
-from scipy import stats
-
 # --- Funções de Cálculo do Market Breadth ---
 def obter_tickers_cvm_amplitude():
     """Esta função busca a lista de tickers da CVM."""
@@ -1363,6 +1358,7 @@ elif pagina_selecionada == "Ações BR":
             # Chamar a função principal para gerar o dashboard
             gerar_dashboard_profissional()
         st.success("Análise concluída! Verifique o console para os resultados detalhados.")
+
 
 
 
