@@ -807,6 +807,10 @@ def calcular_amplitude_ifr(ifr_df):
         'IFR < 30 (Sobrevendidas)': sobrevendidas,
         'IFR Neutro (30-70)': neutras
     })
+    
+    # --- LINHA ADICIONADA ---
+    amplitude_ifr['IFR Net (% > 70 - % < 30)'] = amplitude_ifr['IFR > 70 (Sobrecompradas)'] - amplitude_ifr['IFR < 30 (Sobrevendidas)']
+
     return amplitude_ifr.dropna()
 
 def gerar_grafico_amplitude_ifr(df_ifr_breadth, media_geral_ifr):
@@ -826,6 +830,38 @@ def gerar_grafico_amplitude_ifr(df_ifr_breadth, media_geral_ifr):
         yaxis=dict(title='Percentual de Ações (%)', range=[0, 100]),
         yaxis2=dict(title='Média Geral do IFR', overlaying='y', side='right', range=[0, 100], showgrid=False),
         hovermode='x unified', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    return fig
+
+def gerar_grafico_ifr_net(df_ifr_breadth):
+    """
+    Cria um gráfico de linha/área separado para o Net IFR, destacando o eixo zero.
+    """
+    if df_ifr_breadth.empty or 'IFR Net (% > 70 - % < 30)' not in df_ifr_breadth.columns:
+        return go.Figure().update_layout(title_text="Dados de Net IFR indisponíveis.")
+
+    df_plot = df_ifr_breadth.tail(252) # Plotar o último ano
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=df_plot.index,
+        y=df_plot['IFR Net (% > 70 - % < 30)'],
+        mode='lines',
+        line=dict(color='cyan', width=2),
+        fill='tozeroy',
+        name='Net IFR'
+    ))
+
+    fig.add_hline(y=0, line_width=2, line_dash="dash", line_color="white")
+
+    fig.update_layout(
+        title='Net IFR: (% Ações > 70) - (% Ações < 30) no Último Ano',
+        template='plotly_dark',
+        yaxis_title='Diferença Percentual (%)',
+        showlegend=False,
+        title_x=0,
+        hovermode='x unified'
     )
     return fig
 
@@ -1230,7 +1266,50 @@ elif pagina_selecionada == "Amplitude":
             
             fig_ifr = gerar_grafico_amplitude_ifr(ifr_amplitude_df, media_geral_ifr)
             st.plotly_chart(fig_ifr, use_container_width=True)
+            # --- INÍCIO DO NOVO BLOCO NET IFR ---
+            st.markdown("---")
+            st.subheader("Análise de Net IFR (% Sobrecompradas - % Sobrevendidas)")
+
+            net_ifr = ifr_amplitude_df['IFR Net (% > 70 - % < 30)'].dropna()
             
+            valor_atual_net_ifr = net_ifr.iloc[-1]
+            media_hist_net_ifr = net_ifr.mean()
+            z_score_net_ifr = (valor_atual_net_ifr - media_hist_net_ifr) / net_ifr.std()
+            percentil_net_ifr = stats.percentileofscore(net_ifr, valor_atual_net_ifr)
+
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Net IFR Atual", f"{valor_atual_net_ifr:.2f}%")
+            col2.metric("Média Histórica", f"{media_hist_net_ifr:.2f}%")
+            col3.metric("Z-Score", f"{z_score_net_ifr:.2f}")
+            col4.metric("Percentil Histórico", f"{percentil_net_ifr:.2f}%")
+            
+            fig_net_ifr = gerar_grafico_ifr_net(ifr_amplitude_df)
+            st.plotly_chart(fig_net_ifr, use_container_width=True)
+            
+            # Preparação para Heatmap Net IFR
+            df_analise_net_ifr = pd.DataFrame(dados_bova11['Close'])
+            df_analise_net_ifr.columns = ['Close']
+            df_analise_net_ifr = df_analise_net_ifr.join(net_ifr.rename('net_ifr'))
+            for nome_periodo, dias in PERIODOS_RETORNO.items():
+                df_analise_net_ifr[f'retorno_{nome_periodo}'] = df_analise_net_ifr['Close'].pct_change(periods=dias).shift(-dias) * 100
+            df_analise_net_ifr.dropna(inplace=True)
+            
+            # Adaptação da função analisar_por_faixa para o Net IFR
+            passo_net_ifr = 10
+            bins_net_ifr = list(range(-100, 101, passo_net_ifr))
+            labels_net_ifr = [f'{i} a {i+passo_net_ifr}%' for i in range(-100, 100, passo_net_ifr)]
+            df_analise_net_ifr['faixa_net_ifr'] = pd.cut(df_analise_net_ifr['net_ifr'], bins=bins_net_ifr, labels=labels_net_ifr, right=False, include_lowest=True)
+            
+            resultados_net_ifr = df_analise_net_ifr.groupby('faixa_net_ifr', observed=True)[colunas_retorno].mean()
+            
+            faixa_atual_valor_net_ifr = int(valor_atual_net_ifr // passo_net_ifr) * passo_net_ifr
+            faixa_atual_net_ifr = f'{faixa_atual_valor_net_ifr} a {faixa_atual_valor_net_ifr + passo_net_ifr}%'
+
+            st.markdown("---")
+            st.subheader(f"Análise de Retorno Futuro do {ATIVO_ANALISE} por Faixa de Net IFR")
+            fig_heatmap_net_ifr = plotar_heatmap_com_indicador_atual(resultados_net_ifr, faixa_atual_net_ifr, "Heatmap de Retorno Médio vs. Net IFR")
+            st.plotly_chart(fig_heatmap_net_ifr, use_container_width=True)
+            # --- FIM DO NOVO BLOCO NET IFR ---
             # --- INÍCIO DA SEÇÃO ADICIONADA: HISTOGRAMAS ---
             st.markdown("---")
             st.subheader("Distribuição Histórica dos Indicadores")
@@ -1280,4 +1359,5 @@ elif pagina_selecionada == "Amplitude":
             with col2:
                 fig_heatmap_ifr = plotar_heatmap_com_indicador_atual(resultados_ifr['Retorno Médio'], faixa_atual_ifr, "Heatmap de Retorno Médio vs. Média Geral do IFR")
                 st.plotly_chart(fig_heatmap_ifr, use_container_width=True)
+
 
