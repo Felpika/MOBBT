@@ -1173,6 +1173,10 @@ elif pagina_selecionada == "Ações BR":
 
 # ... (código anterior com o roteamento de páginas)
 
+# App.py
+
+# ... (código anterior)
+
 elif pagina_selecionada == "Amplitude":
     st.header("Análise de Amplitude de Mercado (Market Breadth)")
     st.info(
@@ -1196,18 +1200,16 @@ elif pagina_selecionada == "Amplitude":
             tickers_cvm = obter_tickers_cvm_amplitude()
             if tickers_cvm:
                 precos = obter_precos_historicos_amplitude(tickers_cvm, anos_historico=ANOS_HISTORICO)
-                # CORREÇÃO: Usar auto_adjust=False para garantir a coluna 'Adj Close'
                 dados_bova11 = yf.download(ATIVO_ANALISE, start=precos.index.min(), end=precos.index.max(), auto_adjust=False, progress=False)
 
                 if not precos.empty and not dados_bova11.empty:
                     st.session_state.df_indicadores = calcular_indicadores_amplitude(precos)
                     
-                    # CORREÇÃO: Selecionar 'Adj Close' ou 'Close' de forma segura
                     if 'Adj Close' in dados_bova11.columns:
                         price_series = dados_bova11[['Adj Close']]
                     else:
                         price_series = dados_bova11[['Close']]
-                    price_series.columns = ['price'] # Renomear para um nome padrão
+                    price_series.columns = ['price']
 
                     df_analise_base = price_series
                     for nome_periodo, dias in PERIODOS_RETORNO.items():
@@ -1220,19 +1222,15 @@ elif pagina_selecionada == "Amplitude":
             else:
                 st.error("Não foi possível obter a lista de tickers da CVM.")
     
-    # O restante do bloco de exibição dos gráficos permanece o mesmo
     if st.session_state.analise_amplitude_executada:
         df_indicadores = st.session_state.df_indicadores
         df_analise_base = st.session_state.df_analise_base
 
         # --- SEÇÃO 1: MARKET BREADTH (MM200) ---
         st.subheader("Análise de Market Breadth (% de Ações acima da MM200)")
-        
         mb_series = df_indicadores['market_breadth']
         valor_atual_mb = mb_series.iloc[-1]
         media_hist_mb = mb_series.mean()
-        
-        # Análise de retorno
         df_analise_mb = df_analise_base.join(mb_series).dropna()
         resultados_mb = analisar_retornos_por_faixa(df_analise_mb, 'market_breadth', 10, 0, 100, '%')
         passo_mb = 10
@@ -1247,10 +1245,8 @@ elif pagina_selecionada == "Amplitude":
             st.metric("Z-Score (Desvios Padrão)", f"{z_score_mb:.2f}")
             percentil_mb = stats.percentileofscore(mb_series, valor_atual_mb)
             st.metric("Percentil Histórico", f"{percentil_mb:.2f}%")
-
         with col2:
             st.plotly_chart(gerar_grafico_historico_amplitude(mb_series, "Histórico do Market Breadth (5 Anos)", valor_atual_mb, media_hist_mb), use_container_width=True)
-
         col1, col2 = st.columns(2)
         with col1:
             st.plotly_chart(gerar_histograma_amplitude(mb_series, "Distribuição Histórica do Market Breadth", valor_atual_mb, media_hist_mb), use_container_width=True)
@@ -1259,21 +1255,46 @@ elif pagina_selecionada == "Amplitude":
         
         st.markdown("---")
 
-        # --- SEÇÃO 2: AMPLITUDE DE IFR ---
-        st.subheader("Análise de Amplitude do IFR (Índice de Força Relativa)")
+        # --- SEÇÃO 2: MÉDIA GERAL DO IFR (SEÇÃO ADICIONADA) ---
+        st.subheader("Análise da Média Geral do IFR")
+        ifr_media_series = df_indicadores['IFR_media_geral']
+        valor_atual_ifr_media = ifr_media_series.iloc[-1]
+        media_hist_ifr_media = ifr_media_series.mean()
+        df_analise_ifr_media = df_analise_base.join(ifr_media_series).dropna()
+        resultados_ifr_media = analisar_retornos_por_faixa(df_analise_ifr_media, 'IFR_media_geral', 5, 0, 100, '')
+        passo_ifr_media = 5
+        faixa_atual_valor_ifr_media = int(valor_atual_ifr_media // passo_ifr_media) * passo_ifr_media
+        faixa_atual_ifr_media = f'{faixa_atual_valor_ifr_media} a {faixa_atual_valor_ifr_media + passo_ifr_media}'
 
-        # Análise do Net IFR
+        col1, col2 = st.columns([1,2])
+        with col1:
+            st.metric("Valor Atual", f"{valor_atual_ifr_media:.2f}")
+            st.metric("Média Histórica", f"{media_hist_ifr_media:.2f}")
+            z_score_ifr_media = (valor_atual_ifr_media - media_hist_ifr_media) / ifr_media_series.std()
+            st.metric("Z-Score (Desvios Padrão)", f"{z_score_ifr_media:.2f}")
+            percentil_ifr_media = stats.percentileofscore(ifr_media_series, valor_atual_ifr_media)
+            st.metric("Percentil Histórico", f"{percentil_ifr_media:.2f}%")
+        with col2:
+            st.plotly_chart(gerar_grafico_historico_amplitude(ifr_media_series, "Histórico da Média Geral do IFR (5 Anos)", valor_atual_ifr_media, media_hist_ifr_media), use_container_width=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.plotly_chart(gerar_histograma_amplitude(ifr_media_series, "Distribuição Histórica da Média do IFR", valor_atual_ifr_media, media_hist_ifr_media), use_container_width=True)
+        with col2:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_ifr_media['Retorno Médio'], faixa_atual_ifr_media, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Média IFR"), use_container_width=True)
+        
+        st.markdown("---")
+
+        # --- SEÇÃO 3: NET IFR ---
+        st.subheader("Análise de Net IFR (% Sobrecompradas - % Sobrevendidas)")
         net_ifr_series = df_indicadores['IFR_net']
         valor_atual_net_ifr = net_ifr_series.iloc[-1]
         media_hist_net_ifr = net_ifr_series.mean()
-        
         df_analise_net_ifr = df_analise_base.join(net_ifr_series).dropna()
         resultados_net_ifr = analisar_retornos_por_faixa(df_analise_net_ifr, 'IFR_net', 10, -100, 100, '%')
         passo_net_ifr = 10
         faixa_atual_valor_net_ifr = int(valor_atual_net_ifr // passo_net_ifr) * passo_net_ifr
         faixa_atual_net_ifr = f'{faixa_atual_valor_net_ifr} a {faixa_atual_valor_net_ifr + passo_net_ifr}%'
-
-        st.markdown("#### Net IFR (% Sobrecompradas - % Sobrevendidas)")
+        
         col1, col2 = st.columns([1,2])
         with col1:
             st.metric("Valor Atual", f"{valor_atual_net_ifr:.2f}%")
@@ -1284,7 +1305,6 @@ elif pagina_selecionada == "Amplitude":
             st.metric("Percentil Histórico", f"{percentil_net_ifr:.2f}%")
         with col2:
             st.plotly_chart(gerar_grafico_historico_amplitude(net_ifr_series, "Histórico do Net IFR (5 Anos)", valor_atual_net_ifr, media_hist_net_ifr), use_container_width=True)
-
         col1, col2 = st.columns(2)
         with col1:
             st.plotly_chart(gerar_histograma_amplitude(net_ifr_series, "Distribuição Histórica do Net IFR", valor_atual_net_ifr, media_hist_net_ifr, nbins=100), use_container_width=True)
