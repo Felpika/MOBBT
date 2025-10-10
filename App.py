@@ -450,119 +450,116 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
     return fig
 
 # --- BLOCO 5: LÓGICA DA PÁGINA DE AÇÕES BR ---
-@st.cache_data(ttl=3600*24)
-def executar_analise_insiders():
-    # ... (código existente inalterado)
-    """Função principal que orquestra o download e processamento dos dados de insiders."""
-    ANO_ATUAL = datetime.now().year
-    URL_MOVIMENTACOES = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/VLMO/DADOS/vlmo_cia_aberta_{ANO_ATUAL}.zip"
-    URL_CADASTRO = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ANO_ATUAL}.zip"
-    ZIP_MOVIMENTACOES, CSV_MOVIMENTACOES = "movimentacoes.zip", f"vlmo_cia_aberta_con_{ANO_ATUAL}.csv"
-    ZIP_CADASTRO, CSV_CADASTRO = "cadastro.zip", f"fca_cia_aberta_valor_mobiliario_{ANO_ATUAL}.csv"
-    
-    def _cvm_baixar_zip(url, nome_zip, nome_csv):
-        try:
-            response = requests.get(url, timeout=60)
-            response.raise_for_status()
-            with open(nome_zip, 'wb') as f: f.write(response.content)
-            with zipfile.ZipFile(nome_zip, 'r') as z: z.extract(nome_csv)
-            os.remove(nome_zip)
-            return nome_csv
-        except Exception as e:
-            st.error(f"Erro no download de {url}: {e}")
-            if os.path.exists(nome_zip): os.remove(nome_zip)
-            return None
+# SUBSTITUA a função executar_analise_insiders existente por ESTE BLOCO DE CÓDIGO
+@st.cache_data(ttl=3600*8)
+def _carregar_dados_cvm_insiders():
+    """Função auxiliar para baixar e carregar os dados brutos da CVM para o ano atual e anterior."""
+    anos = [datetime.now().year, datetime.now().year - 1]
+    df_mov_list, df_cad_list = [], []
 
-    def _obter_market_cap_individual(ticker):
-        if pd.isna(ticker) or not isinstance(ticker, str): return ticker, np.nan
+    for ano in anos:
         try:
-            stock = yf.Ticker(f"{ticker.strip()}.SA")
-            return ticker, stock.info.get('marketCap', np.nan)
+            URL_MOVIMENTACOES = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/VLMO/DADOS/vlmo_cia_aberta_{ano}.zip"
+            response_mov = requests.get(URL_MOVIMENTACOES, timeout=60)
+            response_mov.raise_for_status()
+            with zipfile.ZipFile(io.BytesIO(response_mov.content)) as z:
+                csv_mov = f"vlmo_cia_aberta_con_{ano}.csv"
+                with z.open(csv_mov) as f:
+                    df_mov_list.append(pd.read_csv(f, sep=';', encoding='ISO-8859-1', on_bad_lines='skip', low_memory=False))
+
+            URL_CADASTRO = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ano}.zip"
+            response_cad = requests.get(URL_CADASTRO, timeout=60)
+            response_cad.raise_for_status()
+            with zipfile.ZipFile(io.BytesIO(response_cad.content)) as z:
+                csv_cad = f"fca_cia_aberta_valor_mobiliario_{ano}.csv"
+                with z.open(csv_cad) as f:
+                     df_cad_list.append(pd.read_csv(f, sep=';', encoding='ISO-8859-1', on_bad_lines='skip', usecols=['CNPJ_Companhia', 'Codigo_Negociacao']))
         except Exception:
-            return ticker, np.nan
+            # Ignora erros para anos que ainda não têm dados completos, etc.
+            pass
 
-    caminho_csv_mov = _cvm_baixar_zip(URL_MOVIMENTACOES, ZIP_MOVIMENTACOES, CSV_MOVIMENTACOES)
-    caminho_csv_cad = _cvm_baixar_zip(URL_CADASTRO, ZIP_CADASTRO, CSV_CADASTRO)
+    if not df_mov_list or not df_cad_list: return pd.DataFrame(), pd.DataFrame()
+    
+    df_mov_full = pd.concat(df_mov_list, ignore_index=True)
+    df_cad_full = pd.concat(df_cad_list, ignore_index=True).dropna().drop_duplicates()
+    return df_mov_full, df_cad_full
 
-    if not caminho_csv_mov or not caminho_csv_cad: return None, None, None
 
-    df_mov = pd.read_csv(caminho_csv_mov, sep=';', encoding='ISO-8859-1', on_bad_lines='skip')
-    df_cad = pd.read_csv(caminho_csv_cad, sep=';', encoding='ISO-8859-1', on_bad_lines='skip', usecols=['CNPJ_Companhia', 'Codigo_Negociacao'])
-    os.remove(caminho_csv_mov); os.remove(caminho_csv_cad)
-
+@st.cache_data(ttl=3600*8)
+def obter_meses_disponiveis_insiders():
+    """Busca e retorna a lista de meses disponíveis para seleção."""
+    df_mov, _ = _carregar_dados_cvm_insiders()
+    if df_mov.empty: return []
     df_mov['Data_Movimentacao'] = pd.to_datetime(df_mov['Data_Movimentacao'], errors='coerce')
     df_mov.dropna(subset=['Data_Movimentacao'], inplace=True)
-    df_mov = df_mov[df_mov['Tipo_Movimentacao'].isin(['Compra à vista', 'Venda à vista'])]
-    ultimo_mes = df_mov['Data_Movimentacao'].max().to_period('M')
-    df_mes = df_mov[df_mov['Data_Movimentacao'].dt.to_period('M') == ultimo_mes].copy()
-    df_mes['Volume_Net'] = np.where(df_mes['Tipo_Movimentacao'] == 'Compra à vista', df_mes['Volume'], -df_mes['Volume'])
+    return sorted(df_mov['Data_Movimentacao'].dt.to_period('M').unique().strftime('%m/%Y').tolist(), reverse=True)
 
-    df_controladores = df_mes[df_mes['Tipo_Cargo'] == 'Controlador ou Vinculado'].copy()
-    df_outros = df_mes[df_mes['Tipo_Cargo'] != 'Controlador ou Vinculado'].copy()
-    
-    df_net_controladores = df_controladores.groupby(['CNPJ_Companhia', 'Nome_Companhia'])['Volume_Net'].sum().reset_index()
-    df_net_outros = df_outros.groupby(['CNPJ_Companhia', 'Nome_Companhia'])['Volume_Net'].sum().reset_index()
 
-    cnpjs_unicos = pd.concat([df_net_controladores[['CNPJ_Companhia']], df_net_outros[['CNPJ_Companhia']]]).drop_duplicates()
-    df_tickers = df_cad.dropna().drop_duplicates(subset=['CNPJ_Companhia'])
-    df_lookup = pd.merge(cnpjs_unicos, df_tickers, on='CNPJ_Companhia', how='left')
+@st.cache_data(ttl=3600*24)
+def executar_analise_insiders(meses_selecionados):
+    """Função principal que orquestra o download e processamento dos dados de insiders para os meses selecionados."""
+    df_mov, df_cad = _carregar_dados_cvm_insiders()
+    if df_mov.empty: return None
+
+    df_mov['Data_Movimentacao'] = pd.to_datetime(df_mov['Data_Movimentacao'], errors='coerce')
+    df_mov['MesAno'] = df_mov['Data_Movimentacao'].dt.strftime('%m/%Y')
     
+    # 1. Filtragem inicial
+    df_filtrado = df_mov[
+        df_mov['MesAno'].isin(meses_selecionados) &
+        df_mov['Tipo_Movimentacao'].isin(['Compra à vista', 'Venda à vista'])
+    ].copy()
+    
+    # 2. Agregação por Ticker, Mês e Empresa
+    df_merged = pd.merge(df_filtrado, df_cad.drop_duplicates(subset=['CNPJ_Companhia']), on='CNPJ_Companhia', how='left')
+    df_merged.dropna(subset=['Codigo_Negociacao'], inplace=True)
+    
+    df_merged['Volume_Compra'] = np.where(df_merged['Tipo_Movimentacao'] == 'Compra à vista', df_merged['Volume'], 0)
+    df_merged['Volume_Venda'] = np.where(df_merged['Tipo_Movimentacao'] == 'Venda à vista', df_merged['Volume'], 0)
+    df_merged['Qtd_Compra'] = np.where(df_merged['Tipo_Movimentacao'] == 'Compra à vista', df_merged['Quantidade_Valor_Mobiliario'], 0)
+    df_merged['Qtd_Venda'] = np.where(df_merged['Tipo_Movimentacao'] == 'Venda à vista', df_merged['Quantidade_Valor_Mobiliario'], 0)
+    df_merged['Grupo'] = np.where(df_merged['Tipo_Cargo'] == 'Controlador ou Vinculado', 'Controladores', 'Demais Insiders')
+
+    agregacao = {
+        'Volume_Compra': pd.NamedAgg(column='Volume_Compra', aggfunc='sum'),
+        'Volume_Venda': pd.NamedAgg(column='Volume_Venda', aggfunc='sum'),
+        'Qtd_Compra': pd.NamedAgg(column='Qtd_Compra', aggfunc='sum'),
+        'Qtd_Venda': pd.NamedAgg(column='Qtd_Venda', aggfunc='sum'),
+    }
+
+    df_agregado = df_merged.groupby(['Codigo_Negociacao', 'Nome_Companhia', 'CNPJ_Companhia', 'MesAno', 'Grupo']).agg(**agregacao).reset_index()
+
+    df_agregado['Valor'] = df_agregado['Volume_Compra'] - df_agregado['Volume_Venda']
+    df_agregado['Qtd Ações'] = df_agregado['Qtd_Compra'] - df_agregado['Qtd_Venda']
+    df_agregado['Preço Médio'] = (df_agregado['Valor'] / df_agregado['Qtd Ações']).fillna(0)
+    
+    # 3. Busca de Market Cap (Otimizado)
+    tickers_para_buscar = df_agregado['Codigo_Negociacao'].dropna().unique().tolist()
+    if not tickers_para_buscar: return pd.DataFrame()
+
     market_caps = {}
-    tickers_para_buscar = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
     progress_bar = st.progress(0, text="Buscando valores de mercado...")
     with ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_ticker = {executor.submit(_obter_market_cap_individual, ticker): ticker for ticker in tickers_para_buscar}
+        future_to_ticker = {executor.submit(lambda t: (t, yf.Ticker(f"{t}.SA").info.get('marketCap')), ticker): ticker for ticker in tickers_para_buscar}
         for i, future in enumerate(as_completed(future_to_ticker)):
-            ticker, market_cap = future.result()
-            market_caps[ticker] = market_cap
-            progress_bar.progress((i + 1) / len(tickers_para_buscar), text=f"Buscando valores de mercado... ({i+1}/{len(tickers_para_buscar)})")
+            try:
+                ticker, mc = future.result()
+                market_caps[ticker] = mc if mc else np.nan
+            except Exception:
+                market_caps[future_to_ticker[future]] = np.nan
+            progress_bar.progress((i + 1) / len(tickers_para_buscar), f"Buscando valores de mercado... ({i+1}/{len(tickers_para_buscar)})")
     progress_bar.empty()
+    
     df_market_caps = pd.DataFrame(list(market_caps.items()), columns=['Codigo_Negociacao', 'MarketCap'])
-    df_market_cap_lookup = pd.merge(df_lookup, df_market_caps, on="Codigo_Negociacao", how="left")
+    df_final = pd.merge(df_agregado, df_market_caps, on="Codigo_Negociacao", how="left")
+    df_final['% do Capital'] = (df_final['Valor'] / df_final['MarketCap']) * 100
+    df_final.fillna({'% do Capital': 0, 'MarketCap': 0}, inplace=True)
     
-    df_final_controladores = pd.merge(df_net_controladores, df_market_cap_lookup, on='CNPJ_Companhia', how='left')
-    df_final_controladores['Volume_vs_MarketCap_Pct'] = (df_final_controladores['Volume_Net'] / df_final_controladores['MarketCap']) * 100
-    df_final_controladores.fillna({'Volume_vs_MarketCap_Pct': 0}, inplace=True)
-
-    df_final_outros = pd.merge(df_net_outros, df_market_cap_lookup, on='CNPJ_Companhia', how='left')
-    df_final_outros['Volume_vs_MarketCap_Pct'] = (df_final_outros['Volume_Net'] / df_final_outros['MarketCap']) * 100
-    df_final_outros.fillna({'Volume_vs_MarketCap_Pct': 0}, inplace=True)
-    
-    return df_final_controladores, df_final_outros, ultimo_mes
-
-def gerar_graficos_insiders_plotly(df_dados, top_n=10):
-    # ... (código existente inalterado)
-    if df_dados.empty: return None, None
-
-    # Gráfico 1: Volume
-    df_plot_volume = df_dados.sort_values(by='Volume_Net', ascending=True).tail(top_n)
-    fig_volume = px.bar(
-        df_plot_volume,
-        y='Nome_Companhia',
-        x='Volume_Net',
-        orientation='h',
-        title=f'Top {top_n} por Volume Líquido',
-        template='plotly_dark',
-        text='Volume_Net'
-    )
-    fig_volume.update_traces(texttemplate='R$ %{text:,.2s}', textposition='outside')
-    fig_volume.update_layout(title_x=0, xaxis_title="Volume Líquido (R$)", yaxis_title="")
-
-    # Gráfico 2: Relevância
-    df_plot_relevancia = df_dados.sort_values(by='Volume_vs_MarketCap_Pct', ascending=True).tail(top_n)
-    fig_relevancia = px.bar(
-        df_plot_relevancia,
-        y='Nome_Companhia',
-        x='Volume_vs_MarketCap_Pct',
-        orientation='h',
-        title=f'Top {top_n} por Relevância (Volume / Valor de Mercado)',
-        template='plotly_dark',
-        text='Volume_vs_MarketCap_Pct'
-    )
-    fig_relevancia.update_traces(texttemplate='%{text:.3f}%', textposition='outside')
-    fig_relevancia.update_layout(title_x=0, xaxis_title="Volume como % do Valor de Mercado", yaxis_title="")
-    
-    return fig_volume, fig_relevancia
+    # 4. Formatação Final
+    df_final = df_final[df_final['Valor'] != 0] # Remove movimentações com valor líquido zero
+    df_final = df_final.rename(columns={'Codigo_Negociacao': 'Ticker', 'MesAno': 'Mês'})
+    colunas_finais = ['Ticker', 'Mês', 'Valor', 'Qtd Ações', 'Preço Médio', '% do Capital', 'Grupo', 'Nome_Companhia']
+    return df_final.sort_values('Valor', ascending=False)[colunas_finais]
 
 @st.cache_data
 def carregar_dados_acoes(tickers, period="max"):
@@ -1138,44 +1135,95 @@ elif pagina_selecionada == "Ações BR":
     st.markdown("---")
     
     # Seção 2: Análise de Insiders (código original mantido)
-    st.subheader("Radar de Insiders (Movimentações CVM)")
-    st.info("Analisa as movimentações de compra e venda de ações feitas por pessoas ligadas à empresa (Controladores, Diretores, etc.), com base nos dados públicos da CVM. Grandes volumes de compra podem indicar confiança na empresa.")
-    if st.button("Analisar Movimentações de Insiders do Mês", use_container_width=True):
-        with st.spinner("Baixando e processando dados da CVM e YFinance... Isso pode levar alguns minutos."):
-            dados_insiders = executar_analise_insiders()
-        if dados_insiders:
-            df_controladores, df_outros, ultimo_mes = dados_insiders
-            st.subheader(f"Dados de {ultimo_mes.strftime('%B de %Y')}")
-            if not df_controladores.empty:
-                st.write("#### Grupo: Controladores e Vinculados")
-                fig_vol_ctrl, fig_rel_ctrl = gerar_graficos_insiders_plotly(df_controladores)
-                col1_ctrl, col2_ctrl = st.columns(2)
-                with col1_ctrl: st.plotly_chart(fig_vol_ctrl, use_container_width=True)
-                with col2_ctrl: st.plotly_chart(fig_rel_ctrl, use_container_width=True)
+    # SUBSTITUA a seção "Radar de Insiders" existente por ESTE BLOCO DE CÓDIGO
+st.subheader("Radar de Insiders (Movimentações CVM)")
+st.info("Analisa as movimentações de compra e venda de ações feitas por pessoas ligadas à empresa (Controladores, Diretores, etc.), com base nos dados públicos da CVM. Use os filtros para encontrar as movimentações mais relevantes.")
+
+meses_disponiveis = obter_meses_disponiveis_insiders()
+
+if not meses_disponiveis:
+    st.warning("Não foi possível carregar a lista de meses disponíveis da CVM.")
+else:
+    with st.form(key='insiders_form'):
+        meses_selecionados = st.multiselect(
+            label="Selecione os meses para análise (dados dos últimos 2 anos):",
+            options=meses_disponiveis,
+            default=meses_disponiveis[:3] # Sugere os 3 meses mais recentes
+        )
+        submitted = st.form_submit_button('Analisar Movimentações', use_container_width=True)
+
+    if submitted and not meses_selecionados:
+        st.error("Por favor, selecione pelo menos um mês para a análise.")
+    
+    if submitted and meses_selecionados:
+        df_insiders = executar_analise_insiders(meses_selecionados)
+        st.session_state.df_insiders_data = df_insiders
+
+if 'df_insiders_data' in st.session_state:
+    df_resultado = st.session_state.df_insiders_data
+
+    if df_resultado is None or df_resultado.empty:
+        st.info("Nenhuma movimentação de insiders encontrada para os filtros selecionados.")
+    else:
+        st.markdown("---")
+        # --- Filtros ---
+        col1, col2 = st.columns(2)
+        with col1:
+            # Garante que min e max sejam diferentes e trata o caso de valores apenas positivos/negativos
+            min_val, max_val = float(df_resultado['Valor'].min()), float(df_resultado['Valor'].max())
+            valor_filtro = st.slider(
+                'Filtrar por Valor Líquido (R$)',
+                min_value=min_val,
+                max_value=max_val,
+                value=(min_val, max_val),
+                step=100000.0,
+                format="R$ %.2f"
+            )
+
+        with col2:
+            min_pct, max_pct = float(df_resultado['% do Capital'].min()), float(df_resultado['% do Capital'].max())
+            if pd.isna(min_pct) or pd.isna(max_pct) or min_pct == max_pct:
+                 st.info("Filtro de '%' do Capital indisponível.")
+                 pct_filtro = (min_pct, max_pct) # Define um valor padrão
             else:
-                st.warning("Não foram encontrados dados de movimentação para Controladores no último mês.")
-            st.markdown("---")
-            if not df_outros.empty:
-                st.write("#### Grupo: Demais Insiders (Diretores, Conselheiros, etc.)")
-                fig_vol_outros, fig_rel_outros = gerar_graficos_insiders_plotly(df_outros)
-                col1_outros, col2_outros = st.columns(2)
-                with col1_outros: st.plotly_chart(fig_vol_outros, use_container_width=True)
-                with col2_outros: st.plotly_chart(fig_rel_outros, use_container_width=True)
-            else:
-                st.warning("Não foram encontrados dados de movimentação para Demais Insiders no último mês.")
-        else:
-            st.error("Falha ao processar dados de insiders.")
+                 pct_filtro = st.slider(
+                    'Filtrar por Relevância (% do Capital)',
+                    min_value=min_pct,
+                    max_value=max_pct,
+                    value=(min_pct, max_pct),
+                    format="%.4f%%"
+                )
+        
+        df_filtrado = df_resultado[
+            (df_resultado['Valor'] >= valor_filtro[0]) & (df_resultado['Valor'] <= valor_filtro[1]) &
+            (df_resultado['% do Capital'] >= pct_filtro[0]) & (df_resultado['% do Capital'] <= pct_filtro[1])
+        ]
 
-    st.markdown("---")
-# ... final do bloco "elif pagina_selecionada == "Crédito Privado":"
+        # --- Abas e Tabelas ---
+        tab_controladores, tab_outros = st.tabs(["Controladores e Vinculados", "Demais Insiders (Diretores, etc.)"])
 
-# App.py
+        column_config = {
+            "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
+            "Qtd Ações": st.column_config.NumberColumn("Qtd Ações", format="%d"),
+            "Preço Médio": st.column_config.NumberColumn("Preço Médio (R$)", format="R$ %.2f"),
+            "% do Capital": st.column_config.NumberColumn("% do Capital", format="%.4f%%"),
+        }
 
-# ... (código anterior com o roteamento de páginas)
+        with tab_controladores:
+            st.dataframe(
+                df_filtrado[df_filtrado['Grupo'] == 'Controladores'].drop(columns=['Grupo']),
+                use_container_width=True,
+                column_config=column_config,
+                hide_index=True
+            )
 
-# App.py
-
-# ... (código anterior)
+        with tab_outros:
+            st.dataframe(
+                df_filtrado[df_filtrado['Grupo'] == 'Demais Insiders'].drop(columns=['Grupo']),
+                use_container_width=True,
+                column_config=column_config,
+                hide_index=True
+            )
 
 elif pagina_selecionada == "Amplitude":
     st.header("Análise de Amplitude de Mercado (Market Breadth)")
@@ -1310,3 +1358,4 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_histograma_amplitude(net_ifr_series, "Distribuição Histórica do Net IFR", valor_atual_net_ifr, media_hist_net_ifr, nbins=100), use_container_width=True)
         with col2:
             st.plotly_chart(gerar_heatmap_amplitude(resultados_net_ifr['Retorno Médio'], faixa_atual_net_ifr, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Net IFR"), use_container_width=True)
+
