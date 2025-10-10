@@ -1205,6 +1205,7 @@ elif pagina_selecionada == "Ações BR":
     st.markdown("---")
 # Substitua o 'elif' inteiro da página "Amplitude" por este código
 # Substitua o 'elif' inteiro da página "Amplitude" por este código
+# Substitua o 'elif' inteiro da página "Amplitude" por este código
 elif pagina_selecionada == "Amplitude":
     st.header("Análise de Amplitude de Mercado")
     st.info("Esta página analisa a 'saúde' do mercado de ações, verificando quantos papéis estão em tendência de alta (acima da MM200) e os níveis de sobrecompra/sobrevenda (IFR).")
@@ -1226,6 +1227,12 @@ elif pagina_selecionada == "Amplitude":
             
             precos = obter_precos_historicos_amplitude(tickers, anos_historico=ANOS_HISTORICO)
             dados_bova11 = yf.download(ATIVO_ANALISE, start=datetime.now() - timedelta(days=ANOS_HISTORICO*365), end=datetime.now(), auto_adjust=True, progress=False)
+
+            # --- CORREÇÃO ADICIONADA AQUI ---
+            # Validação para garantir que os dados do ativo de análise foram baixados
+            if dados_bova11.empty or 'Close' not in dados_bova11.columns:
+                st.error(f"Falha ao baixar os dados de '{ATIVO_ANALISE}'. A análise de retorno futuro não pode ser gerada.")
+                st.stop()
 
         with st.spinner("Calculando indicadores de amplitude..."):
             # Market Breadth (MM200)
@@ -1307,7 +1314,7 @@ elif pagina_selecionada == "Amplitude":
         # Preparação dos dados para todos os heatmaps
         with st.spinner("Preparando dados para heatmaps..."):
             # Market Breadth
-            df_analise_mb = pd.DataFrame(dados_bova11['Close']).join(market_breadth)
+            df_analise_mb = dados_bova11[['Close']].join(market_breadth)
             for nome_periodo, dias in PERIODOS_RETORNO.items():
                 df_analise_mb[f'retorno_{nome_periodo}'] = df_analise_mb['Close'].pct_change(periods=dias).shift(-dias) * 100
             df_analise_mb.dropna(inplace=True)
@@ -1317,7 +1324,7 @@ elif pagina_selecionada == "Amplitude":
             faixa_atual_mb = f'{faixa_atual_valor_mb}-{faixa_atual_valor_mb + passo_mb}%'
 
             # Média Geral do IFR
-            df_analise_ifr = pd.DataFrame(dados_bova11['Close']).join(media_geral_ifr.rename('media_ifr_geral'))
+            df_analise_ifr = dados_bova11[['Close']].join(media_geral_ifr.rename('media_ifr_geral'))
             for nome_periodo, dias in PERIODOS_RETORNO.items():
                 df_analise_ifr[f'retorno_{nome_periodo}'] = df_analise_ifr['Close'].pct_change(periods=dias).shift(-dias) * 100
             df_analise_ifr.dropna(inplace=True)
@@ -1326,14 +1333,12 @@ elif pagina_selecionada == "Amplitude":
             faixa_atual_valor_ifr = int(valor_atual_ifr // passo_ifr) * passo_ifr
             faixa_atual_ifr = f'{faixa_atual_valor_ifr}-{faixa_atual_valor_ifr + passo_ifr}'
             
-            # --- BLOCO ADICIONADO PARA O HEATMAP DO NET IFR ---
             # Net IFR
-            df_analise_net_ifr = pd.DataFrame(dados_bova11['Close']).join(net_ifr.rename('net_ifr'))
+            df_analise_net_ifr = dados_bova11[['Close']].join(net_ifr.rename('net_ifr'))
             for nome_periodo, dias in PERIODOS_RETORNO.items():
                 df_analise_net_ifr[f'retorno_{nome_periodo}'] = df_analise_net_ifr['Close'].pct_change(periods=dias).shift(-dias) * 100
             df_analise_net_ifr.dropna(inplace=True)
             
-            # Análise por faixa customizada para o range negativo/positivo do Net IFR
             passo_net_ifr = 10
             bins_net = list(range(-100, 101, passo_net_ifr))
             labels_net = [f'{i} a {i+passo_net_ifr}%' for i in range(-100, 100, passo_net_ifr)]
@@ -1342,7 +1347,6 @@ elif pagina_selecionada == "Amplitude":
             
             faixa_atual_valor_net_ifr = int(valor_atual_net_ifr // passo_net_ifr) * passo_net_ifr
             faixa_atual_net_ifr = f'{faixa_atual_valor_net_ifr} a {faixa_atual_valor_net_ifr + passo_net_ifr}%'
-            # --- FIM DO BLOCO ADICIONADO ---
 
         # Exibição dos heatmaps
         col1_heat, col2_heat = st.columns(2)
@@ -1353,7 +1357,6 @@ elif pagina_selecionada == "Amplitude":
             fig_heatmap_ifr = plotar_heatmap_com_indicador_atual(resultados_ifr['Retorno Médio'], faixa_atual_ifr, "Retorno Médio vs. Média Geral do IFR")
             st.plotly_chart(fig_heatmap_ifr, use_container_width=True)
         
-        # Exibição do heatmap do Net IFR em uma nova linha para melhor visualização
         fig_heatmap_net_ifr = plotar_heatmap_com_indicador_atual(resultados_net_ifr, faixa_atual_net_ifr, "Retorno Médio vs. Net IFR")
         st.plotly_chart(fig_heatmap_net_ifr, use_container_width=True)
 
