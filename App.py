@@ -864,6 +864,50 @@ def plotar_heatmap_com_indicador_atual(tabela_media, faixa_atual, titulo):
         fig.add_shape(type="rect", xref="paper", yref="y", x0=0, y0=y_pos-0.5, x1=1, y1=y_pos+0.5, line=dict(color="White", width=3))
     fig.update_layout(title=titulo, template='plotly_dark', yaxis_title='Faixa do Indicador', title_x=0)
     return fig
+
+# --- INÍCIO DO NOVO BLOCO DE CÓDIGO (PARA O BLOCO 7) ---
+
+@st.cache_data(ttl=3600*8)
+def calcular_net_ifr(ifr_amplitude_df):
+    """Calcula o Net IFR (% Sobrecompradas - % Sobrevendidas)."""
+    if ifr_amplitude_df.empty or 'IFR > 70 (Sobrecompradas)' not in ifr_amplitude_df.columns or 'IFR < 30 (Sobrevendidas)' not in ifr_amplitude_df.columns:
+        return pd.Series(dtype='float64')
+    net_ifr = ifr_amplitude_df['IFR > 70 (Sobrecompradas)'] - ifr_amplitude_df['IFR < 30 (Sobrevendidas)']
+    net_ifr.name = 'net_ifr'
+    return net_ifr
+
+def gerar_grafico_net_ifr(net_ifr_series, media_hist):
+    """Gera o gráfico histórico do Net IFR."""
+    if net_ifr_series.empty:
+        return go.Figure().update_layout(title_text="Dados de Net IFR indisponíveis.")
+    
+    df_plot = net_ifr_series.tail(252 * 5) # últimos 5 anos
+    fig = px.line(df_plot, title='Histórico do Net IFR (5 Anos)', template='plotly_dark')
+    fig.add_hline(y=media_hist, line_dash="dash", line_color="gray", annotation_text=f"Média Hist: {media_hist:.2f}%")
+    fig.add_hline(y=0, line_dash="solid", line_color="white", opacity=0.5)
+    fig.update_layout(
+        title_x=0,
+        yaxis_title='Net IFR (% Sobrecompradas - % Sobrevendidas)',
+        xaxis_title='Data',
+        showlegend=False
+    )
+    return fig
+
+def analisar_por_faixa_net_ifr(df, nome_coluna_indicador, colunas_retorno):
+    """Analisa os retornos futuros com base em faixas do Net IFR (adaptado para negativos)."""
+    bins = list(range(-50, 51, 10))
+    labels = [f'{i} a {i+10}%' for i in range(-50, 50, 10)]
+    df[f'faixa_{nome_coluna_indicador}'] = pd.cut(df[nome_coluna_indicador], bins=bins, labels=labels, right=False, include_lowest=True)
+
+    grouped = df.groupby(f'faixa_{nome_coluna_indicador}', observed=False)
+    media_resultados = grouped[colunas_retorno].mean()
+    
+    # Adicionado para remover faixas sem dados e evitar erros no heatmap
+    media_resultados.dropna(how='all', inplace=True) 
+    
+    return pd.concat([media_resultados], axis=1, keys=['Retorno Médio'])
+
+# --- FIM DO NOVO BLOCO DE CÓDIGO ---
 # --- CONSTRUÇÃO DA INTERFACE (LAYOUT FINAL COM OPTION_MENU) ---
 
 # --- Lógica para carregar os dados principais uma vez ---
@@ -1169,7 +1213,7 @@ elif pagina_selecionada == "Ações BR":
     st.markdown("---")
 elif pagina_selecionada == "Amplitude":
     st.header("Análise de Amplitude de Mercado")
-    st.info("Esta página analisa a 'saúde' do mercado de ações, verificando quantos papéis estão em tendência de alta (acima da média de 200 dias) e os níveis de sobrecompra/ sobrevenda (IFR).")
+    st.info("Esta página analisa a 'saúde' do mercado de ações, verificando a força interna do movimento através de múltiplos indicadores.")
 
     if st.button("Executar Análise de Amplitude (Pode levar alguns minutos na 1ª vez)", use_container_width=True):
         
@@ -1188,11 +1232,14 @@ elif pagina_selecionada == "Amplitude":
             with st.spinner(f"Baixando dados do {ATIVO_ANALISE} para análise de retorno..."):
                 dados_bova11 = yf.download(ATIVO_ANALISE, start=datetime.now() - timedelta(days=ANOS_HISTORICO*365), end=datetime.now(), auto_adjust=True, progress=False)
 
-            # --- Análise de Market Breadth (MM200) ---
+            #################################################################
+            # SEÇÃO 1: MARKET BREADTH (MM200)
+            #################################################################
             st.markdown("---")
-            st.subheader("Análise de Market Breadth (% de Ações acima da MM200)")
-            market_breadth = calcular_dados_amplitude(precos)
+            st.subheader("1. Market Breadth (% de Ações acima da MM200)")
+            st.info("Este indicador mostra a porcentagem de ações negociando acima de sua Média Móvel de 200 dias. Leituras extremas podem sinalizar topos (muito alto) ou fundos (muito baixo) de mercado.")
             
+            market_breadth = calcular_dados_amplitude(precos)
             valor_atual_mb = market_breadth.iloc[-1]
             media_hist_mb = market_breadth.mean()
             z_score_mb = (valor_atual_mb - media_hist_mb) / market_breadth.std()
@@ -1204,15 +1251,24 @@ elif pagina_selecionada == "Amplitude":
             col3.metric("Z-Score (Desvios Padrão)", f"{z_score_mb:.2f}")
             col4.metric("Percentil Histórico", f"{percentil_mb:.2f}%")
 
-            fig_hist_mb = px.line(market_breadth.tail(252*5), title='Histórico do Market Breadth (5 Anos)', template='plotly_dark')
-            fig_hist_mb.add_hline(y=media_hist_mb, line_dash="dash", line_color="gray", annotation_text="Média Hist.")
-            fig_hist_mb.add_hline(y=valor_atual_mb, line_dash="dot", line_color="yellow", annotation_text=f"Atual")
-            st.plotly_chart(fig_hist_mb, use_container_width=True)
+            c1, c2 = st.columns([0.6, 0.4])
+            with c1:
+                fig_hist_mb = px.line(market_breadth.tail(252*5), title='Histórico do Market Breadth (5 Anos)', template='plotly_dark')
+                fig_hist_mb.add_hline(y=media_hist_mb, line_dash="dash", line_color="gray", annotation_text="Média Hist.")
+                fig_hist_mb.add_hline(y=valor_atual_mb, line_dash="dot", line_color="yellow", annotation_text=f"Atual")
+                st.plotly_chart(fig_hist_mb, use_container_width=True)
+            with c2:
+                fig_hist_mb_dist = gerar_histograma_com_metricas(market_breadth, "Distribuição Histórica", valor_atual_mb, media_hist_mb)
+                st.plotly_chart(fig_hist_mb_dist, use_container_width=True)
 
-            # --- Análise de Amplitude do IFR ---
+
+            #################################################################
+            # SEÇÃO 2: AMPLITUDE DO IFR
+            #################################################################
             st.markdown("---")
-            st.subheader("Análise de Amplitude do IFR (Índice de Força Relativa)")
-            
+            st.subheader("2. Amplitude do IFR (Índice de Força Relativa)")
+            st.info("Mostra a distribuição das ações entre sobrecompradas (IFR > 70), sobrevendidas (IFR < 30) e neutras. A Média Geral do IFR de todos os ativos também é plotada como um termômetro de sentimento.")
+
             ifr_individual_df = calcular_ifr_com_pandasta(precos, periodo=14)
             ifr_amplitude_df = calcular_amplitude_ifr(ifr_individual_df)
             media_geral_ifr = ifr_individual_df.mean(axis=1).dropna()
@@ -1228,55 +1284,82 @@ elif pagina_selecionada == "Amplitude":
             col3.metric("Z-Score (Desvios Padrão)", f"{z_score_ifr:.2f}")
             col4.metric("Percentil Histórico", f"{percentil_ifr:.2f}%")
             
-            fig_ifr = gerar_grafico_amplitude_ifr(ifr_amplitude_df, media_geral_ifr)
-            st.plotly_chart(fig_ifr, use_container_width=True)
-            
-            # --- INÍCIO DA SEÇÃO ADICIONADA: HISTOGRAMAS ---
-            st.markdown("---")
-            st.subheader("Distribuição Histórica dos Indicadores")
-            col1_hist, col2_hist = st.columns(2)
-            with col1_hist:
-                fig_hist_mb_dist = gerar_histograma_com_metricas(market_breadth, "Distribuição do Market Breadth", valor_atual_mb, media_hist_mb)
-                st.plotly_chart(fig_hist_mb_dist, use_container_width=True)
-            with col2_hist:
+            c1, c2 = st.columns([0.6, 0.4])
+            with c1:
+                fig_ifr = gerar_grafico_amplitude_ifr(ifr_amplitude_df, media_geral_ifr)
+                st.plotly_chart(fig_ifr, use_container_width=True)
+            with c2:
                 fig_hist_ifr_dist = gerar_histograma_com_metricas(media_geral_ifr, "Distribuição da Média Geral do IFR", valor_atual_ifr, media_hist_ifr)
                 st.plotly_chart(fig_hist_ifr_dist, use_container_width=True)
-            # --- FIM DA SEÇÃO ADICIONADA ---
 
 
-            # --- Heatmaps de Retorno Futuro ---
+            #################################################################
+            # SEÇÃO 3: NET IFR (NOVA ANÁLISE)
+            #################################################################
             st.markdown("---")
-            st.subheader(f"Análise de Retorno Futuro do {ATIVO_ANALISE} por Faixa de Indicador")
-            st.info("Os heatmaps mostram o retorno médio histórico do BOVA11 nos períodos seguintes, dado que o indicador estava em uma determinada faixa. A faixa atual está destacada com uma borda branca.")
+            st.subheader("3. Net IFR (% Sobrecompradas - % Sobrevendidas)")
+            st.info("Este indicador mede o 'saldo' líquido entre as forças compradoras e vendedoras. Valores muito positivos indicam euforia e possível exaustão, enquanto valores muito negativos sugerem pânico e potencial capitulação.")
+            
+            net_ifr = calcular_net_ifr(ifr_amplitude_df)
+            valor_atual_net_ifr = net_ifr.iloc[-1]
+            media_hist_net_ifr = net_ifr.mean()
+            z_score_net_ifr = (valor_atual_net_ifr - media_hist_net_ifr) / net_ifr.std()
+            percentil_net_ifr = stats.percentileofscore(net_ifr, valor_atual_net_ifr)
 
-            # Preparação para Heatmap Market Breadth
-            df_analise_mb = pd.DataFrame(dados_bova11['Close'])
-            df_analise_mb.columns = ['Close']
-            df_analise_mb = df_analise_mb.join(market_breadth)
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Valor Atual", f"{valor_atual_net_ifr:.2f}%")
+            col2.metric("Média Histórica", f"{media_hist_net_ifr:.2f}%")
+            col3.metric("Z-Score (Desvios Padrão)", f"{z_score_net_ifr:.2f}")
+            col4.metric("Percentil Histórico", f"{percentil_net_ifr:.2f}%")
+
+            c1, c2 = st.columns([0.6, 0.4])
+            with c1:
+                fig_net_ifr_hist = gerar_grafico_net_ifr(net_ifr, media_hist_net_ifr)
+                st.plotly_chart(fig_net_ifr_hist, use_container_width=True)
+            with c2:
+                fig_hist_net_ifr = gerar_histograma_com_metricas(net_ifr, "Distribuição do Net IFR", valor_atual_net_ifr, media_hist_net_ifr)
+                st.plotly_chart(fig_hist_net_ifr, use_container_width=True)
+
+
+            #################################################################
+            # SEÇÃO 4: HEATMAPS DE RETORNO FUTURO
+            #################################################################
+            st.markdown("---")
+            st.subheader(f"4. Análise de Retorno Futuro do {ATIVO_ANALISE} por Faixa de Indicador")
+            st.info("Os heatmaps mostram o retorno médio histórico do BOVA11 nos períodos seguintes, dado que o indicador estava em uma determinada faixa. A faixa atual está destacada com uma borda branca. Use para entender o comportamento histórico, não como uma previsão.")
+
+            # Preparação para Heatmaps
+            df_analise = pd.DataFrame(dados_bova11['Close'])
+            df_analise = df_analise.join(market_breadth).join(media_geral_ifr.rename('media_ifr_geral')).join(net_ifr)
             for nome_periodo, dias in PERIODOS_RETORNO.items():
-                df_analise_mb[f'retorno_{nome_periodo}'] = df_analise_mb['Close'].pct_change(periods=dias).shift(-dias) * 100
-            df_analise_mb.dropna(inplace=True)
-            resultados_mb = analisar_por_faixa(df_analise_mb.copy(), 'market_breadth', colunas_retorno)
-            passo_mb = 10
-            faixa_atual_valor_mb = int(valor_atual_mb // passo_mb) * passo_mb
+                df_analise[f'retorno_{nome_periodo}'] = df_analise['Close'].pct_change(periods=dias).shift(-dias) * 100
+            df_analise.dropna(inplace=True)
+
+            # Heatmap Market Breadth
+            resultados_mb = analisar_por_faixa(df_analise.copy(), 'market_breadth', colunas_retorno)
+            passo_mb = 10; faixa_atual_valor_mb = int(valor_atual_mb // passo_mb) * passo_mb
             faixa_atual_mb = f'{faixa_atual_valor_mb}-{faixa_atual_valor_mb + passo_mb}%'
-
-            # Preparação para Heatmap IFR
-            df_analise_ifr = pd.DataFrame(dados_bova11['Close'])
-            df_analise_ifr.columns = ['Close']
-            df_analise_ifr = df_analise_ifr.join(media_geral_ifr.rename('media_ifr_geral'))
-            for nome_periodo, dias in PERIODOS_RETORNO.items():
-                df_analise_ifr[f'retorno_{nome_periodo}'] = df_analise_ifr['Close'].pct_change(periods=dias).shift(-dias) * 100
-            df_analise_ifr.dropna(inplace=True)
-            resultados_ifr = analisar_por_faixa(df_analise_ifr.copy(), 'media_ifr_geral', colunas_retorno)
-            passo_ifr = 5
-            faixa_atual_valor_ifr = int(valor_atual_ifr // passo_ifr) * passo_ifr
+            
+            # Heatmap IFR
+            resultados_ifr = analisar_por_faixa(df_analise.copy(), 'media_ifr_geral', colunas_retorno)
+            passo_ifr = 5; faixa_atual_valor_ifr = int(valor_atual_ifr // passo_ifr) * passo_ifr
             faixa_atual_ifr = f'{faixa_atual_valor_ifr}-{faixa_atual_valor_ifr + passo_ifr}'
+            
+            # Heatmap Net IFR (NOVO)
+            resultados_net_ifr = analisar_por_faixa_net_ifr(df_analise.copy(), 'net_ifr', colunas_retorno)
+            passo_net_ifr = 10; faixa_atual_valor_net_ifr = int(valor_atual_net_ifr // passo_net_ifr) * passo_net_ifr
+            faixa_atual_net_ifr = f'{faixa_atual_valor_net_ifr} a {faixa_atual_valor_net_ifr + passo_net_ifr}%'
 
-            col1, col2 = st.columns(2)
+
+            st.write("##### **Retorno vs. Nível do Indicador**")
+            col1, col2, col3 = st.columns(3)
             with col1:
-                fig_heatmap_mb = plotar_heatmap_com_indicador_atual(resultados_mb['Retorno Médio'], faixa_atual_mb, "Heatmap de Retorno Médio vs. Market Breadth")
+                fig_heatmap_mb = plotar_heatmap_com_indicador_atual(resultados_mb['Retorno Médio'], faixa_atual_mb, "Market Breadth (MM200)")
                 st.plotly_chart(fig_heatmap_mb, use_container_width=True)
             with col2:
-                fig_heatmap_ifr = plotar_heatmap_com_indicador_atual(resultados_ifr['Retorno Médio'], faixa_atual_ifr, "Heatmap de Retorno Médio vs. Média Geral do IFR")
+                fig_heatmap_ifr = plotar_heatmap_com_indicador_atual(resultados_ifr['Retorno Médio'], faixa_atual_ifr, "Média Geral do IFR")
                 st.plotly_chart(fig_heatmap_ifr, use_container_width=True)
+            with col3:
+                fig_heatmap_net_ifr = plotar_heatmap_com_indicador_atual(resultados_net_ifr['Retorno Médio'], faixa_atual_net_ifr, "Net IFR")
+                st.plotly_chart(fig_heatmap_net_ifr, use_container_width=True)
+
