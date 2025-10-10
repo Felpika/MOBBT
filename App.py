@@ -516,8 +516,8 @@ def executar_analise_insiders(meses_selecionados):
     
     df_merged['Volume_Compra'] = np.where(df_merged['Tipo_Movimentacao'] == 'Compra à vista', df_merged['Volume'], 0)
     df_merged['Volume_Venda'] = np.where(df_merged['Tipo_Movimentacao'] == 'Venda à vista', df_merged['Volume'], 0)
-    df_merged['Qtd_Compra'] = np.where(df_merged['Tipo_Movimentacao'] == 'Compra à vista', df_merged['Qtde_Val_Mobiliario'], 0)
-    df_merged['Qtd_Venda'] = np.where(df_merged['Tipo_Movimentacao'] == 'Venda à vista', df_merged['Qtde_Val_Mobiliario'], 0)
+    df_merged['Qtd_Compra'] = np.where(df_merged['Tipo_Movimentacao'] == 'Compra à vista', df_merged['Qtd_Tit_Negoc'], 0)
+    df_merged['Qtd_Venda'] = np.where(df_merged['Tipo_Movimentacao'] == 'Venda à vista', df_merged['Qtd_Tit_Negoc'], 0)
     df_merged['Grupo'] = np.where(df_merged['Tipo_Cargo'] == 'Controlador ou Vinculado', 'Controladores', 'Demais Insiders')
 
     agregacao = {
@@ -1358,5 +1358,6 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_histograma_amplitude(net_ifr_series, "Distribuição Histórica do Net IFR", valor_atual_net_ifr, media_hist_net_ifr, nbins=100), use_container_width=True)
         with col2:
             st.plotly_chart(gerar_heatmap_amplitude(resultados_net_ifr['Retorno Médio'], faixa_atual_net_ifr, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Net IFR"), use_container_width=True)
+
 
 
