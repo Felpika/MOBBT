@@ -768,18 +768,23 @@ def obter_precos_historicos_amplitude(tickers, anos_historico=10):
     """Esta função baixa os preços históricos para a análise de amplitude."""
     st.info(f"Baixando dados de preços de {len(tickers)} ativos... (Cache de 8h)")
     tickers_sa = [ticker + ".SA" for ticker in tickers]
+    # Alterado para auto_adjust=False para usar 'Adj Close' explicitamente
     dados_completos = yf.download(
         tickers=tickers_sa,
         start=datetime.now() - timedelta(days=anos_historico*365),
         end=datetime.now(),
-        auto_adjust=True,
-        progress=False, # Desativar a barra de progresso do yfinance no Streamlit
+        auto_adjust=False,
+        progress=False,
         group_by='ticker'
     )
     if not dados_completos.empty:
-        precos_fechamento = dados_completos.stack(level=0, future_stack=True)['Close'].unstack(level=1)
-        return precos_fechamento.astype('float32')
+        # Seleciona 'Adj Close' (preferencial) ou 'Close' como fallback
+        price_type = 'Adj Close' if 'Adj Close' in dados_completos.columns.get_level_values(1) else 'Close'
+        precos = dados_completos.stack(level=0, future_stack=True)[price_type].unstack(level=1)
+        return precos.astype('float32')
     return pd.DataFrame()
+
+# ... (restante das funções)
 
 @st.cache_data
 def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
@@ -1164,6 +1169,10 @@ elif pagina_selecionada == "Ações BR":
     st.markdown("---")
 # ... final do bloco "elif pagina_selecionada == "Crédito Privado":"
 
+# App.py
+
+# ... (código anterior com o roteamento de páginas)
+
 elif pagina_selecionada == "Amplitude":
     st.header("Análise de Amplitude de Mercado (Market Breadth)")
     st.info(
@@ -1187,16 +1196,22 @@ elif pagina_selecionada == "Amplitude":
             tickers_cvm = obter_tickers_cvm_amplitude()
             if tickers_cvm:
                 precos = obter_precos_historicos_amplitude(tickers_cvm, anos_historico=ANOS_HISTORICO)
-                dados_bova11 = yf.download(ATIVO_ANALISE, start=precos.index.min(), end=precos.index.max(), auto_adjust=True, progress=False)
+                # CORREÇÃO: Usar auto_adjust=False para garantir a coluna 'Adj Close'
+                dados_bova11 = yf.download(ATIVO_ANALISE, start=precos.index.min(), end=precos.index.max(), auto_adjust=False, progress=False)
 
                 if not precos.empty and not dados_bova11.empty:
-                    # 2. Calcular indicadores
                     st.session_state.df_indicadores = calcular_indicadores_amplitude(precos)
                     
-                    # 3. Preparar dados para análise de retorno
-                    df_analise_base = pd.DataFrame(dados_bova11['Close'])
+                    # CORREÇÃO: Selecionar 'Adj Close' ou 'Close' de forma segura
+                    if 'Adj Close' in dados_bova11.columns:
+                        price_series = dados_bova11[['Adj Close']]
+                    else:
+                        price_series = dados_bova11[['Close']]
+                    price_series.columns = ['price'] # Renomear para um nome padrão
+
+                    df_analise_base = price_series
                     for nome_periodo, dias in PERIODOS_RETORNO.items():
-                        df_analise_base[f'retorno_{nome_periodo}'] = df_analise_base['Close'].pct_change(periods=dias).shift(-dias) * 100
+                        df_analise_base[f'retorno_{nome_periodo}'] = df_analise_base['price'].pct_change(periods=dias).shift(-dias) * 100
                     
                     st.session_state.df_analise_base = df_analise_base.dropna()
                     st.session_state.analise_amplitude_executada = True
@@ -1205,6 +1220,7 @@ elif pagina_selecionada == "Amplitude":
             else:
                 st.error("Não foi possível obter a lista de tickers da CVM.")
     
+    # O restante do bloco de exibição dos gráficos permanece o mesmo
     if st.session_state.analise_amplitude_executada:
         df_indicadores = st.session_state.df_indicadores
         df_analise_base = st.session_state.df_analise_base
