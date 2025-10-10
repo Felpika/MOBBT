@@ -749,6 +749,102 @@ def gerar_heatmap_amplitude(tabela_media, faixa_atual, titulo):
     return fig
 
 # --- FIM DO BLOCO 7 ---
+# --- FIM DO BLOCO 7 ---
+
+# --- BLOCO 8: LÓGICA DO RADAR DE INSIDERS (NOVO) ---
+NOME_ARQUIVO_CACHE = "market_caps.csv"
+CACHE_VALIDADE_DIAS = 1
+
+@st.cache_data(ttl=3600*8) # Cache de 8 horas
+def baixar_e_extrair_zip_cvm(url, nome_csv_interno):
+    """Baixa e extrai um CSV de um arquivo ZIP da CVM em memória."""
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+            with z.open(nome_csv_interno) as f:
+                return pd.read_csv(f, sep=';', encoding='ISO-8859-1', on_bad_lines='skip')
+    except Exception as e:
+        st.error(f"Erro ao baixar ou processar dados da CVM de {url}: {e}")
+        return None
+
+def obter_market_cap_individual(ticker):
+    """Busca o valor de mercado para um único ticker."""
+    if pd.isna(ticker) or not isinstance(ticker, str): return ticker, np.nan
+    try:
+        stock = yf.Ticker(f"{ticker.strip()}.SA")
+        market_cap = stock.info.get('marketCap')
+        return ticker, market_cap if market_cap else np.nan
+    except Exception:
+        return ticker, np.nan
+
+def buscar_market_caps_otimizado(df_lookup, force_refresh=False):
+    """Busca os valores de mercado usando cache e processamento paralelo."""
+    if force_refresh and os.path.exists(NOME_ARQUIVO_CACHE):
+        os.remove(NOME_ARQUIVO_CACHE)
+
+    if not force_refresh and os.path.exists(NOME_ARQUIVO_CACHE):
+        data_modificacao = datetime.fromtimestamp(os.path.getmtime(NOME_ARQUIVO_CACHE))
+        if (datetime.now() - data_modificacao) < timedelta(days=CACHE_VALIDADE_DIAS):
+            df_cache = pd.read_csv(NOME_ARQUIVO_CACHE)
+            return pd.merge(df_lookup, df_cache, on="Codigo_Negociacao", how="left")
+
+    market_caps = {}
+    tickers_para_buscar = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
+    
+    with st.spinner(f"Buscando Market Cap para {len(tickers_para_buscar)} tickers... (pode levar alguns minutos)"):
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_ticker = {executor.submit(obter_market_cap_individual, ticker): ticker for ticker in tickers_para_buscar}
+            for future in as_completed(future_to_ticker):
+                ticker, market_cap = future.result()
+                if pd.notna(market_cap):
+                    market_caps[ticker] = market_cap
+
+    df_market_caps = pd.DataFrame(list(market_caps.items()), columns=['Codigo_Negociacao', 'MarketCap'])
+    df_market_caps.to_csv(NOME_ARQUIVO_CACHE, index=False)
+    return pd.merge(df_lookup, df_market_caps, on="Codigo_Negociacao", how="left")
+
+@st.cache_data
+def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=False):
+    """Executa a análise para os meses selecionados."""
+    if not meses_selecionados:
+        return pd.DataFrame()
+
+    df_periodo = _df_mov[_df_mov['Ano_Mes'].isin(meses_selecionados)].copy()
+    if df_periodo.empty:
+        st.warning("Não foram encontrados dados para os meses selecionados.")
+        return pd.DataFrame()
+
+    df_periodo['Volume_Net'] = np.where(df_periodo['Tipo_Movimentacao'] == 'Compra à vista', df_periodo['Volume'], -df_periodo['Volume'])
+    df_net_total = df_periodo.groupby(['CNPJ_Companhia', 'Nome_Companhia'])['Volume_Net'].sum().reset_index()
+
+    cnpjs_unicos = df_net_total[['CNPJ_Companhia']].drop_duplicates()
+    df_tickers = _df_cad[['CNPJ_Companhia', 'Codigo_Negociacao']].dropna().drop_duplicates(subset=['CNPJ_Companhia'])
+    df_lookup = pd.merge(cnpjs_unicos, df_tickers, on='CNPJ_Companhia', how='left')
+    
+    df_market_cap_lookup = buscar_market_caps_otimizado(df_lookup, force_refresh=force_refresh)
+
+    df_final = pd.merge(df_net_total, df_market_cap_lookup, on='CNPJ_Companhia', how='left')
+    
+    market_cap_para_calculo = df_final['MarketCap'].fillna(0)
+    df_final['Volume_vs_MarketCap_Pct'] = np.where(
+        market_cap_para_calculo > 0,
+        (df_final['Volume_Net'] / market_cap_para_calculo) * 100,
+        0
+    )
+
+    df_tabela = df_final[[
+        'Codigo_Negociacao', 'Nome_Companhia', 'Volume_Net', 'MarketCap', 'Volume_vs_MarketCap_Pct'
+    ]].rename(columns={
+        'Codigo_Negociacao': 'Ticker', 'Nome_Companhia': 'Empresa',
+        'Volume_Net': 'Volume Líquido (R$)', 'MarketCap': 'Valor de Mercado (R$)',
+        'Volume_vs_MarketCap_Pct': '% do Market Cap'
+    })
+
+    df_tabela = df_tabela.dropna(subset=['Ticker'])
+    return df_tabela.sort_values(by='Volume Líquido (R$)', ascending=False).reset_index(drop=True)
+
+# --- FIM DO BLOCO 8 ---
 
 # --- CONSTRUÇÃO DA INTERFACE (LAYOUT FINAL COM OPTION_MENU) ---
 
@@ -766,22 +862,24 @@ with st.sidebar:
             "NTN-Bs",
             "Curva de Juros",
             "Crédito Privado",
-            "Amplitude", # <-- ADICIONADO
+            "Amplitude", 
             "Econômicos BR",
             "Commodities",
             "Internacional",
             "Ações BR",
+            "Radar de Insiders", # <-- ADICIONAR ESTA LINHA
         ],
         # Ícones da https://icons.getbootstrap.com/
         icons=[
             "star-fill",
             "graph-up-arrow",
             "wallet2",
-            "water", # <-- ADICIONADO
+            "water", 
             "bar-chart-line-fill",
             "box-seam",
             "globe-americas",
             "kanban-fill",
+            "person-check-fill", # <-- ADICIONAR ESTA LINHA (ou outro ícone)
         ],
         menu_icon="speedometer2",
         default_index=0,
@@ -1158,6 +1256,85 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_histograma_amplitude(net_ifr_series, "Distribuição Histórica do Net IFR", valor_atual_net_ifr, media_hist_net_ifr, nbins=100), use_container_width=True)
         with col2:
             st.plotly_chart(gerar_heatmap_amplitude(resultados_net_ifr['Retorno Médio'], faixa_atual_net_ifr, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Net IFR"), use_container_width=True)
+
+# --- ADICIONE TODO O BLOCO ABAIXO ---
+elif pagina_selecionada == "Radar de Insiders":
+    st.header("Radar de Movimentação de Insiders (CVM)")
+    st.info(
+        "Esta ferramenta analisa as movimentações de compra e venda à vista por insiders (controladores, diretores, etc.) "
+        "informadas à CVM. Os dados são agregados mensalmente para identificar quais empresas tiveram maior volume líquido "
+        "de compras ou vendas."
+    )
+    st.markdown("---")
+
+    ANO_ATUAL = datetime.now().year
+    URL_MOVIMENTACOES = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/VLMO/DADOS/vlmo_cia_aberta_{ANO_ATUAL}.zip"
+    URL_CADASTRO = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ANO_ATUAL}.zip"
+    CSV_MOVIMENTACOES = f"vlmo_cia_aberta_con_{ANO_ATUAL}.csv"
+    CSV_CADASTRO = f"fca_cia_aberta_valor_mobiliario_{ANO_ATUAL}.csv"
+
+    # Carrega os dados base com cache
+    with st.spinner("Baixando e pré-processando dados da CVM..."):
+        df_mov_bruto = baixar_e_extrair_zip_cvm(URL_MOVIMENTACOES, CSV_MOVIMENTACOES)
+        df_cad_bruto = baixar_e_extrair_zip_cvm(URL_CADASTRO, CSV_CADASTRO)
+
+    if df_mov_bruto is not None and df_cad_bruto is not None:
+        df_mov_bruto['Data_Movimentacao'] = pd.to_datetime(df_mov_bruto['Data_Movimentacao'], errors='coerce')
+        df_mov_bruto.dropna(subset=['Data_Movimentacao'], inplace=True)
+        df_mov_bruto['Ano_Mes'] = df_mov_bruto['Data_Movimentacao'].dt.strftime('%Y-%m')
+
+        meses_disponiveis = sorted(df_mov_bruto['Ano_Mes'].unique(), reverse=True)
+
+        st.subheader("Configurações da Análise")
+        col1, col2 = st.columns([0.8, 0.2])
+        with col1:
+             meses_selecionados = st.multiselect(
+                "Selecione um ou mais meses para analisar",
+                options=meses_disponiveis,
+                default=[meses_disponiveis[0]] if meses_disponiveis else []
+            )
+        with col2:
+            st.write("") # Espaçador
+            st.write("") # Espaçador
+            force_refresh = st.checkbox("Forçar Refresh", help="Marque para ignorar o cache de Valor de Mercado e buscar os dados mais recentes online (mais lento).")
+
+        if st.button("Analisar Movimentações", use_container_width=True, type="primary"):
+            if meses_selecionados:
+                df_resultado = analisar_dados_insiders(df_mov_bruto, df_cad_bruto, meses_selecionados, force_refresh)
+                
+                st.subheader(f"Resultado da Análise para: {', '.join(meses_selecionados)}")
+                
+                st.dataframe(df_resultado.style.format({
+                    'Volume Líquido (R$)': '{:,.0f}',
+                    'Valor de Mercado (R$)': '{:,.0f}',
+                    '% do Market Cap': '{:.4f}%'
+                }), use_container_width=True)
+
+                # Destaques
+                st.markdown("---")
+                st.subheader("Destaques da Análise")
+                cols_destaques = st.columns(3)
+                maior_compra = df_resultado.loc[df_resultado['Volume Líquido (R$)'].idxmax()]
+                maior_venda = df_resultado.loc[df_resultado['Volume Líquido (R$)'].idxmin()]
+                maior_relevancia = df_resultado.loc[df_resultado['% do Market Cap'].abs().idxmax()]
+
+                cols_destaques[0].metric(
+                    label=f"📈 Maior Compra Líquida: {maior_compra['Ticker']}",
+                    value=f"R$ {maior_compra['Volume Líquido (R$)']:,.0f}"
+                )
+                cols_destaques[1].metric(
+                    label=f"📉 Maior Venda Líquida: {maior_venda['Ticker']}",
+                    value=f"R$ {maior_venda['Volume Líquido (R$)']:,.0f}"
+                )
+                cols_destaques[2].metric(
+                    label=f"📊 Maior Relevância (% Mkt Cap): {maior_relevancia['Ticker']}",
+                    value=f"{maior_relevancia['% do Market Cap']:.4f}%",
+                    help=f"Volume líquido de R$ {maior_relevancia['Volume Líquido (R$)']:,.0f}"
+                )
+            else:
+                st.warning("Por favor, selecione pelo menos um mês para a análise.")
+    else:
+        st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
 
 
 
