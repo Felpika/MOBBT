@@ -140,49 +140,66 @@ def calcular_inflacao_implicita(df):
     if not inflacao_implicita: return pd.DataFrame()
     return pd.DataFrame(inflacao_implicita).sort_values('Vencimento do Prefixo').set_index('Vencimento do Prefixo')
 
+# --- INÍCIO DA FUNÇÃO ATUALIZADA ---
+
 @st.cache_data
 def gerar_grafico_spread_juros(df):
     """
-    Calcula o spread de juros 10y vs 2y com vencimentos rolantes (dinâmicos).
-    Para cada dia no histórico, busca os títulos com vencimentos mais próximos de 2 e 10 anos.
+    Calcula o spread de juros 10y vs 2y com vencimentos FIXOS.
+    Identifica os títulos NTN-F com vencimentos mais próximos de 2 e 10 anos
+    na data mais recente e acompanha o spread desses DOIS títulos ao longo do tempo.
     """
     df_ntnf = df[df['Tipo Titulo'] == 'Tesouro Prefixado com Juros Semestrais'].copy()
     if df_ntnf.empty:
         return go.Figure().update_layout(title_text="Não há dados de Tesouro Prefixado com Juros Semestrais.")
 
-    # Agrupa por data para processamento eficiente
-    df_ntnf_grouped = df_ntnf.groupby('Data Base')
-    spread_results = []
+    # 1. Encontrar a data mais recente
+    if df_ntnf['Data Base'].empty:
+         return go.Figure().update_layout(title_text="Não há dados de Data Base para NTN-F.")
+    data_recente = df_ntnf['Data Base'].max()
+    
+    # 2. Isolar os vencimentos disponíveis na data recente
+    df_dia_recente = df_ntnf[df_ntnf['Data Base'] == data_recente]
+    vencimentos_recentes = df_dia_recente['Data Vencimento'].unique()
 
-    for data_base, df_dia in df_ntnf_grouped:
-        vencimentos_do_dia = df_dia['Data Vencimento'].unique()
+    if len(vencimentos_recentes) < 2:
+        return go.Figure().update_layout(title_text="Não há vencimentos suficientes na data mais recente para calcular o spread.")
 
-        if len(vencimentos_do_dia) < 2:
-            continue
+    # 3. Encontrar os vencimentos fixos (curto e longo)
+    target_2y = pd.to_datetime(data_recente) + pd.DateOffset(years=2)
+    target_10y = pd.to_datetime(data_recente) + pd.DateOffset(years=10)
 
-        target_2y = pd.to_datetime(data_base) + pd.DateOffset(years=2)
-        target_10y = pd.to_datetime(data_base) + pd.DateOffset(years=10)
+    venc_curto_fixo = min(vencimentos_recentes, key=lambda d: abs(d - target_2y))
+    venc_longo_fixo = min(vencimentos_recentes, key=lambda d: abs(d - target_10y))
 
-        # Encontra os vencimentos mais próximos para a data atual do loop
-        venc_curto = min(vencimentos_do_dia, key=lambda d: abs(d - target_2y))
-        venc_longo = min(vencimentos_do_dia, key=lambda d: abs(d - target_10y))
+    if venc_curto_fixo == venc_longo_fixo:
+        return go.Figure().update_layout(title_text="Não foi possível encontrar vencimentos de 2 e 10 anos distintos.")
 
-        if venc_curto == venc_longo:
-            continue
+    # 4. Criar DataFrames para cada vencimento
+    df_curto = df_ntnf[df_ntnf['Data Vencimento'] == venc_curto_fixo][['Data Base', 'Taxa Compra Manha']]
+    df_curto = df_curto.rename(columns={'Taxa Compra Manha': 'Taxa Curta'}).set_index('Data Base')
+    
+    df_longo = df_ntnf[df_ntnf['Data Vencimento'] == venc_longo_fixo][['Data Base', 'Taxa Compra Manha']]
+    df_longo = df_longo.rename(columns={'Taxa Compra Manha': 'Taxa Longa'}).set_index('Data Base')
 
-        taxa_curta = df_dia[df_dia['Data Vencimento'] == venc_curto]['Taxa Compra Manha'].iloc[0]
-        taxa_longa = df_dia[df_dia['Data Vencimento'] == venc_longo]['Taxa Compra Manha'].iloc[0]
-        
-        spread = (taxa_longa - taxa_curta) * 100 # Em basis points
-        spread_results.append({'Data': data_base, 'Spread': spread})
+    # 5. Mesclar e calcular o spread
+    df_merged = pd.merge(df_curto, df_longo, on='Data Base', how='inner')
+    df_merged['Spread'] = (df_merged['Taxa Longa'] - df_merged['Taxa Curta']) * 100  # Em basis points
 
-    if not spread_results:
-        return go.Figure().update_layout(title_text="Não foi possível calcular o spread dinâmico.")
+    if df_merged.empty:
+        return go.Figure().update_layout(title_text="Não foi possível calcular o spread (sem dados sobrepostos).")
 
-    df_spread_final = pd.DataFrame(spread_results).set_index('Data').sort_index()
+    df_spread_final = df_merged[['Spread']].dropna().sort_index()
 
-    # --- Plotagem e Filtros ---
-    fig = px.area(df_spread_final, y='Spread', title='Spread de Juros (10 Anos vs. 2 Anos) - Vencimentos Rolantes', template='plotly_dark')
+    # --- Plotagem e Filtros (lógica mantida da função original) ---
+    
+    # Título do gráfico atualizado para refletir a nova lógica
+    titulo_grafico = (
+        f'Spread de Juros (Fixo): '
+        f'NTN-F {venc_longo_fixo.strftime("%Y")} vs. NTN-F {venc_curto_fixo.strftime("%Y")}'
+    )
+    
+    fig = px.area(df_spread_final, y='Spread', title=titulo_grafico, template='plotly_dark')
     
     end_date = df_spread_final.index.max()
     start_date_real = df_spread_final.index.min()
@@ -215,7 +232,7 @@ def gerar_grafico_spread_juros(df):
         )]
     )
     
-    # --- INÍCIO DA CORREÇÃO DE ESCALA ---
+    # --- INÍCIO DA CORREÇÃO DE ESCALA (lógica mantida da função original) ---
     # Define a visualização inicial padrão para os últimos 5 anos
     start_date_5y_calculada = end_date - pd.DateOffset(years=5)
     start_date_default = max(start_date_5y_calculada, start_date_real)
@@ -239,6 +256,7 @@ def gerar_grafico_spread_juros(df):
     # --- FIM DA CORREÇÃO DE ESCALA ---
 
     return fig
+
 
 
 def gerar_grafico_ettj_curto_prazo(df):
@@ -1452,6 +1470,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
