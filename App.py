@@ -1080,7 +1080,7 @@ elif pagina_selecionada == "Curva de Juros":
         st.markdown("---")
         st.subheader("Spread de Juros (10 Anos vs. 2 Anos)")
         st.info("Este gráfico mostra a diferença (spread) entre as taxas dos títulos prefixados com juros semestrais (NTN-Fs) com vencimentos próximos de 10 e 2 anos. Um spread positivo indica uma curva inclinada, o que é típico. Spreads negativos (curva invertida) são raros e podem sinalizar expectativas de recessão.")
-        st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True)
+        st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
     else:
         st.warning("Não foi possível carregar os dados do Tesouro Direto.")
 
@@ -1470,6 +1470,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
