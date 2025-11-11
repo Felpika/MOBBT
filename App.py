@@ -746,17 +746,14 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
 
     # --- Gráfico de Área com Sobreposição ---
     
-    # Ordem de plotagem: do maior (provável) para o menor,
-    # para que as áreas menores fiquem visíveis na frente.
-    
     fig.add_trace(go.Scatter(
         x=df_amplitude_plot.index, 
         y=df_amplitude_plot['breadth_green'], 
         name='Acima MM50 e MM200', 
         line=dict(color='#4CAF50'),
         fillcolor='rgba(76, 175, 80, 0.4)', # Verde com 40% opacidade
+        fill='tozeroy', # <-- ADICIONADO AQUI: Preenche a área até o eixo Y=0
         mode='lines'
-        # stackgroup='one' FOI REMOVIDO
     ))
     
     fig.add_trace(go.Scatter(
@@ -765,8 +762,8 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
         name='Abaixo MM50, Acima MM200', 
         line=dict(color='#FFC107'),
         fillcolor='rgba(255, 193, 7, 0.4)', # Amarelo/Laranja com 40% opacidade
+        fill='tozeroy', # <-- ADICIONADO AQUI
         mode='lines'
-        # stackgroup='one' FOI REMOVIDO
     ))
     
     fig.add_trace(go.Scatter(
@@ -775,13 +772,13 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
         name='Abaixo MM50 e MM200', 
         line=dict(color='#F44336'),
         fillcolor='rgba(244, 67, 54, 0.4)', # Vermelho com 40% opacidade
+        fill='tozeroy', # <-- ADICIONADO AQUI
         mode='lines'
-        # stackgroup='one' FOI REMOVIDO
     ))
 
     # Atualiza o layout para um gráfico único
     fig.update_layout(
-        title_text='Amplitude de Mercado (MM50/200) - Sobreposto', # Título atualizado
+        title_text='Amplitude de Mercado (MM50/200) - Sobreposto',
         title_x=0,
         template='plotly_dark',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -1568,6 +1565,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
