@@ -690,6 +690,8 @@ def obter_precos_historicos_amplitude(tickers, anos_historico=10):
 
 # ... (restante das funções)
 
+# (No BLOCO 7: LÓGICA DO DASHBOARD DE AMPLITUDE)
+
 @st.cache_data
 def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
     """Calcula todos os indicadores de amplitude de uma vez para otimizar o cache."""
@@ -698,6 +700,19 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
     acima_da_media = _precos_fechamento > mma200
     percentual_acima_media = (acima_da_media.sum(axis=1) / _precos_fechamento.notna().sum(axis=1)) * 100
     
+    # --- INÍCIO DAS NOVAS LINHAS ---
+    # Cálculo da MM50 e das 3 categorias do gráfico
+    mma50 = _precos_fechamento.rolling(window=50, min_periods=20).mean()
+    total_papeis_validos = _precos_fechamento.notna().sum(axis=1)
+    
+    # 1. Vermelho: Papéis abaixo da MM50 e MM200
+    cat_red = ((_precos_fechamento < mma50) & (_precos_fechamento < mma200)).sum(axis=1) / total_papeis_validos * 100
+    # 2. Amarelo: Papéis abaixo da MM50, mas acima da MM200
+    cat_yellow = ((_precos_fechamento < mma50) & (_precos_fechamento > mma200)).sum(axis=1) / total_papeis_validos * 100
+    # 3. Verde: Papéis acima da MM50 e MM200
+    cat_green = ((_precos_fechamento > mma50) & (_precos_fechamento > mma200)).sum(axis=1) / total_papeis_validos * 100
+    # --- FIM DAS NOVAS LINHAS ---
+
     # IFR
     ifr_individual = _precos_fechamento.apply(lambda x: ta.rsi(x, length=rsi_periodo), axis=0)
     total_valido = ifr_individual.notna().sum(axis=1)
@@ -709,10 +724,78 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
         'IFR_sobrecompradas': sobrecompradas,
         'IFR_sobrevendidas': sobrevendidas,
         'IFR_net': sobrecompradas - sobrevendidas,
-        'IFR_media_geral': ifr_individual.mean(axis=1).dropna()
+        'IFR_media_geral': ifr_individual.mean(axis=1).dropna(),
+        
+        # --- ADICIONAR ESTAS 3 COLUNAS ---
+        'breadth_red': cat_red,
+        'breadth_yellow': cat_yellow,
+        'breadth_green': cat_green
     })
     return df_amplitude.dropna()
+# (Adicionar esta nova função no BLOCO 7)
 
+def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot, price_series, price_series_name="Ativo"):
+    """
+    Gera o gráfico de amplitude empilhado (MM50/MM200) com o Ativo (ex: BOVA11) sobreposto.
+    """
+    # Alinha os dados (price_series pode ter mais dados que o df_amplitude_plot)
+    aligned_price_series = price_series.reindex(df_amplitude_plot.index, method='ffill').dropna()
+    
+    # Cria os subplots: 1 para o preço (70%), 1 para as barras (30%)
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.05, row_heights=[0.7, 0.3])
+
+    # --- Gráfico Superior (Ativo) ---
+    fig.add_trace(go.Scatter(
+        x=aligned_price_series.index, 
+        y=aligned_price_series, 
+        name=price_series_name,
+        line=dict(color='white', width=2)
+    ), row=1, col=1)
+
+    # --- Gráfico Inferior (Barras Empilhadas) ---
+    fig.add_trace(go.Bar(
+        x=df_amplitude_plot.index, 
+        y=df_amplitude_plot['breadth_red'], 
+        name='Abaixo MM50 e MM200', 
+        marker_color='#F44336' # Vermelho
+    ), row=2, col=1)
+    
+    fig.add_trace(go.Bar(
+        x=df_amplitude_plot.index, 
+        y=df_amplitude_plot['breadth_yellow'], 
+        name='Abaixo MM50, Acima MM200', 
+        marker_color='#FFC107' # Amarelo/Laranja
+    ), row=2, col=1)
+    
+    fig.add_trace(go.Bar(
+        x=df_amplitude_plot.index, 
+        y=df_amplitude_plot['breadth_green'], 
+        name='Acima MM50 e MM200', 
+        marker_color='#4CAF50' # Verde
+    ), row=2, col=1)
+
+    fig.update_layout(
+        title_text=f'Amplitude de Mercado (MM50/200) vs. {price_series_name}',
+        title_x=0,
+        template='plotly_dark',
+        barmode='stack',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        yaxis1_title=f"Preço {price_series_name}",
+        yaxis2_title="% Papéis",
+        xaxis2_title="Data",
+        xaxis1_showticklabels=False # Oculta o eixo x do gráfico de cima
+    )
+    
+    # Define o range do eixo Y das barras para 0-100%
+    fig.update_yaxes(range=[0, 100], row=2, col=1)
+    
+    # Sincroniza o zoom inicial
+    if not aligned_price_series.empty:
+        fig.update_xaxes(range=[aligned_price_series.index.min(), aligned_price_series.index.max()])
+
+    return fig
+    
 def analisar_retornos_por_faixa(df_analise, nome_coluna_indicador, passo, min_range, max_range, sufixo=''):
     """Agrupa os dados em faixas e calcula o retorno médio e a taxa de acerto."""
     bins = list(np.arange(min_range, max_range + passo, passo))
@@ -1270,7 +1353,20 @@ elif pagina_selecionada == "Amplitude":
     if st.session_state.analise_amplitude_executada:
         df_indicadores = st.session_state.df_indicadores
         df_analise_base = st.session_state.df_analise_base
-
+        # --- INÍCIO DO NOVO BLOCO DE CÓDIGO ---
+        st.subheader("Visão Geral da Amplitude (MM50/200)")
+        
+        # Prepara os dados para o gráfico
+        colunas_mm = ['breadth_red', 'breadth_yellow', 'breadth_green']
+        df_amplitude_mm_plot = df_indicadores[colunas_mm].dropna()
+        bova_series = df_analise_base['price']
+        
+        fig_stacked = gerar_grafico_amplitude_mm_stacked(df_amplitude_mm_plot, bova_series, ATIVO_ANALISE)
+        st.plotly_chart(fig_stacked, use_container_width=True)
+        
+        st.markdown("---") # Separa do próximo gráfico
+        # --- FIM DO NOVO BLOCO DE CÓDIGO ---
+        
         # --- SEÇÃO 1: MARKET BREADTH (MM200) ---
         st.subheader("Análise de Market Breadth (% de Ações acima da MM200)")
         mb_series = df_indicadores['market_breadth']
@@ -1470,6 +1566,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
