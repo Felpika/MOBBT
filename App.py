@@ -1414,44 +1414,44 @@ elif pagina_selecionada == "Radar de Insiders":
                 )
             else:
                 st.warning("Por favor, selecione pelo menos um mês para a análise.")
-                # --- (INÍCIO DA NOVA SEÇÃO DE HISTÓRICO POR TICKER) ---
-        
-                st.markdown("---")
-                st.subheader("Analisar Histórico por Ticker")
-                st.info("Digite o código de negociação (ex: PETR4, VALE3) para ver o histórico de volume líquido mensal de insiders.")
-        
-                # Cria o lookup Ticker -> CNPJ
-                # (Isso é rápido por causa do @st.cache_data na função criar_lookup_ticker_cnpj)
-                lookup_ticker_cnpj = criar_lookup_ticker_cnpj(df_cad_bruto)
-        
-                ticker_input = st.text_input(
-                    "Digite o Ticker:", 
-                    key="insider_ticker_input", 
-                    placeholder="Ex: PETR4"
-                ).upper() # Converte para maiúsculas
-        
-                if st.button("Buscar Histórico por Ticker", use_container_width=True):
-                    if ticker_input:
-                        # Usa o dicionário para encontrar o CNPJ correspondente ao Ticker
-                        cnpj_alvo = lookup_ticker_cnpj.get(ticker_input)
-                        
-                        if not cnpj_alvo:
-                            st.error(f"Ticker '{ticker_input}' não encontrado na base de cadastro da CVM. Verifique o código.")
-                        else:
-                            with st.spinner(f"Analisando histórico para {ticker_input}..."):
-                                # Passa o df_mov_bruto (que já tem a coluna 'Ano_Mes' criada)
-                                # e o CNPJ encontrado
-                                df_historico_ticker = analisar_historico_insider_por_ticker(df_mov_bruto, cnpj_alvo)
-                                
-                                # Gera e exibe o gráfico
-                                fig_historico = gerar_grafico_historico_insider(df_historico_ticker, ticker_input)
-                                st.plotly_chart(fig_historico, use_container_width=True)
-                    else:
-                        st.warning("Por favor, digite um ticker.")
+            # --- (INÍCIO DA NOVA SEÇÃO DE HISTÓRICO POR TICKER) ---
+        st.markdown("---")
+        st.subheader("Analisar Histórico por Ticker")
+        st.info("Digite o código de negociação (ex: PETR4, VALE3) para ver o histórico de volume líquido mensal de insiders.")
+
+        # Cria o lookup Ticker -> CNPJ
+        # (Isso é rápido por causa do @st.cache_data na função criar_lookup_ticker_cnpj)
+        lookup_ticker_cnpj = criar_lookup_ticker_cnpj(df_cad_bruto)
+
+        ticker_input = st.text_input(
+            "Digite o Ticker:", 
+            key="insider_ticker_input", 
+            placeholder="Ex: PETR4"
+        ).upper() # Converte para maiúsculas
+
+        if st.button("Buscar Histórico por Ticker", use_container_width=True):
+            if ticker_input:
+                # Usa o dicionário para encontrar o CNPJ correspondente ao Ticker
+                cnpj_alvo = lookup_ticker_cnpj.get(ticker_input)
                 
-        # --- (FIM DA NOVA SEÇÃO) ---
+                if not cnpj_alvo:
+                    st.error(f"Ticker '{ticker_input}' não encontrado na base de cadastro da CVM. Verifique o código.")
+                else:
+                    with st.spinner(f"Analisando histórico para {ticker_input}..."):
+                        # Passa o df_mov_bruto (que já tem a coluna 'Ano_Mes' criada)
+                        # e o CNPJ encontrado
+                        df_historico_ticker = analisar_historico_insider_por_ticker(df_mov_bruto, cnpj_alvo)
+                        
+                        # Gera e exibe o gráfico
+                        fig_historico = gerar_grafico_historico_insider(df_historico_ticker, ticker_input)
+                        st.plotly_chart(fig_historico, use_container_width=True)
+            else:
+                st.warning("Por favor, digite um ticker.")
+        
+# --- (FIM DA NOVA SEÇÃO) ---
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
