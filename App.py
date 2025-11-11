@@ -736,24 +736,27 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
 
 # (Substitua a função 'gerar_grafico_amplitude_mm_stacked' existente por esta)
 
+# (No BLOCO 7, substitua a função 'gerar_grafico_amplitude_mm_stacked' por esta)
+
 def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
     """
-    Gera o gráfico de amplitude de área empilhado (MM50/200).
+    Gera o gráfico de amplitude de área com SOBREPOSIÇÃO (MM50/200).
     """
     fig = go.Figure()
 
-    # --- Gráfico de Área Empilhada ---
+    # --- Gráfico de Área com Sobreposição ---
     
-    # Ordem de plotagem: do inferior para o superior (Vermelho -> Amarelo -> Verde)
+    # Ordem de plotagem: do maior (provável) para o menor,
+    # para que as áreas menores fiquem visíveis na frente.
     
     fig.add_trace(go.Scatter(
         x=df_amplitude_plot.index, 
-        y=df_amplitude_plot['breadth_red'], 
-        name='Abaixo MM50 e MM200', 
-        line=dict(color='#F44336'),
-        fillcolor='rgba(244, 67, 54, 0.7)', # Vermelho com opacidade
-        mode='lines',
-        stackgroup='one' # Isso cria o stack
+        y=df_amplitude_plot['breadth_green'], 
+        name='Acima MM50 e MM200', 
+        line=dict(color='#4CAF50'),
+        fillcolor='rgba(76, 175, 80, 0.4)', # Verde com 40% opacidade
+        mode='lines'
+        # stackgroup='one' FOI REMOVIDO
     ))
     
     fig.add_trace(go.Scatter(
@@ -761,24 +764,24 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
         y=df_amplitude_plot['breadth_yellow'], 
         name='Abaixo MM50, Acima MM200', 
         line=dict(color='#FFC107'),
-        fillcolor='rgba(255, 193, 7, 0.7)', # Amarelo/Laranja com opacidade
-        mode='lines',
-        stackgroup='one'
+        fillcolor='rgba(255, 193, 7, 0.4)', # Amarelo/Laranja com 40% opacidade
+        mode='lines'
+        # stackgroup='one' FOI REMOVIDO
     ))
     
     fig.add_trace(go.Scatter(
         x=df_amplitude_plot.index, 
-        y=df_amplitude_plot['breadth_green'], 
-        name='Acima MM50 e MM200', 
-        line=dict(color='#4CAF50'),
-        fillcolor='rgba(76, 175, 80, 0.7)', # Verde com opacidade
-        mode='lines',
-        stackgroup='one'
+        y=df_amplitude_plot['breadth_red'], 
+        name='Abaixo MM50 e MM200', 
+        line=dict(color='#F44336'),
+        fillcolor='rgba(244, 67, 54, 0.4)', # Vermelho com 40% opacidade
+        mode='lines'
+        # stackgroup='one' FOI REMOVIDO
     ))
 
     # Atualiza o layout para um gráfico único
     fig.update_layout(
-        title_text='Amplitude de Mercado (MM50/200)', # Novo título
+        title_text='Amplitude de Mercado (MM50/200) - Sobreposto', # Título atualizado
         title_x=0,
         template='plotly_dark',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -1565,6 +1568,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
