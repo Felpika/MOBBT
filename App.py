@@ -843,6 +843,87 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
 
     df_tabela = df_tabela.dropna(subset=['Ticker'])
     return df_tabela.sort_values(by='Volume Líquido (R$)', ascending=False).reset_index(drop=True)
+# --- INÍCIO DAS NOVAS FUNÇÕES (Adicionar no Bloco 8) ---
+
+@st.cache_data
+def criar_lookup_ticker_cnpj(_df_cad):
+    """
+    Cria um dicionário (lookup table) de Ticker -> CNPJ 
+    a partir do dataframe de cadastro da CVM.
+    """
+    df_tickers = _df_cad[['CNPJ_Companhia', 'Codigo_Negociacao']].dropna()
+    # Garante tickers únicos, priorizando o primeiro encontrado (se houver duplicatas)
+    df_tickers = df_tickers.drop_duplicates(subset=['Codigo_Negociacao'])
+    
+    # O ticker da CVM é limpo (ex: PETR4, VALE3)
+    return pd.Series(df_tickers['CNPJ_Companhia'].values, index=df_tickers['Codigo_Negociacao']).to_dict()
+
+@st.cache_data
+def analisar_historico_insider_por_ticker(_df_mov, cnpj_alvo):
+    """
+    Filtra e agrega o histórico de volume líquido por mês para um único CNPJ.
+    Requer que _df_mov já contenha a coluna 'Ano_Mes'.
+    """
+    if not cnpj_alvo or _df_mov.empty:
+        return pd.DataFrame()
+
+    # Filtra movimentações apenas para o CNPJ da empresa alvo
+    df_empresa = _df_mov[_df_mov['CNPJ_Companhia'] == cnpj_alvo].copy()
+    if df_empresa.empty:
+        return pd.DataFrame()
+
+    # Calcula o Volume Líquido (Compra = positivo, Venda = negativo)
+    df_empresa['Volume_Net'] = np.where(
+        df_empresa['Tipo_Movimentacao'] == 'Compra à vista',
+        df_empresa['Volume'],
+        -df_empresa['Volume']
+    )
+
+    # Agrupa por Ano_Mes (que já foi pré-calculado na UI) e soma o volume líquido
+    df_historico = df_empresa.groupby('Ano_Mes')['Volume_Net'].sum().reset_index()
+
+    # Garante que está ordenado por data para o gráfico
+    df_historico = df_historico.sort_values(by='Ano_Mes')
+    
+    # Converte Ano_Mes para um objeto de data real (1º dia do mês) para o gráfico
+    df_historico['Data'] = pd.to_datetime(df_historico['Ano_Mes'] + '-01')
+
+    return df_historico[['Data', 'Volume_Net']]
+
+def gerar_grafico_historico_insider(df_historico, ticker):
+    """
+    Gera um gráfico de barras Plotly para o histórico de volume líquido de insiders.
+    """
+    if df_historico.empty:
+        return go.Figure().update_layout(
+            title_text=f"Não há dados de movimentação 'Compra à vista' ou 'Venda à vista' para {ticker}.",
+            template="plotly_dark", 
+            title_x=0.5
+        )
+
+    # Adiciona uma coluna de cor para o gráfico (Verde para Compra, Vermelho para Venda)
+    df_historico['Cor'] = np.where(df_historico['Volume_Net'] > 0, '#4CAF50', '#F44336')
+
+    fig = px.bar(
+        df_historico,
+        x='Data',
+        y='Volume_Net',
+        title=f'Histórico de Volume Líquido Mensal de Insiders: {ticker.upper()}',
+        template='plotly_dark'
+    )
+
+    # Aplica as cores customizadas
+    fig.update_traces(marker_color=df_historico['Cor'])
+
+    fig.update_layout(
+        title_x=0,
+        yaxis_title='Volume Líquido (R$)',
+        xaxis_title='Mês',
+        showlegend=False
+    )
+    # Formata o eixo Y para Reais (ex: R$ 1.000.000)
+    fig.update_yaxes(tickformat="$,.0f") 
+    return fig
 
 # --- FIM DO BLOCO 8 ---
 
@@ -1333,9 +1414,44 @@ elif pagina_selecionada == "Radar de Insiders":
                 )
             else:
                 st.warning("Por favor, selecione pelo menos um mês para a análise.")
+                # --- (INÍCIO DA NOVA SEÇÃO DE HISTÓRICO POR TICKER) ---
+        
+                st.markdown("---")
+                st.subheader("Analisar Histórico por Ticker")
+                st.info("Digite o código de negociação (ex: PETR4, VALE3) para ver o histórico de volume líquido mensal de insiders.")
+        
+                # Cria o lookup Ticker -> CNPJ
+                # (Isso é rápido por causa do @st.cache_data na função criar_lookup_ticker_cnpj)
+                lookup_ticker_cnpj = criar_lookup_ticker_cnpj(df_cad_bruto)
+        
+                ticker_input = st.text_input(
+                    "Digite o Ticker:", 
+                    key="insider_ticker_input", 
+                    placeholder="Ex: PETR4"
+                ).upper() # Converte para maiúsculas
+        
+                if st.button("Buscar Histórico por Ticker", use_container_width=True):
+                    if ticker_input:
+                        # Usa o dicionário para encontrar o CNPJ correspondente ao Ticker
+                        cnpj_alvo = lookup_ticker_cnpj.get(ticker_input)
+                        
+                        if not cnpj_alvo:
+                            st.error(f"Ticker '{ticker_input}' não encontrado na base de cadastro da CVM. Verifique o código.")
+                        else:
+                            with st.spinner(f"Analisando histórico para {ticker_input}..."):
+                                # Passa o df_mov_bruto (que já tem a coluna 'Ano_Mes' criada)
+                                # e o CNPJ encontrado
+                                df_historico_ticker = analisar_historico_insider_por_ticker(df_mov_bruto, cnpj_alvo)
+                                
+                                # Gera e exibe o gráfico
+                                fig_historico = gerar_grafico_historico_insider(df_historico_ticker, ticker_input)
+                                st.plotly_chart(fig_historico, use_container_width=True)
+                    else:
+                        st.warning("Por favor, digite um ticker.")
+                
+        # --- (FIM DA NOVA SEÇÃO) ---
+
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
-
-
 
 
