@@ -14,7 +14,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import io # Adicionado para a nova funcionalidade
 from streamlit_option_menu import option_menu
-import pandas_ta as ta
+from ta.momentum import RSIIndicator
 from scipy import stats
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
@@ -710,7 +710,7 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
     cat_green = ((_precos_fechamento > mma50) & (_precos_fechamento > mma200)).sum(axis=1) / total_papeis_validos * 100
 
     # 3. IFR (Seu código existente)
-    ifr_individual = _precos_fechamento.apply(lambda x: ta.rsi(x, length=rsi_periodo), axis=0)
+    ifr_individual = _precos_fechamento.apply(lambda x: RSIIndicator(close=x, window=rsi_periodo).rsi() if len(x.dropna()) >= rsi_periodo else pd.Series(index=x.index, dtype=float), axis=0)
     total_valido_ifr = ifr_individual.notna().sum(axis=1)
     sobrecompradas = (ifr_individual > 70).sum(axis=1) / total_valido_ifr * 100
     sobrevendidas = (ifr_individual < 30).sum(axis=1) / total_valido_ifr * 100
@@ -815,33 +815,50 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
 
     return fig
 def gerar_grafico_net_highs_lows(df_amplitude):
-    """Gera gráfico de barras para Net New Highs/Lows."""
-    df_plot = df_amplitude[['net_highs_lows', 'new_highs', 'new_lows']].copy()
+    """Gera gráfico de área para Net New Highs/Lows - versão otimizada."""
+    df_plot = df_amplitude[['net_highs_lows', 'new_highs', 'new_lows']].dropna().copy()
     
-    # Define cores baseadas no valor positivo/negativo
-    colors = np.where(df_plot['net_highs_lows'] >= 0, '#4CAF50', '#F44336')
+    if df_plot.empty:
+        return go.Figure().update_layout(title_text="Sem dados disponíveis", template='plotly_dark')
     
     fig = go.Figure()
     
-    # Barra principal: Saldo Líquido
-    fig.add_trace(go.Bar(
+    net_values = df_plot['net_highs_lows']
+    positive_vals = net_values.where(net_values >= 0, 0)
+    negative_vals = net_values.where(net_values < 0, 0)
+    
+    fig.add_trace(go.Scatter(
         x=df_plot.index,
-        y=df_plot['net_highs_lows'],
-        name='Saldo (Máx - Mín)',
-        marker_color=colors
+        y=positive_vals,
+        name='Saldo Positivo',
+        mode='lines',
+        line=dict(color='#4CAF50', width=1),
+        fill='tozeroy',
+        fillcolor='rgba(76, 175, 80, 0.5)'
     ))
     
-    # Linhas auxiliares (opcionais, para ver o bruto)
+    fig.add_trace(go.Scatter(
+        x=df_plot.index,
+        y=negative_vals,
+        name='Saldo Negativo',
+        mode='lines',
+        line=dict(color='#F44336', width=1),
+        fill='tozeroy',
+        fillcolor='rgba(244, 67, 54, 0.5)'
+    ))
+    
     fig.add_trace(go.Scatter(
         x=df_plot.index, y=df_plot['new_highs'], 
         name='Novas Máximas', mode='lines', 
-        line=dict(color='green', width=1, dash='dot'), visible='legendonly'
+        line=dict(color='#81C784', width=1, dash='dot'), visible='legendonly'
     ))
     fig.add_trace(go.Scatter(
         x=df_plot.index, y=df_plot['new_lows'], 
         name='Novas Mínimas', mode='lines', 
-        line=dict(color='red', width=1, dash='dot'), visible='legendonly'
+        line=dict(color='#E57373', width=1, dash='dot'), visible='legendonly'
     ))
+
+    fig.add_hline(y=0, line_dash="solid", line_color="white", line_width=0.5)
 
     fig.update_layout(
         title_text='Novas Máximas vs. Novas Mínimas (52 Semanas) - Saldo Líquido',
@@ -849,32 +866,64 @@ def gerar_grafico_net_highs_lows(df_amplitude):
         yaxis_title="Saldo de Papéis",
         xaxis_title="Data",
         template='plotly_dark',
-        showlegend=True
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
+    
+    fig.update_xaxes(
+        rangeselector=dict(
+            buttons=list([
+                dict(count=3, label="3M", step="month", stepmode="backward"),
+                dict(count=6, label="6M", step="month", stepmode="backward"),
+                dict(count=1, label="1A", step="year", stepmode="backward"),
+                dict(count=2, label="2A", step="year", stepmode="backward"),
+                dict(step="all", label="Tudo")
+            ]),
+            bgcolor="#333952",
+            font=dict(color="white")
+        )
+    )
+    
+    if len(df_plot) > 252:
+        end_date = df_plot.index.max()
+        start_date = end_date - pd.DateOffset(years=1)
+        fig.update_xaxes(range=[start_date, end_date])
+    
     return fig
 
 def gerar_grafico_mcclellan(df_amplitude):
-    """Gera o gráfico do Oscilador McClellan."""
-    series_mcclellan = df_amplitude['mcclellan']
+    """Gera o gráfico do Oscilador McClellan com filtro de tempo."""
+    series_mcclellan = df_amplitude['mcclellan'].dropna()
+    
+    if series_mcclellan.empty:
+        return go.Figure().update_layout(title_text="Sem dados disponíveis", template='plotly_dark')
     
     fig = go.Figure()
     
-    # Preenchimento verde se > 0, vermelho se < 0
+    positive_vals = series_mcclellan.where(series_mcclellan >= 0, 0)
+    negative_vals = series_mcclellan.where(series_mcclellan < 0, 0)
+    
     fig.add_trace(go.Scatter(
-        x=series_mcclellan.index, 
-        y=series_mcclellan,
+        x=series_mcclellan.index,
+        y=positive_vals,
+        name='Positivo',
         mode='lines',
-        name='McClellan Osc',
-        line=dict(color='orange', width=2),
+        line=dict(color='#4CAF50', width=1),
         fill='tozeroy',
-        fillcolor='rgba(255, 165, 0, 0.1)' # Laranja suave no fundo
+        fillcolor='rgba(76, 175, 80, 0.4)'
     ))
     
-    # Adiciona linha zero
-    fig.add_hline(y=0, line_dash="solid", line_color="white", line_width=1)
+    fig.add_trace(go.Scatter(
+        x=series_mcclellan.index,
+        y=negative_vals,
+        name='Negativo',
+        mode='lines',
+        line=dict(color='#F44336', width=1),
+        fill='tozeroy',
+        fillcolor='rgba(244, 67, 54, 0.4)'
+    ))
     
-    # Adiciona níveis de referência comuns (ex: +100/-100 dependendo da qtd de papeis, mas variam)
-    # Como o número de papéis varia, deixaremos apenas o zero.
+    fig.add_hline(y=0, line_dash="solid", line_color="white", line_width=0.5)
     
     fig.update_layout(
         title_text='Oscilador McClellan (Market Breadth Momentum)',
@@ -882,8 +931,29 @@ def gerar_grafico_mcclellan(df_amplitude):
         yaxis_title="Oscilador",
         xaxis_title="Data",
         template='plotly_dark',
-        showlegend=False
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
+    
+    fig.update_xaxes(
+        rangeselector=dict(
+            buttons=list([
+                dict(count=3, label="3M", step="month", stepmode="backward"),
+                dict(count=6, label="6M", step="month", stepmode="backward"),
+                dict(count=1, label="1A", step="year", stepmode="backward"),
+                dict(count=2, label="2A", step="year", stepmode="backward"),
+                dict(step="all", label="Tudo")
+            ]),
+            bgcolor="#333952",
+            font=dict(color="white")
+        )
+    )
+    
+    if len(series_mcclellan) > 252:
+        end_date = series_mcclellan.index.max()
+        start_date = end_date - pd.DateOffset(years=1)
+        fig.update_xaxes(range=[start_date, end_date])
+    
     return fig
     
 def analisar_retornos_por_faixa(df_analise, nome_coluna_indicador, passo, min_range, max_range, sufixo=''):
