@@ -10,5 +10,6 @@ fredapi
 textblob
 openpyxl
 streamlit-option-menu
-pandas-ta
+ta
 scipy
+requests
