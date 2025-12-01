@@ -694,48 +694,68 @@ def obter_precos_historicos_amplitude(tickers, anos_historico=10):
 
 @st.cache_data
 def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
-    """Calcula todos os indicadores de amplitude de uma vez para otimizar o cache."""
-    # Market Breadth (MM200)
+    """Calcula indicadores de amplitude, incluindo Highs/Lows e McClellan."""
+    
+    # 1. Market Breadth (MM200)
     mma200 = _precos_fechamento.rolling(window=200, min_periods=50).mean()
     acima_da_media = _precos_fechamento > mma200
     percentual_acima_media = (acima_da_media.sum(axis=1) / _precos_fechamento.notna().sum(axis=1)) * 100
     
-    # --- INÍCIO DAS NOVAS LINHAS ---
-    # Cálculo da MM50 e das 3 categorias do gráfico
+    # 2. Categorias MM50 vs MM200 (Seu código existente)
     mma50 = _precos_fechamento.rolling(window=50, min_periods=20).mean()
     total_papeis_validos = _precos_fechamento.notna().sum(axis=1)
     
-    # 1. Vermelho: Papéis abaixo da MM50 e MM200
     cat_red = ((_precos_fechamento < mma50) & (_precos_fechamento < mma200)).sum(axis=1) / total_papeis_validos * 100
-    # 2. Amarelo: Papéis abaixo da MM50, mas acima da MM200
     cat_yellow = ((_precos_fechamento < mma50) & (_precos_fechamento > mma200)).sum(axis=1) / total_papeis_validos * 100
-    # 3. Verde: Papéis acima da MM50 e MM200
     cat_green = ((_precos_fechamento > mma50) & (_precos_fechamento > mma200)).sum(axis=1) / total_papeis_validos * 100
-    # --- FIM DAS NOVAS LINHAS ---
 
-    # IFR
+    # 3. IFR (Seu código existente)
     ifr_individual = _precos_fechamento.apply(lambda x: ta.rsi(x, length=rsi_periodo), axis=0)
-    total_valido = ifr_individual.notna().sum(axis=1)
-    sobrecompradas = (ifr_individual > 70).sum(axis=1) / total_valido * 100
-    sobrevendidas = (ifr_individual < 30).sum(axis=1) / total_valido * 100
+    total_valido_ifr = ifr_individual.notna().sum(axis=1)
+    sobrecompradas = (ifr_individual > 70).sum(axis=1) / total_valido_ifr * 100
+    sobrevendidas = (ifr_individual < 30).sum(axis=1) / total_valido_ifr * 100
+
+    # --- NOVO CÓDIGO: Novas Máximas e Mínimas (52 Semanas / 252 Dias) ---
+    # Rolling max/min dos últimos 252 dias
+    rolling_max = _precos_fechamento.rolling(window=252, min_periods=200).max()
+    rolling_min = _precos_fechamento.rolling(window=252, min_periods=200).min()
     
+    # Compara o preço ATUAL com o max/min da janela.
+    # Nota: O rolling_max inclui o dia atual. Se hoje for nova máxima, preço == rolling_max.
+    new_highs = (_precos_fechamento >= rolling_max).sum(axis=1)
+    new_lows = (_precos_fechamento <= rolling_min).sum(axis=1)
+    net_highs_lows = new_highs - new_lows
+
+    # --- NOVO CÓDIGO: Oscilador McClellan ---
+    # 1. Calcular Avanços e Declínios Diários
+    diff_precos = _precos_fechamento.diff()
+    advances = (diff_precos > 0).sum(axis=1)
+    declines = (diff_precos < 0).sum(axis=1)
+    net_advances = advances - declines
+    
+    # 2. Calcular EMAs (10% e 5% constants aprox. equivalem a 19 e 39 dias)
+    # A fórmula clássica usa suavização exponencial da diferença líquida (Net Advances)
+    ema_19 = net_advances.ewm(span=19, adjust=False).mean()
+    ema_39 = net_advances.ewm(span=39, adjust=False).mean()
+    mcclellan_osc = ema_19 - ema_39
+
     df_amplitude = pd.DataFrame({
         'market_breadth': percentual_acima_media.dropna(),
         'IFR_sobrecompradas': sobrecompradas,
         'IFR_sobrevendidas': sobrevendidas,
         'IFR_net': sobrecompradas - sobrevendidas,
         'IFR_media_geral': ifr_individual.mean(axis=1).dropna(),
-        
-        # --- ADICIONAR ESTAS 3 COLUNAS ---
         'breadth_red': cat_red,
         'breadth_yellow': cat_yellow,
-        'breadth_green': cat_green
+        'breadth_green': cat_green,
+        # Novas Colunas
+        'new_highs': new_highs,
+        'new_lows': new_lows,
+        'net_highs_lows': net_highs_lows,
+        'mcclellan': mcclellan_osc
     })
+    
     return df_amplitude.dropna()
-# (Adicionar esta nova função no BLOCO 7)
-
-# (Substitua a função 'gerar_grafico_amplitude_mm_stacked' existente por esta)
-
 # (No BLOCO 7, substitua a função 'gerar_grafico_amplitude_mm_stacked' por esta)
 
 def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
@@ -793,6 +813,77 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
     if not df_amplitude_plot.empty:
         fig.update_xaxes(range=[df_amplitude_plot.index.min(), df_amplitude_plot.index.max()])
 
+    return fig
+def gerar_grafico_net_highs_lows(df_amplitude):
+    """Gera gráfico de barras para Net New Highs/Lows."""
+    df_plot = df_amplitude[['net_highs_lows', 'new_highs', 'new_lows']].copy()
+    
+    # Define cores baseadas no valor positivo/negativo
+    colors = np.where(df_plot['net_highs_lows'] >= 0, '#4CAF50', '#F44336')
+    
+    fig = go.Figure()
+    
+    # Barra principal: Saldo Líquido
+    fig.add_trace(go.Bar(
+        x=df_plot.index,
+        y=df_plot['net_highs_lows'],
+        name='Saldo (Máx - Mín)',
+        marker_color=colors
+    ))
+    
+    # Linhas auxiliares (opcionais, para ver o bruto)
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot['new_highs'], 
+        name='Novas Máximas', mode='lines', 
+        line=dict(color='green', width=1, dash='dot'), visible='legendonly'
+    ))
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot['new_lows'], 
+        name='Novas Mínimas', mode='lines', 
+        line=dict(color='red', width=1, dash='dot'), visible='legendonly'
+    ))
+
+    fig.update_layout(
+        title_text='Novas Máximas vs. Novas Mínimas (52 Semanas) - Saldo Líquido',
+        title_x=0,
+        yaxis_title="Saldo de Papéis",
+        xaxis_title="Data",
+        template='plotly_dark',
+        showlegend=True
+    )
+    return fig
+
+def gerar_grafico_mcclellan(df_amplitude):
+    """Gera o gráfico do Oscilador McClellan."""
+    series_mcclellan = df_amplitude['mcclellan']
+    
+    fig = go.Figure()
+    
+    # Preenchimento verde se > 0, vermelho se < 0
+    fig.add_trace(go.Scatter(
+        x=series_mcclellan.index, 
+        y=series_mcclellan,
+        mode='lines',
+        name='McClellan Osc',
+        line=dict(color='orange', width=2),
+        fill='tozeroy',
+        fillcolor='rgba(255, 165, 0, 0.1)' # Laranja suave no fundo
+    ))
+    
+    # Adiciona linha zero
+    fig.add_hline(y=0, line_dash="solid", line_color="white", line_width=1)
+    
+    # Adiciona níveis de referência comuns (ex: +100/-100 dependendo da qtd de papeis, mas variam)
+    # Como o número de papéis varia, deixaremos apenas o zero.
+    
+    fig.update_layout(
+        title_text='Oscilador McClellan (Market Breadth Momentum)',
+        title_x=0,
+        yaxis_title="Oscilador",
+        xaxis_title="Data",
+        template='plotly_dark',
+        showlegend=False
+    )
     return fig
     
 def analisar_retornos_por_faixa(df_analise, nome_coluna_indicador, passo, min_range, max_range, sufixo=''):
@@ -1450,6 +1541,25 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_histograma_amplitude(net_ifr_series, "Distribuição Histórica do Net IFR", valor_atual_net_ifr, media_hist_net_ifr, nbins=100), use_container_width=True)
         with col2:
             st.plotly_chart(gerar_heatmap_amplitude(resultados_net_ifr['Retorno Médio'], faixa_atual_net_ifr, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Net IFR"), use_container_width=True)
+# ... (código anterior da seção Net IFR) ...
+        
+        # --- SEÇÃO 4: NOVAS MÁXIMAS VS MÍNIMAS (NOVO) ---
+        st.subheader("Novas Máximas vs. Novas Mínimas (52 Semanas)")
+        st.info("Este indicador mostra o saldo líquido de ações atingindo novas máximas de 52 semanas menos aquelas atingindo novas mínimas. Valores positivos indicam força ampla do mercado.")
+        
+        # Gera e exibe o gráfico
+        fig_nh_nl = gerar_grafico_net_highs_lows(df_indicadores)
+        st.plotly_chart(fig_nh_nl, use_container_width=True)
+        
+        st.markdown("---")
+
+        # --- SEÇÃO 5: OSCILADOR MCCLELLAN (NOVO) ---
+        st.subheader("Oscilador McClellan")
+        st.info("Indicador de momentum de amplitude baseado no saldo de avanços e declínios. Cruzamentos acima de zero indicam entrada de fluxo comprador generalizado; abaixo de zero, fluxo vendedor. Divergências com o preço são sinais fortes de reversão.")
+        
+        # Gera e exibe o gráfico
+        fig_mcclellan = gerar_grafico_mcclellan(df_indicadores)
+        st.plotly_chart(fig_mcclellan, use_container_width=True)
 
 # --- ADICIONE TODO O BLOCO ABAIXO ---
 elif pagina_selecionada == "Radar de Insiders":
@@ -1565,6 +1675,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
