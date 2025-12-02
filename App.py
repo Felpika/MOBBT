@@ -199,61 +199,49 @@ def gerar_grafico_spread_juros(df):
         f'NTN-F {venc_longo_fixo.strftime("%Y")} vs. NTN-F {venc_curto_fixo.strftime("%Y")}'
     )
     
-    fig = px.area(df_spread_final, y='Spread', title=titulo_grafico, template='plotly_dark')
+    df_plot = df_spread_final.reset_index()
+    df_plot.columns = ['Data', 'Spread']
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df_plot['Data'],
+        y=df_plot['Spread'],
+        mode='lines',
+        fill='tozeroy',
+        line=dict(color='#636EFA'),
+        name='Spread'
+    ))
     
     end_date = df_spread_final.index.max()
     start_date_real = df_spread_final.index.min()
-    buttons = []
-    periods = {'1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
-    
-    for label, days in periods.items():
-        if days == 'max':
-            start_date_button = start_date_real
-        else:
-            start_date_calculada = end_date - timedelta(days=days)
-            start_date_button = max(start_date_calculada, start_date_real)
-            
-        buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date_button, end_date], 'yaxis.autorange': True}]))
     
     fig.update_layout(
-        title_x=0, 
-        yaxis_title="Diferença (Basis Points)", 
-        xaxis_title="Data", 
-        showlegend=False,
-        updatemenus=[dict(
-            type="buttons",
-            direction="right",
-            showactive=True,
-            x=1,
-            xanchor="right",
-            y=1.05,
-            yanchor="bottom",
-            buttons=buttons
-        )]
+        title=titulo_grafico,
+        template='plotly_dark',
+        title_x=0,
+        yaxis_title="Diferença (Basis Points)",
+        xaxis_title="Data",
+        showlegend=False
     )
     
-    # --- INÍCIO DA CORREÇÃO DE ESCALA (lógica mantida da função original) ---
+    fig.update_xaxes(
+        rangeselector=dict(
+            buttons=list([
+                dict(count=1, label="1A", step="year", stepmode="backward"),
+                dict(count=2, label="2A", step="year", stepmode="backward"),
+                dict(count=5, label="5A", step="year", stepmode="backward"),
+                dict(step="all", label="Máx")
+            ]),
+            bgcolor="#333952",
+            font=dict(color="white")
+        ),
+        rangeslider=dict(visible=False),
+        type="date"
+    )
+    
     # Define a visualização inicial padrão para os últimos 5 anos
     start_date_5y_calculada = end_date - pd.DateOffset(years=5)
     start_date_default = max(start_date_5y_calculada, start_date_real)
     fig.update_xaxes(range=[start_date_default, end_date])
-
-    # Filtra o dataframe para o período de visualização padrão
-    df_visible = df_spread_final.loc[start_date_default:end_date]
-
-    if not df_visible.empty:
-        # Calcula o mínimo e máximo do período visível
-        min_y = df_visible['Spread'].min()
-        max_y = df_visible['Spread'].max()
-        
-        # Adiciona uma margem (padding) para não ficar colado nas bordas
-        padding = (max_y - min_y) * 0.10
-        if padding < 10: # Garante uma margem mínima
-            padding = 10
-            
-        # Define o range do eixo Y para a visualização inicial
-        fig.update_yaxes(range=[min_y - padding, max_y + padding])
-    # --- FIM DA CORREÇÃO DE ESCALA ---
 
     return fig
 
@@ -973,11 +961,55 @@ def analisar_retornos_por_faixa(df_analise, nome_coluna_indicador, passo, min_ra
     return pd.concat([media_resultados, acerto_resultados], axis=1, keys=['Retorno Médio', 'Taxa de Acerto'])
 
 def gerar_grafico_historico_amplitude(series_dados, titulo, valor_atual, media_hist):
-    """Gera um gráfico de linha para o histórico do indicador."""
-    fig = px.line(series_dados.tail(252*5), title=titulo, template='plotly_dark') # 5 anos
+    """Gera um gráfico de linha para o histórico do indicador, com botões de período."""
+    # Garante que estamos trabalhando com um DataFrame para facilitar os filtros
+    df_plot = series_dados.to_frame(name='valor').dropna()
+    if df_plot.empty:
+        return go.Figure().update_layout(
+            title_text=titulo,
+            template='plotly_dark',
+            title_x=0
+        )
+
+    # Gráfico principal
+    fig = px.line(df_plot, x=df_plot.index, y='valor', title=titulo, template='plotly_dark')
+
+    # Linhas horizontais de referência
     fig.add_hline(y=media_hist, line_dash="dash", line_color="gray", annotation_text="Média Hist.")
     fig.add_hline(y=valor_atual, line_dash="dot", line_color="yellow", annotation_text=f"Atual: {valor_atual:.2f}")
-    fig.update_layout(showlegend=False, title_x=0, yaxis_title="%", xaxis_title="Data")
+
+    # Configuração geral de layout
+    fig.update_layout(
+        showlegend=False,
+        title_x=0,
+        yaxis_title="%",
+        xaxis_title="Data"
+    )
+
+    # Botões de período no eixo X
+    end_date = df_plot.index.max()
+    fig.update_xaxes(
+        rangeselector=dict(
+            buttons=list([
+                dict(count=3, label="3M", step="month", stepmode="backward"),
+                dict(count=6, label="6M", step="month", stepmode="backward"),
+                dict(count=1, label="1A", step="year", stepmode="backward"),
+                dict(count=3, label="3A", step="year", stepmode="backward"),
+                dict(count=5, label="5A", step="year", stepmode="backward"),
+                dict(step="all", label="Tudo"),
+            ]),
+            bgcolor="#333952",
+            font=dict(color="white")
+        ),
+        rangeslider=dict(visible=False),
+        type="date"
+    )
+
+    # Zoom inicial padrão: últimos 5 anos (ou todo o histórico se menor)
+    if len(df_plot) > 252 * 5:
+        start_date = end_date - pd.DateOffset(years=5)
+        fig.update_xaxes(range=[start_date, end_date])
+
     return fig
 
 def gerar_histograma_amplitude(series_dados, titulo, valor_atual, media_hist, nbins=50):
