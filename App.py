@@ -174,6 +174,64 @@ def calcular_inflacao_implicita(df):
     )
     return df_resultado
 
+def gerar_grafico_curva_juros_real_ntnb(df):
+    """
+    Gera o gráfico da curva de juros real (taxa IPCA+) das NTN-Bs.
+    A taxa de juros real é a taxa fixa que as NTN-Bs pagam acima do IPCA.
+    """
+    if df.empty or 'Data Base' not in df.columns:
+        return go.Figure().update_layout(title_text="Não há dados disponíveis.", template='plotly_dark')
+    
+    # Filtra apenas os títulos NTN-B na data mais recente
+    tipos_ntnb = ['Tesouro IPCA+', 'Tesouro IPCA+ com Juros Semestrais']
+    df_recente = df[df['Data Base'] == df['Data Base'].max()].copy()
+    df_ntnb = df_recente[df_recente['Tipo Titulo'].isin(tipos_ntnb)].copy()
+    
+    if df_ntnb.empty:
+        return go.Figure().update_layout(title_text="Não há dados de NTN-Bs disponíveis.", template='plotly_dark')
+    
+    # Remove duplicatas, priorizando "com Juros Semestrais" quando houver ambos
+    df_ntnb = df_ntnb.sort_values('Tipo Titulo', ascending=False).drop_duplicates('Data Vencimento')
+    df_ntnb = df_ntnb.sort_values('Data Vencimento')
+    
+    # Calcula o prazo até o vencimento em anos
+    data_ref = df_recente['Data Base'].max()
+    df_ntnb['Anos até Vencimento'] = (
+        (pd.to_datetime(df_ntnb['Data Vencimento']) - data_ref).dt.days / 365.25
+    )
+    
+    # Cria o gráfico
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df_ntnb['Anos até Vencimento'],
+        y=df_ntnb['Taxa Compra Manha'],
+        mode='lines+markers',
+        line=dict(color='#4CAF50', width=2.5),
+        marker=dict(size=8, color='#4CAF50'),
+        name='Juros Real (IPCA+)',
+        hovertemplate=(
+            "Vencimento: %{customdata[0]}<br>"
+            "Prazo: %{x:.1f} anos<br>"
+            "Taxa Real: %{y:.2f}% a.a.<extra></extra>"
+        ),
+        customdata=np.stack([
+            df_ntnb['Data Vencimento'].dt.strftime('%d/%m/%Y')
+        ], axis=-1)
+    ))
+    
+    fig.update_layout(
+        title=f'Curva de Juros Real (NTN-Bs) - {data_ref.strftime("%d/%m/%Y")}',
+        template='plotly_dark',
+        title_x=0,
+        xaxis_title='Prazo até o Vencimento (anos)',
+        yaxis_title='Taxa de Juros Real (% a.a.)',
+        showlegend=False
+    )
+    
+    fig.update_yaxes(tickformat=".2f")
+    
+    return fig
+
 # --- INÍCIO DA FUNÇÃO ATUALIZADA ---
 
 @st.cache_data
@@ -1270,19 +1328,17 @@ with st.sidebar:
     pagina_selecionada = option_menu(
         menu_title="Monitoramento",
         options=[
-            "NTN-Bs",
-            "Curva de Juros",
+            "Juros Brasil",
             "Crédito Privado",
             "Amplitude", 
             "Econômicos BR",
             "Commodities",
             "Internacional",
             "Ações BR",
-            "Radar de Insiders", # <-- ADICIONAR ESTA LINHA
+            "Radar de Insiders",
         ],
         # Ícones da https://icons.getbootstrap.com/
         icons=[
-            "star-fill",
             "graph-up-arrow",
             "wallet2",
             "water", 
@@ -1290,7 +1346,7 @@ with st.sidebar:
             "box-seam",
             "globe-americas",
             "kanban-fill",
-            "person-check-fill", # <-- ADICIONAR ESTA LINHA (ou outro ícone)
+            "person-check-fill",
         ],
         menu_icon="speedometer2",
         default_index=0,
@@ -1304,13 +1360,32 @@ with st.sidebar:
 
 # --- Roteamento de Páginas (com nomes atualizados) ---
 
-if pagina_selecionada == "NTN-Bs":
-    st.header("Dashboard de Análise de NTN-Bs (Tesouro IPCA+)")
+if pagina_selecionada == "Juros Brasil":
+    st.header("Dashboard de Juros do Brasil")
+    st.info("Esta página consolida a análise de títulos públicos brasileiros: NTN-Bs (juros reais), títulos prefixados (juros nominais), e indicadores derivados.")
     st.markdown("---")
 
     if not df_tesouro.empty:
-        # --- PAINEL DE ANÁLISE HISTÓRICA (ATUALIZADO) ---
-        st.subheader("Análise Histórica Comparativa")
+        # --- SEÇÃO 1: CURVAS DE JUROS (REAL E NOMINAL) ---
+        st.subheader("Curvas de Juros")
+        
+        col_curva_real, col_curva_nominal = st.columns(2)
+        
+        with col_curva_real:
+            st.markdown("#### Curva de Juros Real (NTN-Bs)")
+            st.info("Taxa de juros real (IPCA+) que o mercado exige para diferentes prazos. Representa o retorno real esperado acima da inflação.")
+            fig_curva_real = gerar_grafico_curva_juros_real_ntnb(df_tesouro)
+            st.plotly_chart(fig_curva_real, use_container_width=True)
+        
+        with col_curva_nominal:
+            st.markdown("#### Curva de Juros Nominal (ETTJ - Curto Prazo)")
+            st.info("Estrutura a termo da taxa de juros nominal (prefixados) nos últimos 5 dias úteis.")
+            st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
+        
+        st.markdown("---")
+        
+        # --- SEÇÃO 2: ANÁLISE HISTÓRICA DE NTN-Bs ---
+        st.subheader("Análise Histórica de NTN-Bs")
         st.info("Selecione um ou mais vencimentos para comparar a variação da taxa ou preço ao longo do tempo.")
         
         # Filtra apenas os títulos NTN-B
@@ -1336,7 +1411,7 @@ if pagina_selecionada == "NTN-Bs":
             )
         with col2:
              metrica_escolhida = st.radio(
-                "Analisar por:", ('Taxa', 'PU'), # Nomes mais curtos para caber
+                "Analisar por:", ('Taxa', 'PU'),
                 horizontal=True, key='metrica_ntnb',
                 help="Analisar por Taxa de Compra ou Preço Unitário (PU)"
             )
@@ -1348,12 +1423,33 @@ if pagina_selecionada == "NTN-Bs":
         )
         st.plotly_chart(fig_hist_ntnb, use_container_width=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # --- DEMAIS GRÁFICOS DO DASHBOARD (sem alteração) ---
-        bottom_left, bottom_right = st.columns((1, 1))
-        with bottom_left:
-            st.subheader("Inflação Implícita (Breakeven)")
+        st.markdown("---")
+        
+        # --- SEÇÃO 3: ETTJ LONGO PRAZO E SPREADS ---
+        st.subheader("Análise de Curva Nominal e Spreads")
+        
+        col_ettj_long, col_spread_2y10y = st.columns(2)
+        
+        with col_ettj_long:
+            st.markdown("#### ETTJ - Comparativo Histórico (Longo Prazo)")
+            st.info("Evolução da curva de juros nominal ao longo do tempo (1 semana, 1 mês, 3 meses, 6 meses, 1 ano atrás).")
+            st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
+        
+        with col_spread_2y10y:
+            st.markdown("#### Spread de Juros (10 Anos vs. 2 Anos)")
+            st.info("Diferença entre as taxas dos títulos prefixados (NTN-Fs) com vencimentos próximos de 10 e 2 anos. Spread positivo = curva inclinada (normal). Spread negativo = curva invertida (sinal de alerta).")
+            st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
+        
+        st.markdown("---")
+        
+        # --- SEÇÃO 4: INDICADORES DERIVADOS ---
+        st.subheader("Indicadores Derivados")
+        
+        col_breakeven, col_spread_br_eua = st.columns(2)
+        
+        with col_breakeven:
+            st.markdown("#### Inflação Implícita (Breakeven)")
+            st.info("Inflação implícita calculada pela diferença entre títulos prefixados e IPCA+ com vencimentos próximos.")
             df_breakeven = calcular_inflacao_implicita(df_tesouro)
             if not df_breakeven.empty:
                 # Prepara dados para uma curva mais intuitiva (prazo vs inflação implícita)
@@ -1400,9 +1496,10 @@ if pagina_selecionada == "NTN-Bs":
                 st.plotly_chart(fig_breakeven, use_container_width=True)
             else:
                 st.warning("Não há pares de títulos para calcular a inflação implícita hoje.")
-        with bottom_right:
-            st.subheader("Spread de Juros: Brasil vs. EUA")
-            st.info("Diferença entre a taxa da NTN-B de ~10 anos e o título americano de 10 anos.")
+        
+        with col_spread_br_eua:
+            st.markdown("#### Spread de Juros: Brasil vs. EUA")
+            st.info("Diferença entre a taxa da NTN-B de ~10 anos e o título americano de 10 anos (DGS10). Indica o prêmio de risco país.")
             FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
             df_fred_br_tab = carregar_dados_fred(FRED_API_KEY, {'DGS10': 'Juros 10 Anos EUA'})
             if not df_fred_br_tab.empty:
@@ -1416,24 +1513,6 @@ if pagina_selecionada == "NTN-Bs":
                 st.warning("Não foi possível carregar os dados de juros dos EUA.")
     else:
         st.warning("Não foi possível carregar os dados do Tesouro Direto para exibir esta página.")
-
-
-elif pagina_selecionada == "Curva de Juros":
-    st.header("Estrutura a Termo da Taxa de Juros (ETTJ)")
-    st.info("Esta página foca na análise dos títulos públicos prefixados (LTNs e NTN-Fs), que formam a curva de juros nominal da economia.")
-    st.markdown("---")
-    if not df_tesouro.empty:
-        st.subheader("Comparativo de Curto Prazo (Últimos 5 Dias)")
-        st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
-        st.markdown("---")
-        st.subheader("Comparativo de Longo Prazo (Histórico)")
-        st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
-        st.markdown("---")
-        st.subheader("Spread de Juros (10 Anos vs. 2 Anos)")
-        st.info("Este gráfico mostra a diferença (spread) entre as taxas dos títulos prefixados com juros semestrais (NTN-Fs) com vencimentos próximos de 10 e 2 anos. Um spread positivo indica uma curva inclinada, o que é típico. Spreads negativos (curva invertida) são raros e podem sinalizar expectativas de recessão.")
-        st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
-    else:
-        st.warning("Não foi possível carregar os dados do Tesouro Direto.")
 
 # --- INÍCIO DA SEÇÃO MODIFICADA ---
 
