@@ -123,8 +123,25 @@ def gerar_grafico_ntnb_multiplos_vencimentos(df_ntnb_all, vencimentos, metrica):
     return fig
 @st.cache_data
 def calcular_inflacao_implicita(df):
-    # ... (código existente inalterado)
+    """
+    Calcula a curva de inflação implícita (breakeven) usando a fotografia mais recente do Tesouro.
+
+    Para cada título prefixado, encontra o IPCA+ com vencimento mais próximo e
+    calcula a inflação implícita anualizada:
+        (1 + taxa_prefixada) / (1 + juro_real_IPCA) - 1
+
+    Retorna um DataFrame indexado pelo vencimento do prefixado, com colunas:
+        - 'Inflação Implícita (% a.a.)'
+        - 'Anos até Vencimento'
+    """
+    if df.empty or 'Data Base' not in df.columns:
+        return pd.DataFrame()
+
     df_recente = df[df['Data Base'] == df['Data Base'].max()].copy()
+    if df_recente.empty:
+        return pd.DataFrame()
+
+    data_referencia = df_recente['Data Base'].max()
     tipos_ipca = ['Tesouro IPCA+ com Juros Semestrais', 'Tesouro IPCA+']
     df_ipca_raw = df_recente[df_recente['Tipo Titulo'].isin(tipos_ipca)]
     df_prefixados = df_recente[df_recente['Tipo Titulo'] == 'Tesouro Prefixado'].set_index('Data Vencimento')
@@ -134,11 +151,28 @@ def calcular_inflacao_implicita(df):
     for venc_prefixado, row_prefixado in df_prefixados.iterrows():
         venc_ipca_proximo = min(df_ipca.index, key=lambda d: abs(d - venc_prefixado))
         if abs((venc_ipca_proximo - venc_prefixado).days) < 550:
-            taxa_prefixada, taxa_ipca = row_prefixado['Taxa Compra Manha'], df_ipca.loc[venc_ipca_proximo]['Taxa Compra Manha']
+            taxa_prefixada = row_prefixado['Taxa Compra Manha']
+            taxa_ipca = df_ipca.loc[venc_ipca_proximo]['Taxa Compra Manha']
+
+            # Conversão de taxas (% a.a.) para fator e cálculo de breakeven anualizado
             breakeven = (((1 + taxa_prefixada / 100) / (1 + taxa_ipca / 100)) - 1) * 100
-            inflacao_implicita.append({'Vencimento do Prefixo': venc_prefixado, 'Inflação Implícita (% a.a.)': breakeven})
-    if not inflacao_implicita: return pd.DataFrame()
-    return pd.DataFrame(inflacao_implicita).sort_values('Vencimento do Prefixo').set_index('Vencimento do Prefixo')
+
+            anos_ate_vencimento = (venc_prefixado - data_referencia).days / 365.25
+            inflacao_implicita.append({
+                'Vencimento do Prefixo': venc_prefixado,
+                'Inflação Implícita (% a.a.)': breakeven,
+                'Anos até Vencimento': anos_ate_vencimento
+            })
+
+    if not inflacao_implicita:
+        return pd.DataFrame()
+
+    df_resultado = (
+        pd.DataFrame(inflacao_implicita)
+        .sort_values('Vencimento do Prefixo')
+        .set_index('Vencimento do Prefixo')
+    )
+    return df_resultado
 
 # --- INÍCIO DA FUNÇÃO ATUALIZADA ---
 
@@ -1322,8 +1356,47 @@ if pagina_selecionada == "NTN-Bs":
             st.subheader("Inflação Implícita (Breakeven)")
             df_breakeven = calcular_inflacao_implicita(df_tesouro)
             if not df_breakeven.empty:
-                fig_breakeven = px.bar(df_breakeven, y='Inflação Implícita (% a.a.)', text_auto='.2f', title='Inflação Implícita por Vencimento').update_traces(textposition='outside')
-                fig_breakeven.update_layout(title_x=0, template='plotly_dark')
+                # Prepara dados para uma curva mais intuitiva (prazo vs inflação implícita)
+                df_breakeven_plot = df_breakeven.reset_index().rename(columns={'Vencimento do Prefixo': 'Vencimento'})
+
+                # Se por algum motivo a coluna não existir (compatibilidade), calcula na hora
+                if 'Anos até Vencimento' not in df_breakeven_plot.columns:
+                    data_ref = df_tesouro['Data Base'].max()
+                    df_breakeven_plot['Anos até Vencimento'] = (
+                        (pd.to_datetime(df_breakeven_plot['Vencimento']) - data_ref).dt.days / 365.25
+                    )
+
+                data_ref = df_tesouro['Data Base'].max()
+
+                fig_breakeven = go.Figure()
+                fig_breakeven.add_trace(go.Scatter(
+                    x=df_breakeven_plot['Anos até Vencimento'],
+                    y=df_breakeven_plot['Inflação Implícita (% a.a.)'],
+                    mode='lines+markers',
+                    line=dict(color='#FFB74D', width=2),
+                    marker=dict(size=8),
+                    name='Inflação Implícita',
+                    hovertemplate=(
+                        "Vencimento: %{customdata[0]}<br>"
+                        "Prazo: %{x:.1f} anos<br>"
+                        "Inflação Implícita: %{y:.2f}%<extra></extra>"
+                    ),
+                    customdata=np.stack([
+                        df_breakeven_plot['Vencimento'].dt.strftime('%d/%m/%Y')
+                    ], axis=-1)
+                ))
+
+                fig_breakeven.update_layout(
+                    title=f'Curva de Inflação Implícita (Breakeven) - {data_ref.strftime("%d/%m/%Y")}',
+                    template='plotly_dark',
+                    title_x=0,
+                    xaxis_title='Prazo até o Vencimento (anos)',
+                    yaxis_title='Inflação Implícita (% a.a.)',
+                    showlegend=False
+                )
+
+                fig_breakeven.update_yaxes(tickformat=".2f")
+
                 st.plotly_chart(fig_breakeven, use_container_width=True)
             else:
                 st.warning("Não há pares de títulos para calcular a inflação implícita hoje.")
