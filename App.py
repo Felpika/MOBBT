@@ -656,7 +656,7 @@ def obter_tickers_cvm_amplitude():
         return None
 
 @st.cache_data(ttl=3600*8) # Cache de 8 horas
-def obter_precos_historicos_amplitude(tickers, anos_historico=10):
+def obter_precos_historicos_amplitude(tickers, anos_historico=5):
     """Esta função baixa os preços históricos para a análise de amplitude."""
     st.info(f"Baixando dados de preços de {len(tickers)} ativos... (Cache de 8h)")
     tickers_sa = [ticker + ".SA" for ticker in tickers]
