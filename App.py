@@ -1676,6 +1676,25 @@ elif pagina_selecionada == "Amplitude":
         fig_mcclellan = gerar_grafico_mcclellan(df_indicadores)
         st.plotly_chart(fig_mcclellan, use_container_width=True)
 
+        st.markdown("---")
+
+        # --- SEÇÃO 6: CBOE Brazil ETF Volatility Index (VXEWZCLS) ---
+        st.subheader("Volatilidade Implícita Brasil (CBOE Brazil ETF Volatility Index - VXEWZ)")
+        st.info(
+            "O índice **VXEWZ** mede a volatilidade implícita das opções do ETF EWZ (Brasil) negociado nos EUA, "
+            "sendo um termômetro de medo/apetite a risco específico para Brasil. "
+            "Níveis elevados indicam maior incerteza e aversão ao risco."
+        )
+
+        FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
+        df_vxewz = carregar_dados_fred(FRED_API_KEY, {'VXEWZCLS': 'CBOE Brazil ETF Volatility Index (VXEWZ)'})
+
+        if not df_vxewz.empty:
+            fig_vxewz = gerar_grafico_fred(df_vxewz, 'VXEWZCLS', 'CBOE Brazil ETF Volatility Index (VXEWZ)')
+            st.plotly_chart(fig_vxewz, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
+        else:
+            st.warning("Não foi possível carregar os dados do índice de volatilidade VXEWZ (VXEWZCLS) a partir do FRED.")
+
 # --- ADICIONE TODO O BLOCO ABAIXO ---
 elif pagina_selecionada == "Radar de Insiders":
     st.header("Radar de Movimentação de Insiders (CVM)")
