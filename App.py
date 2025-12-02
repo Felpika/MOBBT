@@ -12,9 +12,9 @@ from fredapi import Fred
 import requests
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import io # Adicionado para a nova funcionalidade
+import io  # Adicionado para a nova funcionalidade
 from streamlit_option_menu import option_menu
-from ta.momentum import RSIIndicator
+import pandas_ta as ta
 from scipy import stats
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
@@ -697,8 +697,11 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
     cat_yellow = ((_precos_fechamento < mma50) & (_precos_fechamento > mma200)).sum(axis=1) / total_papeis_validos * 100
     cat_green = ((_precos_fechamento > mma50) & (_precos_fechamento > mma200)).sum(axis=1) / total_papeis_validos * 100
 
-    # 3. IFR (Seu código existente)
-    ifr_individual = _precos_fechamento.apply(lambda x: RSIIndicator(close=x, window=rsi_periodo).rsi() if len(x.dropna()) >= rsi_periodo else pd.Series(index=x.index, dtype=float), axis=0)
+    # 3. IFR (usando pandas_ta)
+    ifr_individual = _precos_fechamento.apply(
+        lambda x: ta.rsi(x, length=rsi_periodo) if len(x.dropna()) >= rsi_periodo else pd.Series(index=x.index, dtype=float),
+        axis=0
+    )
     total_valido_ifr = ifr_individual.notna().sum(axis=1)
     sobrecompradas = (ifr_individual > 70).sum(axis=1) / total_valido_ifr * 100
     sobrevendidas = (ifr_individual < 30).sum(axis=1) / total_valido_ifr * 100
@@ -1590,7 +1593,12 @@ elif pagina_selecionada == "Amplitude":
 
         # --- SEÇÃO 2: MÉDIA GERAL DO IFR (SEÇÃO ADICIONADA) ---
         st.subheader("Análise da Média Geral do IFR")
+        # Limita a análise da média geral do IFR aos últimos 5 anos
         ifr_media_series = df_indicadores['IFR_media_geral']
+        if not ifr_media_series.empty:
+            cutoff_ifr = ifr_media_series.index.max() - pd.DateOffset(years=5)
+            ifr_media_series = ifr_media_series[ifr_media_series.index >= cutoff_ifr]
+
         valor_atual_ifr_media = ifr_media_series.iloc[-1]
         media_hist_ifr_media = ifr_media_series.mean()
         df_analise_ifr_media = df_analise_base.join(ifr_media_series).dropna()
@@ -1619,7 +1627,12 @@ elif pagina_selecionada == "Amplitude":
 
         # --- SEÇÃO 3: NET IFR ---
         st.subheader("Análise de Net IFR (% Sobrecompradas - % Sobrevendidas)")
+        # Limita a análise de Net IFR aos últimos 5 anos
         net_ifr_series = df_indicadores['IFR_net']
+        if not net_ifr_series.empty:
+            cutoff_net_ifr = net_ifr_series.index.max() - pd.DateOffset(years=5)
+            net_ifr_series = net_ifr_series[net_ifr_series.index >= cutoff_net_ifr]
+
         valor_atual_net_ifr = net_ifr_series.iloc[-1]
         media_hist_net_ifr = net_ifr_series.mean()
         df_analise_net_ifr = df_analise_base.join(net_ifr_series).dropna()
