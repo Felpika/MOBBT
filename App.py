@@ -85,6 +85,7 @@ def gerar_grafico_ntnb_multiplos_vencimentos(df_ntnb_all, vencimentos, metrica):
                 x=df_venc['Data Base'],
                 y=df_venc[metrica],
                 mode='lines',
+                line=dict(shape='spline', smoothing=1.0),
                 name=f'{nome_base} {venc.year}'
             ))
 
@@ -205,9 +206,8 @@ def gerar_grafico_curva_juros_real_ntnb(df):
     fig.add_trace(go.Scatter(
         x=df_ntnb['Anos até Vencimento'],
         y=df_ntnb['Taxa Compra Manha'],
-        mode='lines+markers',
-        line=dict(color='#4CAF50', width=2.5),
-        marker=dict(size=8, color='#4CAF50'),
+        mode='lines',
+        line=dict(color='#4CAF50', width=2.5, shape='spline', smoothing=1.0),
         name='Juros Real (IPCA+)',
         hovertemplate=(
             "Vencimento: %{customdata[0]}<br>"
@@ -299,7 +299,7 @@ def gerar_grafico_spread_juros(df):
         y=df_plot['Spread'],
         mode='lines',
         fill='tozeroy',
-        line=dict(color='#636EFA'),
+        line=dict(color='#636EFA', shape='spline', smoothing=1.0),
         name='Spread'
     ))
     
@@ -358,9 +358,11 @@ def gerar_grafico_ettj_curto_prazo(df):
     for legenda, data_base in datas_para_plotar.items():
         df_data = df_prefixado[df_prefixado['Data Base'] == data_base].sort_values('Data Vencimento')
         df_data['Dias Uteis'] = np.busday_count(df_data['Data Base'].values.astype('M8[D]'), df_data['Data Vencimento'].values.astype('M8[D]'))
-        line_style = dict(dash='dash') if not legenda.startswith('Hoje') else {}
-        fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
-    fig.update_layout(title_text='Curva de Juros (ETTJ) - Curto Prazo (últimos 5 dias)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        # Converte dias úteis para anos para padronização
+        df_data['Anos até Vencimento'] = df_data['Dias Uteis'] / 252  # Aproximadamente 252 dias úteis por ano
+        line_style = dict(dash='dash', shape='spline', smoothing=1.0) if not legenda.startswith('Hoje') else dict(shape='spline', smoothing=1.0)
+        fig.add_trace(go.Scatter(x=df_data['Anos até Vencimento'], y=df_data['Taxa Compra Manha'], mode='lines', name=legenda, line=line_style))
+    fig.update_layout(title_text='Curva de Juros (ETTJ) - Curto Prazo (últimos 5 dias)', title_x=0, xaxis_title='Prazo até o Vencimento (anos)', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
 def gerar_grafico_ettj_longo_prazo(df):
@@ -382,9 +384,11 @@ def gerar_grafico_ettj_longo_prazo(df):
     for legenda, data_base in datas_para_plotar.items():
         df_data = df_prefixado[df_prefixado['Data Base'] == data_base].sort_values('Data Vencimento')
         df_data['Dias Uteis'] = np.busday_count(df_data['Data Base'].values.astype('M8[D]'), df_data['Data Vencimento'].values.astype('M8[D]'))
-        line_style = dict(dash='dash') if not legenda.startswith('Hoje') else {}
-        fig.add_trace(go.Scatter(x=df_data['Dias Uteis'], y=df_data['Taxa Compra Manha'], mode='lines+markers', name=legenda, line=line_style))
-    fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0, xaxis_title='Dias Úteis até o Vencimento', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        # Converte dias úteis para anos para padronização
+        df_data['Anos até Vencimento'] = df_data['Dias Uteis'] / 252  # Aproximadamente 252 dias úteis por ano
+        line_style = dict(dash='dash', shape='spline', smoothing=1.0) if not legenda.startswith('Hoje') else dict(shape='spline', smoothing=1.0)
+        fig.add_trace(go.Scatter(x=df_data['Anos até Vencimento'], y=df_data['Taxa Compra Manha'], mode='lines', name=legenda, line=line_style))
+    fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0, xaxis_title='Prazo até o Vencimento (anos)', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS ---
@@ -528,6 +532,8 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
     df_merged = pd.merge(df_br, df_usa, left_index=True, right_index=True, how='inner')
     df_merged['Spread'] = df_merged['BR10Y'] - df_merged['DGS10']
     fig = px.line(df_merged, y='Spread', title='Spread de Juros 10 Anos: NTN-B (Brasil) vs. Treasury (EUA)', template='plotly_dark')
+    # Adiciona suavização nas linhas
+    fig.update_traces(line=dict(shape='spline', smoothing=1.0))
     end_date = df_merged.index.max()
     buttons = []
     periods = {'1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
@@ -1366,10 +1372,10 @@ if pagina_selecionada == "Juros Brasil":
     st.markdown("---")
 
     if not df_tesouro.empty:
-        # --- SEÇÃO 1: CURVAS DE JUROS (REAL E NOMINAL) ---
-        st.subheader("Curvas de Juros")
+        # --- SEÇÃO 1: CURVAS DE JUROS REAL E INFLACAO IMPLICITA ---
+        st.subheader("Curvas de Juros Real e Inflação Implícita")
         
-        col_curva_real, col_curva_nominal = st.columns(2)
+        col_curva_real, col_breakeven = st.columns(2)
         
         with col_curva_real:
             st.markdown("#### Curva de Juros Real (NTN-Bs)")
@@ -1377,10 +1383,54 @@ if pagina_selecionada == "Juros Brasil":
             fig_curva_real = gerar_grafico_curva_juros_real_ntnb(df_tesouro)
             st.plotly_chart(fig_curva_real, use_container_width=True)
         
-        with col_curva_nominal:
-            st.markdown("#### Curva de Juros Nominal (ETTJ - Curto Prazo)")
-            st.info("Estrutura a termo da taxa de juros nominal (prefixados) nos últimos 5 dias úteis.")
-            st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
+        with col_breakeven:
+            st.markdown("#### Inflação Implícita (Breakeven)")
+            st.info("Inflação implícita calculada pela diferença entre títulos prefixados e IPCA+ com vencimentos próximos.")
+            df_breakeven = calcular_inflacao_implicita(df_tesouro)
+            if not df_breakeven.empty:
+                # Prepara dados para uma curva mais intuitiva (prazo vs inflação implícita)
+                df_breakeven_plot = df_breakeven.reset_index().rename(columns={'Vencimento do Prefixo': 'Vencimento'})
+
+                # Se por algum motivo a coluna não existir (compatibilidade), calcula na hora
+                if 'Anos até Vencimento' not in df_breakeven_plot.columns:
+                    data_ref = df_tesouro['Data Base'].max()
+                    df_breakeven_plot['Anos até Vencimento'] = (
+                        (pd.to_datetime(df_breakeven_plot['Vencimento']) - data_ref).dt.days / 365.25
+                    )
+
+                data_ref = df_tesouro['Data Base'].max()
+
+                fig_breakeven = go.Figure()
+                fig_breakeven.add_trace(go.Scatter(
+                    x=df_breakeven_plot['Anos até Vencimento'],
+                    y=df_breakeven_plot['Inflação Implícita (% a.a.)'],
+                    mode='lines',
+                    line=dict(color='#FFB74D', width=2, shape='spline', smoothing=1.0),
+                    name='Inflação Implícita',
+                    hovertemplate=(
+                        "Vencimento: %{customdata[0]}<br>"
+                        "Prazo: %{x:.1f} anos<br>"
+                        "Inflação Implícita: %{y:.2f}%<extra></extra>"
+                    ),
+                    customdata=np.stack([
+                        df_breakeven_plot['Vencimento'].dt.strftime('%d/%m/%Y')
+                    ], axis=-1)
+                ))
+
+                fig_breakeven.update_layout(
+                    title=f'Curva de Inflação Implícita (Breakeven) - {data_ref.strftime("%d/%m/%Y")}',
+                    template='plotly_dark',
+                    title_x=0,
+                    xaxis_title='Prazo até o Vencimento (anos)',
+                    yaxis_title='Inflação Implícita (% a.a.)',
+                    showlegend=False
+                )
+
+                fig_breakeven.update_yaxes(tickformat=".2f")
+
+                st.plotly_chart(fig_breakeven, use_container_width=True)
+            else:
+                st.warning("Não há pares de títulos para calcular a inflação implícita hoje.")
         
         st.markdown("---")
         
@@ -1425,77 +1475,32 @@ if pagina_selecionada == "Juros Brasil":
 
         st.markdown("---")
         
-        # --- SEÇÃO 3: ETTJ LONGO PRAZO E SPREADS ---
-        st.subheader("Análise de Curva Nominal e Spreads")
+        # --- SEÇÃO 3: ETTJ - CURTO E LONGO PRAZO ---
+        st.subheader("Curva de Juros Nominal (ETTJ)")
         
-        col_ettj_long, col_spread_2y10y = st.columns(2)
+        col_ettj_curto, col_ettj_long = st.columns(2)
+        
+        with col_ettj_curto:
+            st.markdown("#### ETTJ - Curto Prazo")
+            st.info("Estrutura a termo da taxa de juros nominal (prefixados) nos últimos 5 dias úteis.")
+            st.plotly_chart(gerar_grafico_ettj_curto_prazo(df_tesouro), use_container_width=True)
         
         with col_ettj_long:
             st.markdown("#### ETTJ - Comparativo Histórico (Longo Prazo)")
             st.info("Evolução da curva de juros nominal ao longo do tempo (1 semana, 1 mês, 3 meses, 6 meses, 1 ano atrás).")
             st.plotly_chart(gerar_grafico_ettj_longo_prazo(df_tesouro), use_container_width=True)
         
+        st.markdown("---")
+        
+        # --- SEÇÃO 4: SPREADS ---
+        st.subheader("Spreads de Juros")
+        
+        col_spread_2y10y, col_spread_br_eua = st.columns(2)
+        
         with col_spread_2y10y:
             st.markdown("#### Spread de Juros (10 Anos vs. 2 Anos)")
             st.info("Diferença entre as taxas dos títulos prefixados (NTN-Fs) com vencimentos próximos de 10 e 2 anos. Spread positivo = curva inclinada (normal). Spread negativo = curva invertida (sinal de alerta).")
             st.plotly_chart(gerar_grafico_spread_juros(df_tesouro), use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
-        
-        st.markdown("---")
-        
-        # --- SEÇÃO 4: INDICADORES DERIVADOS ---
-        st.subheader("Indicadores Derivados")
-        
-        col_breakeven, col_spread_br_eua = st.columns(2)
-        
-        with col_breakeven:
-            st.markdown("#### Inflação Implícita (Breakeven)")
-            st.info("Inflação implícita calculada pela diferença entre títulos prefixados e IPCA+ com vencimentos próximos.")
-            df_breakeven = calcular_inflacao_implicita(df_tesouro)
-            if not df_breakeven.empty:
-                # Prepara dados para uma curva mais intuitiva (prazo vs inflação implícita)
-                df_breakeven_plot = df_breakeven.reset_index().rename(columns={'Vencimento do Prefixo': 'Vencimento'})
-
-                # Se por algum motivo a coluna não existir (compatibilidade), calcula na hora
-                if 'Anos até Vencimento' not in df_breakeven_plot.columns:
-                    data_ref = df_tesouro['Data Base'].max()
-                    df_breakeven_plot['Anos até Vencimento'] = (
-                        (pd.to_datetime(df_breakeven_plot['Vencimento']) - data_ref).dt.days / 365.25
-                    )
-
-                data_ref = df_tesouro['Data Base'].max()
-
-                fig_breakeven = go.Figure()
-                fig_breakeven.add_trace(go.Scatter(
-                    x=df_breakeven_plot['Anos até Vencimento'],
-                    y=df_breakeven_plot['Inflação Implícita (% a.a.)'],
-                    mode='lines+markers',
-                    line=dict(color='#FFB74D', width=2),
-                    marker=dict(size=8),
-                    name='Inflação Implícita',
-                    hovertemplate=(
-                        "Vencimento: %{customdata[0]}<br>"
-                        "Prazo: %{x:.1f} anos<br>"
-                        "Inflação Implícita: %{y:.2f}%<extra></extra>"
-                    ),
-                    customdata=np.stack([
-                        df_breakeven_plot['Vencimento'].dt.strftime('%d/%m/%Y')
-                    ], axis=-1)
-                ))
-
-                fig_breakeven.update_layout(
-                    title=f'Curva de Inflação Implícita (Breakeven) - {data_ref.strftime("%d/%m/%Y")}',
-                    template='plotly_dark',
-                    title_x=0,
-                    xaxis_title='Prazo até o Vencimento (anos)',
-                    yaxis_title='Inflação Implícita (% a.a.)',
-                    showlegend=False
-                )
-
-                fig_breakeven.update_yaxes(tickformat=".2f")
-
-                st.plotly_chart(fig_breakeven, use_container_width=True)
-            else:
-                st.warning("Não há pares de títulos para calcular a inflação implícita hoje.")
         
         with col_spread_br_eua:
             st.markdown("#### Spread de Juros: Brasil vs. EUA")
