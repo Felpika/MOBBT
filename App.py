@@ -531,19 +531,35 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
     df_usa = df_usa['DGS10']
     df_merged = pd.merge(df_br, df_usa, left_index=True, right_index=True, how='inner')
     df_merged['Spread'] = df_merged['BR10Y'] - df_merged['DGS10']
-    fig = px.line(df_merged, y='Spread', title='Spread de Juros 10 Anos: NTN-B (Brasil) vs. Treasury (EUA)', template='plotly_dark')
-    # Adiciona suavização nas linhas
-    fig.update_traces(line=dict(shape='spline', smoothing=1.0))
+    
+    # Cria o gráfico usando go.Figure para ter controle completo sobre a linha suavizada
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df_merged.index,
+        y=df_merged['Spread'],
+        mode='lines',
+        line=dict(color='#636EFA', shape='spline', smoothing=1.0),
+        name='Spread',
+        hovertemplate='Data: %{x}<br>Spread: %{y:.2f}%<extra></extra>'
+    ))
+    
     end_date = df_merged.index.max()
     buttons = []
     periods = {'1A': 365, '2A': 730, '5A': 1825, 'Máx': 'max'}
     for label, days in periods.items():
         start_date = df_merged.index.min() if days == 'max' else end_date - timedelta(days=days)
         buttons.append(dict(method='relayout', label=label, args=[{'xaxis.range': [start_date, end_date], 'yaxis.autorange': True}]))
+    
     fig.update_layout(
-        title_x=0, yaxis_title="Diferença (Pontos Percentuais)", xaxis_title="Data",
+        title='Spread de Juros 10 Anos: NTN-B (Brasil) vs. Treasury (EUA)',
+        template='plotly_dark',
+        title_x=0,
+        yaxis_title="Diferença (Pontos Percentuais)",
+        xaxis_title="Data",
+        showlegend=False,
         updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons)]
     )
+    
     start_date_1y = end_date - timedelta(days=365)
     filtered_series = df_merged.loc[start_date_1y:end_date, 'Spread'].dropna()
     fig.update_xaxes(range=[start_date_1y, end_date])
