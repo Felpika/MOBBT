@@ -634,7 +634,7 @@ def carregar_dados_idex():
     st.info("Carregando dados do IDEX JGP... (Cache de 4h)")
     url_geral = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_geral_datafile.xlsx"
     url_low_rated = "https://jgp-credito-public-s3.s3.us-east-1.amazonaws.com/idex/idex_cdi_low_rated_datafile.xlsx"
-    emissores_para_remover = ['AMERICANAS SA', 'Light - Servicos de Eletricidade', 'Aeris', 'Viveo', 'Elfa Medicamentos', 'Braskem']
+    emissores_para_remover = ['AMERICANAS SA', 'Light - Servicos de Eletricidade', 'Aeris', 'Viveo', 'Elfa Medicamentos', 'Braskem', 'VIA S.A.']
 
     def _processar_url(url):
         response = requests.get(url)
@@ -1982,6 +1982,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
