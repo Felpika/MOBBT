@@ -18,8 +18,8 @@ import pandas_ta as ta
 from scipy import stats
 import plotly.io as pio  # <--- Adicione esta linha
 
-pio.templates["plotly_dark"].layout.paper_bgcolor = "#050505" # Fundo externo do gráfico
-pio.templates["plotly_dark"].layout.plot_bgcolor = "#050505"  # Área onde as linhas são desenhadas
+pio.templates["brokeberg"].layout.paper_bgcolor = "#050505" # Fundo externo do gráfico
+pio.templates["brokeberg"].layout.plot_bgcolor = "#050505"  # Área onde as linhas são desenhadas
 
 # --- DEFINIÇÃO DO TEMA CUSTOMIZADO (BROKEBERG) ---
 def configurar_tema_brokeberg():
@@ -35,7 +35,7 @@ def configurar_tema_brokeberg():
     GRADE_SUTIL = '#30363D'
 
     # Cria o template
-    brokeberg_template = pio.templates["plotly_dark"]  # Baseia-se no dark para facilitar
+    brokeberg_template = pio.templates["brokeberg"]  # Baseia-se no dark para facilitar
     
     # Customiza o Layout Global
     brokeberg_template.layout.update(
@@ -73,24 +73,38 @@ configurar_tema_brokeberg()
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="Brokeberg Terminal")
 
-# --- INJETAR CSS (COLE ISTO AQUI) ---
+# --- INJETAR CSS COMPLETO (Corrigido para Cards e Inputs) ---
 st.markdown("""
 <style>
-    /* 1. Fundo Principal da Aplicação */
-    .stApp {
-        background-color: #050505; /* Preto Profundo */
+    /* 1. Fundo Principal e Sidebar */
+    .stApp { background-color: #050505; }
+    [data-testid="stSidebar"] { background-color: #0D1117; border-right: 1px solid #30363D; }
+    
+    /* 2. Textos Gerais (Títulos, Parágrafos) */
+    h1, h2, h3, h4, h5, h6, p, label, .stMarkdown { color: #F0F6FC !important; }
+    
+    /* 3. Cards de Informação (st.info, st.warning, st.error) */
+    div.stAlert {
+        background-color: #161B22; /* Fundo do card */
+        border: 1px solid #30363D; /* Borda sutil */
+        color: #C9D1D9; /* Cor do texto */
     }
     
-    /* 2. Barra Lateral (Sidebar) */
-    [data-testid="stSidebar"] {
-        background-color: #0D1117; /* Azul Noturno */
-        border-right: 1px solid #30363D;
-    }
+    /* 4. Métricas (st.metric) */
+    [data-testid="stMetricValue"] { color: #00D4FF !important; } /* Valor Neon */
+    [data-testid="stMetricLabel"] { color: #8B949E !important; } /* Label Cinza */
 
-    /* 3. Ajuste para os textos gerais ficarem claros */
-    h1, h2, h3, h4, h5, h6, p, label {
+    /* 5. Inputs (Caixas de texto, Selects, Datas) */
+    .stTextInput > div > div > input, 
+    .stSelectbox > div > div > div, 
+    .stDateInput > div > div > input,
+    .stMultiSelect > div > div > div {
+        background-color: #161B22 !important;
         color: #F0F6FC !important;
+        border: 1px solid #30363D !important;
     }
+    /* Cor do texto dentro do multiselect */
+    span[data-baseweb="tag"] { background-color: #30363D !important; }
 </style>
 """, unsafe_allow_html=True)
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
@@ -145,7 +159,7 @@ def gerar_grafico_ntnb_multiplos_vencimentos(df_ntnb_all, vencimentos, metrica):
     if not vencimentos:
         return fig.update_layout(
             title_text="Selecione um ou mais vencimentos para visualizar",
-            template="plotly_dark",
+            template="brokeberg",
             title_x=0.5
         )
 
@@ -546,7 +560,7 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
             update_args[f'xaxis{i if i > 1 else ""}.range'], update_args[f'yaxis{i if i > 1 else ""}.autorange'] = [start_date, end_date], True
         buttons.append(dict(method='relayout', label=label, args=[update_args]))
     active_button_index = list(periods.keys()).index('1A') if '1A' in list(periods.keys()) else 4
-    fig.update_layout(title_text="Dashboard de Preços Históricos de Commodities", title_x=0, template="plotly_dark", height=250 * num_rows, showlegend=False,
+    fig.update_layout(title_text="Dashboard de Preços Históricos de Commodities", title_x=0, template="brokeberg", height=250 * num_rows, showlegend=False,
                         updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons, active=active_button_index)])
     start_date_1y = end_date - timedelta(days=365); idx = 0
     for df_cat in dados_preco_por_categoria.values():
@@ -1380,7 +1394,7 @@ def gerar_grafico_historico_insider(df_historico, ticker):
     if df_historico.empty:
         return go.Figure().update_layout(
             title_text=f"Não há dados de movimentação 'Compra à vista' ou 'Venda à vista' para {ticker}.",
-            template="plotly_dark", 
+            template="brokeberg", 
             title_x=0.5
         )
 
@@ -2071,6 +2085,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
