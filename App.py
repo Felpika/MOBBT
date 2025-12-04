@@ -18,7 +18,7 @@ import pandas_ta as ta
 from scipy import stats
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
-st.set_page_config(layout="wide", page_title="Bloombergzinho")
+st.set_page_config(layout="wide", page_title="Brokeberg Terminal")
 
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
 @st.cache_data(ttl=3600*4)
@@ -1344,7 +1344,7 @@ df_tesouro = obter_dados_tesouro()
 
 # --- Configuração do Sidebar com o novo menu ---
 with st.sidebar:
-    st.title("Bloombergzinho")
+    st.title("Brokeberg Terminal")
     st.caption(f"Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     
     pagina_selecionada = option_menu(
@@ -1982,6 +1982,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
