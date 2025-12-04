@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -32,7 +33,7 @@ def configurar_tema_brokeberg():
     GRADE_SUTIL = '#30363D'
 
     # Cria o template
-    brokeberg_template = pio.templates["brokeberg"]  # Baseia-se no dark para facilitar
+    brokeberg_template = pio.templates["plotly_dark"]  # Baseia-se no dark para facilitar
     
     # Customiza o Layout Global
     brokeberg_template.layout.update(
@@ -70,40 +71,6 @@ configurar_tema_brokeberg()
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="Brokeberg Terminal")
 
-# --- INJETAR CSS COMPLETO (Corrigido para Cards e Inputs) ---
-st.markdown("""
-<style>
-    /* 1. Fundo Principal e Sidebar */
-    .stApp { background-color: #050505; }
-    [data-testid="stSidebar"] { background-color: #0D1117; border-right: 1px solid #30363D; }
-    
-    /* 2. Textos Gerais (Títulos, Parágrafos) */
-    h1, h2, h3, h4, h5, h6, p, label, .stMarkdown { color: #F0F6FC !important; }
-    
-    /* 3. Cards de Informação (st.info, st.warning, st.error) */
-    div.stAlert {
-        background-color: #161B22; /* Fundo do card */
-        border: 1px solid #30363D; /* Borda sutil */
-        color: #C9D1D9; /* Cor do texto */
-    }
-    
-    /* 4. Métricas (st.metric) */
-    [data-testid="stMetricValue"] { color: #00D4FF !important; } /* Valor Neon */
-    [data-testid="stMetricLabel"] { color: #8B949E !important; } /* Label Cinza */
-
-    /* 5. Inputs (Caixas de texto, Selects, Datas) */
-    .stTextInput > div > div > input, 
-    .stSelectbox > div > div > div, 
-    .stDateInput > div > div > input,
-    .stMultiSelect > div > div > div {
-        background-color: #161B22 !important;
-        color: #F0F6FC !important;
-        border: 1px solid #30363D !important;
-    }
-    /* Cor do texto dentro do multiselect */
-    span[data-baseweb="tag"] { background-color: #30363D !important; }
-</style>
-""", unsafe_allow_html=True)
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
 @st.cache_data(ttl=3600*4)
 def obter_dados_tesouro():
@@ -156,7 +123,7 @@ def gerar_grafico_ntnb_multiplos_vencimentos(df_ntnb_all, vencimentos, metrica):
     if not vencimentos:
         return fig.update_layout(
             title_text="Selecione um ou mais vencimentos para visualizar",
-            template="brokeberg",
+            template="plotly_dark",
             title_x=0.5
         )
 
@@ -557,7 +524,7 @@ def gerar_dashboard_commodities(dados_preco_por_categoria):
             update_args[f'xaxis{i if i > 1 else ""}.range'], update_args[f'yaxis{i if i > 1 else ""}.autorange'] = [start_date, end_date], True
         buttons.append(dict(method='relayout', label=label, args=[update_args]))
     active_button_index = list(periods.keys()).index('1A') if '1A' in list(periods.keys()) else 4
-    fig.update_layout(title_text="Dashboard de Preços Históricos de Commodities", title_x=0, template="brokeberg", height=250 * num_rows, showlegend=False,
+    fig.update_layout(title_text="Dashboard de Preços Históricos de Commodities", title_x=0, template="plotly_dark", height=250 * num_rows, showlegend=False,
                         updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons, active=active_button_index)])
     start_date_1y = end_date - timedelta(days=365); idx = 0
     for df_cat in dados_preco_por_categoria.values():
@@ -1391,7 +1358,7 @@ def gerar_grafico_historico_insider(df_historico, ticker):
     if df_historico.empty:
         return go.Figure().update_layout(
             title_text=f"Não há dados de movimentação 'Compra à vista' ou 'Venda à vista' para {ticker}.",
-            template="brokeberg", 
+            template="plotly_dark", 
             title_x=0.5
         )
 
@@ -1457,29 +1424,13 @@ with st.sidebar:
         menu_icon="speedometer2",
         default_index=0,
         styles={
-            "container": {
-                "padding": "5px !important", 
-                "background-color": "#0D1117"  # <--- Fundo igual ao da Sidebar
-            },
-            "icon": {
-                "color": "#8B949E", 
-                "font-size": "20px"
-            }, 
-            "nav-link": {
-                "font-size": "16px", 
-                "text-align": "left", 
-                "margin": "0px", 
-                "color": "#C9D1D9",  # <--- Cor do texto normal
-                "--hover-color": "#161B22"
-            },
-            "nav-link-selected": {
-                "background-color": "#161B22", 
-                "color": "#00D4FF",  # <--- Ciano Neon no item selecionado
-                "border-left": "3px solid #00D4FF",
-                "font-weight": "bold"
-            },
+            "container": {"padding": "5px !important", "background-color": "transparent"},
+            "icon": {"color": "#636EFA", "font-size": "20px"},
+            "nav-link": {"font-size": "16px", "text-align": "left", "margin": "0px", "--hover-color": "#262830"},
+            "nav-link-selected": {"background-color": "#333952"}, # Verde para destacar
         }
     )
+
 # --- Roteamento de Páginas (com nomes atualizados) ---
 
 if pagina_selecionada == "Juros Brasil":
@@ -2082,10 +2033,6 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
-
-
-
-
 
 
 
