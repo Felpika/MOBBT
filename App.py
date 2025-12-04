@@ -70,6 +70,26 @@ configurar_tema_brokeberg()
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="Brokeberg Terminal")
 
+# --- INJETAR CSS (COLE ISTO AQUI) ---
+st.markdown("""
+<style>
+    /* 1. Fundo Principal da Aplicação */
+    .stApp {
+        background-color: #050505; /* Preto Profundo */
+    }
+    
+    /* 2. Barra Lateral (Sidebar) */
+    [data-testid="stSidebar"] {
+        background-color: #0D1117; /* Azul Noturno */
+        border-right: 1px solid #30363D;
+    }
+
+    /* 3. Ajuste para os textos gerais ficarem claros */
+    h1, h2, h3, h4, h5, h6, p, label {
+        color: #F0F6FC !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
 @st.cache_data(ttl=3600*4)
 def obter_dados_tesouro():
@@ -1423,13 +1443,29 @@ with st.sidebar:
         menu_icon="speedometer2",
         default_index=0,
         styles={
-            "container": {"padding": "5px !important", "background-color": "transparent"},
-            "icon": {"color": "#636EFA", "font-size": "20px"},
-            "nav-link": {"font-size": "16px", "text-align": "left", "margin": "0px", "--hover-color": "#262830"},
-            "nav-link-selected": {"background-color": "#333952"}, # Verde para destacar
+            "container": {
+                "padding": "5px !important", 
+                "background-color": "#0D1117"  # <--- Fundo igual ao da Sidebar
+            },
+            "icon": {
+                "color": "#8B949E", 
+                "font-size": "20px"
+            }, 
+            "nav-link": {
+                "font-size": "16px", 
+                "text-align": "left", 
+                "margin": "0px", 
+                "color": "#C9D1D9",  # <--- Cor do texto normal
+                "--hover-color": "#161B22"
+            },
+            "nav-link-selected": {
+                "background-color": "#161B22", 
+                "color": "#00D4FF",  # <--- Ciano Neon no item selecionado
+                "border-left": "3px solid #00D4FF",
+                "font-weight": "bold"
+            },
         }
     )
-
 # --- Roteamento de Páginas (com nomes atualizados) ---
 
 if pagina_selecionada == "Juros Brasil":
@@ -2032,6 +2068,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
