@@ -1344,7 +1344,7 @@ df_tesouro = obter_dados_tesouro()
 
 # --- Configuração do Sidebar com o novo menu ---
 with st.sidebar:
-    st.title("MOBBT")
+    st.title("Bloombergzinho")
     st.caption(f"Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     
     pagina_selecionada = option_menu(
@@ -1982,6 +1982,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
