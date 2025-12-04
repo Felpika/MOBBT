@@ -18,50 +18,8 @@ import pandas_ta as ta
 from scipy import stats
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
-# --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="Brokeberg Terminal")
 
-# --- INÍCIO DA ALTERAÇÃO DE CORES (CSS) ---
-st.markdown("""
-<style>
-    /* Fundo Principal (Quase Preto) */
-    [data-testid="stAppViewContainer"] {
-        background-color: #050505;
-        color: #C9D1D9;
-    }
-    
-    /* Barra Lateral (Azul Noturno Profundo) */
-    [data-testid="stSidebar"] {
-        background-color: #0D1117;
-        border-right: 1px solid #30363D;
-    }
-
-    /* Cabeçalho (Header) Transparente */
-    [data-testid="stHeader"] {
-        background-color: rgba(0,0,0,0);
-    }
-
-    /* Títulos e Headers (Branco Gelo) */
-    h1, h2, h3, h4, h5, h6 {
-        color: #F0F6FC !important;
-        font-family: 'Segoe UI', sans-serif;
-    }
-
-    /* Cards de Métricas e Infos (Fundo Escuro com Borda Sutil) */
-    div.stAlert {
-        background-color: #161B22;
-        border: 1px solid #30363D;
-        color: #C9D1D9;
-    }
-    
-    /* Ajuste de inputs e selects para combinar */
-    .stTextInput > div > div > input {
-        color: #F0F6FC;
-        background-color: #161B22;
-    }
-</style>
-""", unsafe_allow_html=True)
-# --- FIM DA ALTERAÇÃO DE CORES ---
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
 @st.cache_data(ttl=3600*4)
 def obter_dados_tesouro():
@@ -1385,12 +1343,10 @@ def gerar_grafico_historico_insider(df_historico, ticker):
 df_tesouro = obter_dados_tesouro()
 
 # --- Configuração do Sidebar com o novo menu ---
-# --- Configuração do Sidebar com o novo menu ---
 with st.sidebar:
     st.title("Brokeberg Terminal")
     st.caption(f"Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     
-    # --- ALTERAÇÃO DE ESTILO DO MENU ---
     pagina_selecionada = option_menu(
         menu_title="Monitoramento",
         options=[
@@ -1403,6 +1359,7 @@ with st.sidebar:
             "Ações BR",
             "Radar de Insiders",
         ],
+        # Ícones da https://icons.getbootstrap.com/
         icons=[
             "graph-up-arrow",
             "wallet2",
@@ -1416,25 +1373,12 @@ with st.sidebar:
         menu_icon="speedometer2",
         default_index=0,
         styles={
-            # Container do menu combinando com a sidebar
             "container": {"padding": "5px !important", "background-color": "transparent"},
-            
-            # Ícones em Cinza Claro (inativo)
-            "icon": {"color": "#8B949E", "font-size": "20px"}, 
-            
-            # Texto do link (Cinza Azulado)
-            "nav-link": {"font-size": "16px", "text-align": "left", "margin": "0px", "color": "#C9D1D9"},
-            
-            # Item Selecionado: Fundo Escuro + Texto/Icone Ciano Neon + Borda Esquerda
-            "nav-link-selected": {
-                "background-color": "#161B22", 
-                "color": "#00D4FF", 
-                "font-weight": "bold",
-                "border-left": "3px solid #00D4FF"
-            },
+            "icon": {"color": "#636EFA", "font-size": "20px"},
+            "nav-link": {"font-size": "16px", "text-align": "left", "margin": "0px", "--hover-color": "#262830"},
+            "nav-link-selected": {"background-color": "#333952"}, # Verde para destacar
         }
     )
-    # --- FIM DA ALTERAÇÃO DO MENU ---
 
 # --- Roteamento de Páginas (com nomes atualizados) ---
 
@@ -2038,8 +1982,6 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
-
-
 
 
 
