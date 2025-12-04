@@ -18,7 +18,7 @@ import pandas_ta as ta
 from scipy import stats
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
-st.set_page_config(layout="wide", page_title="MOBBT")
+st.set_page_config(layout="wide", page_title="Bloombergzinho")
 
 # --- BLOCO 1: LÓGICA DO DASHBOARD DO TESOURO DIRETO ---
 @st.cache_data(ttl=3600*4)
@@ -1982,6 +1982,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
