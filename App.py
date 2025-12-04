@@ -16,6 +16,56 @@ import io  # Adicionado para a nova funcionalidade
 from streamlit_option_menu import option_menu
 import pandas_ta as ta
 from scipy import stats
+import plotly.io as pio  # <--- Adicione esta linha
+
+# --- DEFINIÇÃO DO TEMA CUSTOMIZADO (BROKEBERG) ---
+def configurar_tema_brokeberg():
+    # Cores baseadas na paleta Cyberpunk Finance
+    VERDE_NEON = '#39E58C'
+    AMARELO_OURO = '#FFB302'
+    CIANO_NEON = '#00D4FF'
+    VERMELHO_NEON = '#FF4B4B'
+    FUNDO_ESCURO = '#050505'  # Mesmo do CSS
+    FUNDO_CARDS = '#161B22'
+    TEXTO_PRINCIPAL = '#F0F6FC'
+    TEXTO_SECUNDARIO = '#C9D1D9'
+    GRADE_SUTIL = '#30363D'
+
+    # Cria o template
+    brokeberg_template = pio.templates["plotly_dark"]  # Baseia-se no dark para facilitar
+    
+    # Customiza o Layout Global
+    brokeberg_template.layout.update(
+        paper_bgcolor=FUNDO_ESCURO,  # Fundo externo do gráfico
+        plot_bgcolor=FUNDO_ESCURO,   # Fundo interno (área de plotagem)
+        font={'color': TEXTO_SECUNDARIO, 'family': "Segoe UI, sans-serif"},
+        title={'font': {'color': TEXTO_PRINCIPAL, 'size': 20}},
+        
+        # Eixo X
+        xaxis={
+            'gridcolor': GRADE_SUTIL,
+            'linecolor': GRADE_SUTIL,
+            'zerolinecolor': GRADE_SUTIL,
+            'tickfont': {'color': TEXTO_SECUNDARIO}
+        },
+        # Eixo Y
+        yaxis={
+            'gridcolor': GRADE_SUTIL,
+            'linecolor': GRADE_SUTIL,
+            'zerolinecolor': GRADE_SUTIL,
+            'tickfont': {'color': TEXTO_SECUNDARIO}
+        },
+        # Cores padrão para linhas (Ciclo de cores)
+        # Se você não especificar cor na linha, ele usa essa ordem:
+        colorway=[CIANO_NEON, VERDE_NEON, AMARELO_OURO, VERMELHO_NEON, '#AB47BC', '#5C6BC0']
+    )
+
+    # Registra e define como padrão
+    pio.templates["brokeberg"] = brokeberg_template
+    pio.templates.default = "brokeberg"
+
+# Executa a configuração
+configurar_tema_brokeberg()
 
 # --- CONFIGURAÇÃO GERAL DA PÁGINA ---
 st.set_page_config(layout="wide", page_title="Brokeberg Terminal")
@@ -57,7 +107,7 @@ def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra M
     df_filtrado = df[(df['Tipo Titulo'] == tipo) & (df['Data Vencimento'] == vencimento)].sort_values('Data Base')
     titulo = f'Histórico da Taxa de Compra: {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})' if metrica == 'Taxa Compra Manha' else f'Histórico do Preço Unitário (PU): {tipo} (Venc. {vencimento.strftime("%d/%m/%Y")})'
     eixo_y = "Taxa de Compra (% a.a.)" if metrica == 'Taxa Compra Manha' else "Preço Unitário (R$)"
-    fig = px.line(df_filtrado, x='Data Base', y=metrica, title=titulo, template='plotly_dark')
+    fig = px.line(df_filtrado, x='Data Base', y=metrica, title=titulo, template='brokeberg')
     fig.update_layout(title_x=0, yaxis_title=eixo_y, xaxis_title="Data")
     return fig
 # Adicione esta função nova ao seu código, de preferência no Bloco 1
@@ -96,7 +146,7 @@ def gerar_grafico_ntnb_multiplos_vencimentos(df_ntnb_all, vencimentos, metrica):
         title_text=titulo, title_x=0,
         yaxis_title=eixo_y,
         xaxis_title="Data",
-        template='plotly_dark',
+        template='brokeberg',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 
@@ -181,7 +231,7 @@ def gerar_grafico_curva_juros_real_ntnb(df):
     A taxa de juros real é a taxa fixa que as NTN-Bs pagam acima do IPCA.
     """
     if df.empty or 'Data Base' not in df.columns:
-        return go.Figure().update_layout(title_text="Não há dados disponíveis.", template='plotly_dark')
+        return go.Figure().update_layout(title_text="Não há dados disponíveis.", template='brokeberg')
     
     # Filtra apenas os títulos NTN-B na data mais recente
     tipos_ntnb = ['Tesouro IPCA+', 'Tesouro IPCA+ com Juros Semestrais']
@@ -189,7 +239,7 @@ def gerar_grafico_curva_juros_real_ntnb(df):
     df_ntnb = df_recente[df_recente['Tipo Titulo'].isin(tipos_ntnb)].copy()
     
     if df_ntnb.empty:
-        return go.Figure().update_layout(title_text="Não há dados de NTN-Bs disponíveis.", template='plotly_dark')
+        return go.Figure().update_layout(title_text="Não há dados de NTN-Bs disponíveis.", template='brokeberg')
     
     # Remove duplicatas, priorizando "com Juros Semestrais" quando houver ambos
     df_ntnb = df_ntnb.sort_values('Tipo Titulo', ascending=False).drop_duplicates('Data Vencimento')
@@ -221,7 +271,7 @@ def gerar_grafico_curva_juros_real_ntnb(df):
     
     fig.update_layout(
         title=f'Curva de Juros Real (NTN-Bs) - {data_ref.strftime("%d/%m/%Y")}',
-        template='plotly_dark',
+        template='brokeberg',
         title_x=0,
         xaxis_title='Prazo até o Vencimento (anos)',
         yaxis_title='Taxa de Juros Real (% a.a.)',
@@ -308,7 +358,7 @@ def gerar_grafico_spread_juros(df):
     
     fig.update_layout(
         title=titulo_grafico,
-        template='plotly_dark',
+        template='brokeberg',
         title_x=0,
         yaxis_title="Diferença (Basis Points)",
         xaxis_title="Data",
@@ -362,7 +412,7 @@ def gerar_grafico_ettj_curto_prazo(df):
         df_data['Anos até Vencimento'] = df_data['Dias Uteis'] / 252  # Aproximadamente 252 dias úteis por ano
         line_style = dict(dash='dash', shape='spline', smoothing=1.0) if not legenda.startswith('Hoje') else dict(shape='spline', smoothing=1.0)
         fig.add_trace(go.Scatter(x=df_data['Anos até Vencimento'], y=df_data['Taxa Compra Manha'], mode='lines', name=legenda, line=line_style))
-    fig.update_layout(title_text='Curva de Juros (ETTJ) - Curto Prazo (últimos 5 dias)', title_x=0, xaxis_title='Prazo até o Vencimento (anos)', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    fig.update_layout(title_text='Curva de Juros (ETTJ) - Curto Prazo (últimos 5 dias)', title_x=0, xaxis_title='Prazo até o Vencimento (anos)', yaxis_title='Taxa (% a.a.)', template='brokeberg', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
 def gerar_grafico_ettj_longo_prazo(df):
@@ -388,7 +438,7 @@ def gerar_grafico_ettj_longo_prazo(df):
         df_data['Anos até Vencimento'] = df_data['Dias Uteis'] / 252  # Aproximadamente 252 dias úteis por ano
         line_style = dict(dash='dash', shape='spline', smoothing=1.0) if not legenda.startswith('Hoje') else dict(shape='spline', smoothing=1.0)
         fig.add_trace(go.Scatter(x=df_data['Anos até Vencimento'], y=df_data['Taxa Compra Manha'], mode='lines', name=legenda, line=line_style))
-    fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0, xaxis_title='Prazo até o Vencimento (anos)', yaxis_title='Taxa (% a.a.)', template='plotly_dark', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    fig.update_layout(title_text='Curva de Juros (ETTJ) - Longo Prazo (Comparativo Histórico)', title_x=0, xaxis_title='Prazo até o Vencimento (anos)', yaxis_title='Taxa (% a.a.)', template='brokeberg', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
 # --- BLOCO 2: LÓGICA DO DASHBOARD DE INDICADORES ECONÔMICOS ---
@@ -505,7 +555,7 @@ def gerar_grafico_fred(df, ticker, titulo):
     # ... (código existente inalterado)
     if ticker not in df.columns or df[ticker].isnull().all():
         return go.Figure().update_layout(title_text=f"Dados para {ticker} não encontrados.")
-    fig = px.line(df, y=ticker, title=titulo, template='plotly_dark')
+    fig = px.line(df, y=ticker, title=titulo, template='brokeberg')
     if ticker == 'T10Y2Y':
         fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Inversão", annotation_position="bottom right")
     end_date = df.index.max()
@@ -552,7 +602,7 @@ def gerar_grafico_spread_br_eua(df_br, df_usa):
     
     fig.update_layout(
         title='Spread de Juros 10 Anos: NTN-B (Brasil) vs. Treasury (EUA)',
-        template='plotly_dark',
+        template='brokeberg',
         title_x=0,
         yaxis_title="Diferença (Pontos Percentuais)",
         xaxis_title="Data",
@@ -621,7 +671,7 @@ def gerar_grafico_ratio(df_metrics, ticker_a, ticker_b, window):
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Lower_Band_2x_Rolling'], mode='lines', line_color='gray', line_width=1, name='Bollinger Inferior', fill='tonexty', fillcolor='rgba(128,128,128,0.1)', showlegend=False))
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Rolling_Mean'], mode='lines', line_color='orange', line_dash='dash', name=f'Média Móvel ({window}d)'))
     fig.add_trace(go.Scatter(x=df_metrics.index, y=df_metrics['Ratio'], mode='lines', line_color='#636EFA', name='Ratio Atual', line_width=2.5))
-    fig.update_layout(title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}', template='plotly_dark', title_x=0, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    fig.update_layout(title_text=f'Análise de Ratio: {ticker_a} / {ticker_b}', template='brokeberg', title_x=0, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
 # --- BLOCO 6: LÓGICA DO INDICADOR IDEX JGP (NOVO) ---
@@ -706,7 +756,7 @@ def gerar_grafico_idex_infra(df_idex_infra):
         df_idex_infra,
         y='spread_bps_ntnb',
         title='Histórico do Spread Médio Ponderado: IDEX INFRA',
-        template='plotly_dark'
+        template='brokeberg'
     )
     
     # Atualiza os eixos e a legenda
@@ -731,7 +781,7 @@ def gerar_grafico_idex(df_idex):
         df_idex,
         y=['IDEX Geral (Filtrado)', 'IDEX Low Rated (Filtrado)'],
         title='Histórico do Spread Médio Ponderado: IDEX JGP',
-        template='plotly_dark'
+        template='brokeberg'
     )
 
     fig.update_yaxes(tickformat=".2%")
@@ -905,7 +955,7 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
     fig.update_layout(
         title_text='Amplitude de Mercado (MM50/200) - Sobreposto',
         title_x=0,
-        template='plotly_dark',
+        template='brokeberg',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         yaxis_title="% Papéis",
         xaxis_title="Data"
@@ -924,7 +974,7 @@ def gerar_grafico_net_highs_lows(df_amplitude):
     df_plot = df_amplitude[['net_highs_lows', 'new_highs', 'new_lows']].dropna().copy()
     
     if df_plot.empty:
-        return go.Figure().update_layout(title_text="Sem dados disponíveis", template='plotly_dark')
+        return go.Figure().update_layout(title_text="Sem dados disponíveis", template='brokeberg')
     
     fig = go.Figure()
     
@@ -970,7 +1020,7 @@ def gerar_grafico_net_highs_lows(df_amplitude):
         title_x=0,
         yaxis_title="Saldo de Papéis",
         xaxis_title="Data",
-        template='plotly_dark',
+        template='brokeberg',
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
@@ -1001,7 +1051,7 @@ def gerar_grafico_mcclellan(df_amplitude):
     series_mcclellan = df_amplitude['mcclellan'].dropna()
     
     if series_mcclellan.empty:
-        return go.Figure().update_layout(title_text="Sem dados disponíveis", template='plotly_dark')
+        return go.Figure().update_layout(title_text="Sem dados disponíveis", template='brokeberg')
     
     fig = go.Figure()
     
@@ -1035,7 +1085,7 @@ def gerar_grafico_mcclellan(df_amplitude):
         title_x=0,
         yaxis_title="Oscilador",
         xaxis_title="Data",
-        template='plotly_dark',
+        template='brokeberg',
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
@@ -1084,12 +1134,12 @@ def gerar_grafico_historico_amplitude(series_dados, titulo, valor_atual, media_h
     if df_plot.empty:
         return go.Figure().update_layout(
             title_text=titulo,
-            template='plotly_dark',
+            template='brokeberg',
             title_x=0
         )
 
     # Gráfico principal
-    fig = px.line(df_plot, x=df_plot.index, y='valor', title=titulo, template='plotly_dark')
+    fig = px.line(df_plot, x=df_plot.index, y='valor', title=titulo, template='brokeberg')
 
     # Linhas horizontais de referência
     fig.add_hline(y=media_hist, line_dash="dash", line_color="gray", annotation_text="Média Hist.")
@@ -1131,7 +1181,7 @@ def gerar_grafico_historico_amplitude(series_dados, titulo, valor_atual, media_h
 
 def gerar_histograma_amplitude(series_dados, titulo, valor_atual, media_hist, nbins=50):
     """Gera um histograma de uma série de dados com linhas verticais para o valor atual e a média."""
-    fig = px.histogram(series_dados, title=titulo, nbins=nbins, template='plotly_dark')
+    fig = px.histogram(series_dados, title=titulo, nbins=nbins, template='brokeberg')
     fig.add_vline(x=media_hist, line_dash="dash", line_color="gray", annotation_text=f"Média: {media_hist:.2f}", annotation_position="top left")
     fig.add_vline(x=valor_atual, line_dash="dot", line_color="yellow", annotation_text=f"Atual: {valor_atual:.2f}", annotation_position="top right")
     fig.update_layout(showlegend=False, title_x=0)
@@ -1155,7 +1205,7 @@ def gerar_heatmap_amplitude(tabela_media, faixa_atual, titulo):
                       x0=0, y0=y_pos-0.5, x1=1, y1=y_pos+0.5,
                       line=dict(color="White", width=4))
                       
-    fig.update_layout(title=titulo, template='plotly_dark', yaxis_title='Faixa do Indicador', title_x=0)
+    fig.update_layout(title=titulo, template='brokeberg', yaxis_title='Faixa do Indicador', title_x=0)
     return fig
 
 # --- FIM DO BLOCO 7 ---
@@ -1319,7 +1369,7 @@ def gerar_grafico_historico_insider(df_historico, ticker):
         x='Data',
         y='Volume_Net',
         title=f'Histórico de Volume Líquido Mensal de Insiders: {ticker.upper()}',
-        template='plotly_dark'
+        template='brokeberg'
     )
 
     # Aplica as cores customizadas
@@ -1435,7 +1485,7 @@ if pagina_selecionada == "Juros Brasil":
 
                 fig_breakeven.update_layout(
                     title=f'Curva de Inflação Implícita (Breakeven) - {data_ref.strftime("%d/%m/%Y")}',
-                    template='plotly_dark',
+                    template='brokeberg',
                     title_x=0,
                     xaxis_title='Prazo até o Vencimento (anos)',
                     yaxis_title='Inflação Implícita (% a.a.)',
@@ -1579,7 +1629,7 @@ elif pagina_selecionada == "Econômicos BR":
         num_cols_bcb = 3
         cols_bcb = st.columns(num_cols_bcb)
         for i, nome_serie in enumerate(df_filtrado_bcb.columns):
-            fig_bcb = px.line(df_filtrado_bcb, x=df_filtrado_bcb.index, y=nome_serie, title=nome_serie, template='plotly_dark')
+            fig_bcb = px.line(df_filtrado_bcb, x=df_filtrado_bcb.index, y=nome_serie, title=nome_serie, template='brokeberg')
             fig_bcb.update_layout(title_x=0)
             cols_bcb[i % num_cols_bcb].plotly_chart(fig_bcb, use_container_width=True)
     else:
@@ -1982,6 +2032,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
