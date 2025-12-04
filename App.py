@@ -18,6 +18,9 @@ import pandas_ta as ta
 from scipy import stats
 import plotly.io as pio  # <--- Adicione esta linha
 
+pio.templates["plotly_dark"].layout.paper_bgcolor = "#050505" # Fundo externo do gráfico
+pio.templates["plotly_dark"].layout.plot_bgcolor = "#050505"  # Área onde as linhas são desenhadas
+
 # --- DEFINIÇÃO DO TEMA CUSTOMIZADO (BROKEBERG) ---
 def configurar_tema_brokeberg():
     # Cores baseadas na paleta Cyberpunk Finance
@@ -2068,6 +2071,7 @@ elif pagina_selecionada == "Radar de Insiders":
 
     else:
         st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+
 
 
 
