@@ -1350,6 +1350,41 @@ def analisar_historico_insider_por_ticker(_df_mov, cnpj_alvo):
     df_historico['Data'] = pd.to_datetime(df_historico['Ano_Mes'] + '-01')
 
     return df_historico[['Data', 'Volume_Net']]
+@st.cache_data
+def obter_detalhes_insider_por_ticker(_df_mov, cnpj_alvo):
+    """
+    Retorna um DataFrame detalhado com as movimentações individuais para um CNPJ específico.
+    Inclui Cargo, Tipo de Operação, Data, etc.
+    """
+    if not cnpj_alvo or _df_mov.empty:
+        return pd.DataFrame()
+
+    # Filtra pelo CNPJ
+    df_detalhes = _df_mov[_df_mov['CNPJ_Companhia'] == cnpj_alvo].copy()
+
+    if df_detalhes.empty:
+        return pd.DataFrame()
+
+    # Seleciona e renomeia as colunas para exibição amigável
+    # As colunas padrão do arquivo VLMO da CVM geralmente são estas:
+    colunas_desejadas = {
+        'Data_Movimentacao': 'Data',
+        'Cargo_Funcao': 'Cargo / Função',
+        'Tipo_Movimentacao': 'Operação',
+        'Quantidade': 'Qtd.',
+        'Preco_Unitario': 'Preço (R$)',
+        'Volume': 'Volume Total (R$)'
+    }
+    
+    # Garante que só selecionamos colunas que existem no DataFrame
+    cols_existentes = [c for c in colunas_desejadas.keys() if c in df_detalhes.columns]
+    df_exibicao = df_detalhes[cols_existentes].rename(columns=colunas_desejadas)
+
+    # Ordena pela data (mais recente primeiro)
+    if 'Data' in df_exibicao.columns:
+        df_exibicao = df_exibicao.sort_values(by='Data', ascending=False)
+
+    return df_exibicao
 
 def gerar_grafico_historico_insider(df_historico, ticker):
     """
@@ -1995,20 +2030,19 @@ elif pagina_selecionada == "Radar de Insiders":
                 )
             else:
                 st.warning("Por favor, selecione pelo menos um mês para a análise.")
-            # --- (INÍCIO DA NOVA SEÇÃO DE HISTÓRICO POR TICKER) ---
+        # --- (INÍCIO DA NOVA SEÇÃO DE HISTÓRICO POR TICKER ATUALIZADA) ---
         st.markdown("---")
-        st.subheader("Analisar Histórico por Ticker")
-        st.info("Digite o código de negociação (ex: PETR4, VALE3) para ver o histórico de volume líquido mensal de insiders.")
+        st.subheader("Analisar Histórico Detalhado por Ticker")
+        st.info("Digite o código de negociação (ex: PETR4, VALE3) para ver o gráfico e a lista detalhada de movimentações.")
 
         # Cria o lookup Ticker -> CNPJ
-        # (Isso é rápido por causa do @st.cache_data na função criar_lookup_ticker_cnpj)
         lookup_ticker_cnpj = criar_lookup_ticker_cnpj(df_cad_bruto)
 
         ticker_input = st.text_input(
             "Digite o Ticker:", 
             key="insider_ticker_input", 
             placeholder="Ex: PETR4"
-        ).upper() # Converte para maiúsculas
+        ).upper().strip()
 
         if st.button("Buscar Histórico por Ticker", use_container_width=True):
             if ticker_input:
@@ -2019,20 +2053,36 @@ elif pagina_selecionada == "Radar de Insiders":
                     st.error(f"Ticker '{ticker_input}' não encontrado na base de cadastro da CVM. Verifique o código.")
                 else:
                     with st.spinner(f"Analisando histórico para {ticker_input}..."):
-                        # Passa o df_mov_bruto (que já tem a coluna 'Ano_Mes' criada)
-                        # e o CNPJ encontrado
+                        # 1. Gráfico de Barras (Agregado Mensal)
                         df_historico_ticker = analisar_historico_insider_por_ticker(df_mov_bruto, cnpj_alvo)
+                        if not df_historico_ticker.empty:
+                            fig_historico = gerar_grafico_historico_insider(df_historico_ticker, ticker_input)
+                            st.plotly_chart(fig_historico, use_container_width=True)
+                        else:
+                            st.warning(f"Não há dados agregados suficientes para gerar o gráfico de {ticker_input}.")
+
+                        # 2. Tabela Detalhada (Lista de Movimentações)
+                        st.markdown(f"#### 📋 Lista de Movimentações: {ticker_input}")
+                        df_detalhes = obter_detalhes_insider_por_ticker(df_mov_bruto, cnpj_alvo)
                         
-                        # Gera e exibe o gráfico
-                        fig_historico = gerar_grafico_historico_insider(df_historico_ticker, ticker_input)
-                        st.plotly_chart(fig_historico, use_container_width=True)
+                        if not df_detalhes.empty:
+                            st.dataframe(
+                                df_detalhes.style.format({
+                                    'Data': '{:%d/%m/%Y}',
+                                    'Preço (R$)': 'R$ {:,.2f}',
+                                    'Volume Total (R$)': 'R$ {:,.2f}',
+                                    'Qtd.': '{:,.0f}'
+                                }),
+                                use_container_width=True,
+                                hide_index=True,
+                                height=400 # Altura fixa com scroll se a lista for longa
+                            )
+                        else:
+                            st.info(f"Não foram encontradas movimentações detalhadas para {ticker_input} neste período.")
             else:
                 st.warning("Por favor, digite um ticker.")
         
-# --- (FIM DA NOVA SEÇÃO) ---
-
-    else:
-        st.error("Falha ao carregar os dados base da CVM. A análise não pode continuar.")
+        # --- (FIM DA NOVA SEÇÃO) ---
 
 
 
