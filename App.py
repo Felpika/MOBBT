@@ -1373,7 +1373,7 @@ def obter_detalhes_insider_por_ticker(_df_mov, cnpj_alvo):
     # 3. Seleciona e renomeia as colunas
     colunas_desejadas = {
         'Data_Movimentacao': 'Data',
-        'Grupo_Autor': 'Cargo / Grupo', # Mantendo a correção anterior
+        'Tipo_Cargo': 'Cargo / Grupo', # Mantendo a correção anterior
         'Tipo_Movimentacao': 'Operação',
         'Quantidade': 'Qtd.',
         'Preco_Unitario': 'Preço (R$)',
@@ -2086,6 +2086,7 @@ elif pagina_selecionada == "Radar de Insiders":
                 st.warning("Por favor, digite um ticker.")
         
         # --- (FIM DA NOVA SEÇÃO) ---
+
 
 
 
