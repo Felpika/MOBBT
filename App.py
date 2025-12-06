@@ -1350,37 +1350,40 @@ def analisar_historico_insider_por_ticker(_df_mov, cnpj_alvo):
     df_historico['Data'] = pd.to_datetime(df_historico['Ano_Mes'] + '-01')
 
     return df_historico[['Data', 'Volume_Net']]
+
 @st.cache_data
 def obter_detalhes_insider_por_ticker(_df_mov, cnpj_alvo):
     """
     Retorna um DataFrame detalhado com as movimentações individuais para um CNPJ específico.
-    Inclui Cargo, Tipo de Operação, Data, etc.
+    Filtra apenas Compras e Vendas à vista e usa 'Grupo_Autor' para o cargo.
     """
     if not cnpj_alvo or _df_mov.empty:
         return pd.DataFrame()
 
-    # Filtra pelo CNPJ
+    # 1. Filtra pelo CNPJ da empresa
     df_detalhes = _df_mov[_df_mov['CNPJ_Companhia'] == cnpj_alvo].copy()
+
+    # 2. Filtra apenas operações "à vista" (NOVA LINHA)
+    operacoes_validas = ['Compra à vista', 'Venda à vista']
+    df_detalhes = df_detalhes[df_detalhes['Tipo_Movimentacao'].isin(operacoes_validas)]
 
     if df_detalhes.empty:
         return pd.DataFrame()
 
-    # Seleciona e renomeia as colunas para exibição amigável
-    # As colunas padrão do arquivo VLMO da CVM geralmente são estas:
+    # 3. Seleciona e renomeia as colunas
     colunas_desejadas = {
         'Data_Movimentacao': 'Data',
-        'Cargo_Funcao': 'Cargo / Função',
+        'Grupo_Autor': 'Cargo / Grupo', # Mantendo a correção anterior
         'Tipo_Movimentacao': 'Operação',
         'Quantidade': 'Qtd.',
         'Preco_Unitario': 'Preço (R$)',
         'Volume': 'Volume Total (R$)'
     }
     
-    # Garante que só selecionamos colunas que existem no DataFrame
     cols_existentes = [c for c in colunas_desejadas.keys() if c in df_detalhes.columns]
     df_exibicao = df_detalhes[cols_existentes].rename(columns=colunas_desejadas)
 
-    # Ordena pela data (mais recente primeiro)
+    # 4. Ordena pela data (mais recente primeiro)
     if 'Data' in df_exibicao.columns:
         df_exibicao = df_exibicao.sort_values(by='Data', ascending=False)
 
@@ -2083,6 +2086,7 @@ elif pagina_selecionada == "Radar de Insiders":
                 st.warning("Por favor, digite um ticker.")
         
         # --- (FIM DA NOVA SEÇÃO) ---
+
 
 
 
