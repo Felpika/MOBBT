@@ -1994,9 +1994,51 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_histograma_amplitude(nh_nl_series_recent, "Distribuição Histórica (Saldo Líquido)", valor_atual_nh, media_hist_nh, nbins=100), use_container_width=True)
         with col_heat:
             st.plotly_chart(gerar_heatmap_amplitude(resultados_nh['Retorno Médio'], faixa_atual_nh, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Net Highs/Lows"), use_container_width=True)
-        
+      
         st.markdown("---")
-        # --- SEÇÃO 6: OSCILADOR MCCLELLAN (ATUALIZADO) ---
+
+        # --- SEÇÃO 5: MACD BREADTH ---
+        st.subheader("Amplitude MACD (% Compra)")
+        st.info("Percentual de ações da bolsa onde a linha MACD está acima da linha de sinal (Histograma > 0). Níveis muito baixos podem indicar sobrevenda extrema (oportunidade), e níveis muito altos indicam exaustão da tendência.")
+
+        macd_series = df_indicadores['macd_breadth']
+        
+        # Filtro de data para os gráficos (últimos 5 anos se disponível)
+        if not macd_series.empty:
+             cutoff_macd = macd_series.index.max() - pd.DateOffset(years=5)
+             macd_series = macd_series[macd_series.index >= cutoff_macd]
+
+        valor_atual_macd = macd_series.iloc[-1]
+        media_hist_macd = macd_series.mean()
+        
+        # Prepara análise de retornos (Heatmap)
+        df_analise_macd = df_analise_base.join(macd_series).dropna()
+        resultados_macd = analisar_retornos_por_faixa(df_analise_macd, 'macd_breadth', 10, 0, 100, '%')
+        
+        passo_macd = 10
+        faixa_atual_valor_macd = int(valor_atual_macd // passo_macd) * passo_macd
+        faixa_atual_macd = f'{faixa_atual_valor_macd} a {faixa_atual_valor_macd + passo_macd}%'
+
+        col1, col2 = st.columns([1,2])
+        with col1:
+            st.metric("Valor Atual (% Bullish)", f"{valor_atual_macd:.2f}%")
+            st.metric("Média Histórica", f"{media_hist_macd:.2f}%")
+            z_score_macd = (valor_atual_macd - media_hist_macd) / macd_series.std()
+            st.metric("Z-Score", f"{z_score_macd:.2f}")
+            percentil_macd = stats.percentileofscore(macd_series, valor_atual_macd)
+            st.metric("Percentil Histórico", f"{percentil_macd:.2f}%")
+        
+        with col2:
+            st.plotly_chart(gerar_grafico_historico_amplitude(macd_series, "Histórico MACD Breadth (% Papéis com MACD > Sinal)", valor_atual_macd, media_hist_macd), use_container_width=True)
+            
+        col1, col2 = st.columns(2)
+        with col1:
+            st.plotly_chart(gerar_histograma_amplitude(macd_series, "Distribuição Histórica MACD Breadth", valor_atual_macd, media_hist_macd), use_container_width=True)
+        with col2:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_macd['Retorno Médio'], faixa_atual_macd, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs MACD Breadth"), use_container_width=True)
+
+        st.markdown("---")
+        # --- SEÇÃO 6: OSCILADOR MCCLELLAN (INTERVALO REDUZIDO) ---
         st.subheader("Oscilador McClellan")
         st.info("Indicador de momentum de amplitude. Cruzamentos acima de zero indicam fluxo comprador; abaixo, vendedor.")
 
@@ -2008,16 +2050,15 @@ elif pagina_selecionada == "Amplitude":
         else:
              mcclellan_series_recent = mcclellan_series
 
-        # Cálculos
         valor_atual_mcc = mcclellan_series.iloc[-1]
         media_hist_mcc = mcclellan_series_recent.mean()
 
-        # Heatmap
-        # O oscilador geralmente flutua entre -100 e +100 (depende do volume de papéis, vamos por margem de segurança -150 a 150)
+        # --- ALTERAÇÃO AQUI: Passo reduzido de 15 para 5 ---
+        passo_mcc = 5
+        # Range ajustado para não gerar linhas vazias demais (-100 a 100 costuma ser suficiente)
         df_analise_mcc = df_analise_base.join(mcclellan_series).dropna()
-        resultados_mcc = analisar_retornos_por_faixa(df_analise_mcc, 'mcclellan', 15, -150, 150, '')
+        resultados_mcc = analisar_retornos_por_faixa(df_analise_mcc, 'mcclellan', passo_mcc, -100, 100, '')
         
-        passo_mcc = 15
         faixa_atual_valor_mcc = int(np.floor(valor_atual_mcc / passo_mcc)) * passo_mcc
         faixa_atual_mcc = f'{faixa_atual_valor_mcc} a {faixa_atual_valor_mcc + passo_mcc}'
 
@@ -2188,6 +2229,7 @@ elif pagina_selecionada == "Radar de Insiders":
                 st.warning("Por favor, digite um ticker.")
         
         # --- (FIM DA NOVA SEÇÃO) ---
+
 
 
 
