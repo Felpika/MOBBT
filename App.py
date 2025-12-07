@@ -887,20 +887,15 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
     ema_39 = net_advances.ewm(span=39, adjust=False).mean()
     mcclellan_osc = ema_19 - ema_39
 
-    # --- NOVO: MACD Breadth ---
-    # Cálculo vetorizado do MACD (12, 26, 9) para todas as ações
+    # --- 6. NOVO: MACD Breadth (O que faltava) ---
     ema12 = _precos_fechamento.ewm(span=12, adjust=False).mean()
     ema26 = _precos_fechamento.ewm(span=26, adjust=False).mean()
     macd_line = ema12 - ema26
     signal_line = macd_line.ewm(span=9, adjust=False).mean()
     histograma_macd = macd_line - signal_line
     
-    # Conta quantos papeis tem Histograma > 0 (Tendência de Alta no MACD)
     macd_bullish = (histograma_macd > 0).sum(axis=1)
-    # Reusa total_papeis_validos (aproximação) ou recalcula validos no MACD
     validos_macd = histograma_macd.notna().sum(axis=1)
-    
-    # Evita divisão por zero
     percentual_macd_bullish = (macd_bullish / validos_macd).fillna(0) * 100
 
     df_amplitude = pd.DataFrame({
@@ -916,7 +911,7 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
         'new_lows': new_lows,
         'net_highs_lows': net_highs_lows,
         'mcclellan': mcclellan_osc,
-        'macd_breadth': percentual_macd_bullish # <--- Nova Coluna
+        'macd_breadth': percentual_macd_bullish # <--- ESSA LINHA É CRUCIAL
     })
     
     return df_amplitude.dropna()
@@ -2134,6 +2129,7 @@ elif pagina_selecionada == "Radar de Insiders":
                 st.warning("Por favor, digite um ticker.")
         
         # --- (FIM DA NOVA SEÇÃO) ---
+
 
 
 
