@@ -847,14 +847,14 @@ def obter_precos_historicos_amplitude(tickers, anos_historico=5):
 
 @st.cache_data
 def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
-    """Calcula indicadores de amplitude, incluindo Highs/Lows e McClellan."""
+    """Calcula indicadores de amplitude, incluindo Highs/Lows, McClellan e MACD Breadth."""
     
     # 1. Market Breadth (MM200)
     mma200 = _precos_fechamento.rolling(window=200, min_periods=50).mean()
     acima_da_media = _precos_fechamento > mma200
     percentual_acima_media = (acima_da_media.sum(axis=1) / _precos_fechamento.notna().sum(axis=1)) * 100
     
-    # 2. Categorias MM50 vs MM200 (Seu código existente)
+    # 2. Categorias MM50 vs MM200
     mma50 = _precos_fechamento.rolling(window=50, min_periods=20).mean()
     total_papeis_validos = _precos_fechamento.notna().sum(axis=1)
     
@@ -871,29 +871,37 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
     sobrecompradas = (ifr_individual > 70).sum(axis=1) / total_valido_ifr * 100
     sobrevendidas = (ifr_individual < 30).sum(axis=1) / total_valido_ifr * 100
 
-    # --- NOVO CÓDIGO: Novas Máximas e Mínimas (52 Semanas / 252 Dias) ---
-    # Rolling max/min dos últimos 252 dias
+    # 4. Novas Máximas e Mínimas (52 Semanas / 252 Dias)
     rolling_max = _precos_fechamento.rolling(window=252, min_periods=200).max()
     rolling_min = _precos_fechamento.rolling(window=252, min_periods=200).min()
-    
-    # Compara o preço ATUAL com o max/min da janela.
-    # Nota: O rolling_max inclui o dia atual. Se hoje for nova máxima, preço == rolling_max.
     new_highs = (_precos_fechamento >= rolling_max).sum(axis=1)
     new_lows = (_precos_fechamento <= rolling_min).sum(axis=1)
     net_highs_lows = new_highs - new_lows
 
-    # --- NOVO CÓDIGO: Oscilador McClellan ---
-    # 1. Calcular Avanços e Declínios Diários
+    # 5. Oscilador McClellan
     diff_precos = _precos_fechamento.diff()
     advances = (diff_precos > 0).sum(axis=1)
     declines = (diff_precos < 0).sum(axis=1)
     net_advances = advances - declines
-    
-    # 2. Calcular EMAs (10% e 5% constants aprox. equivalem a 19 e 39 dias)
-    # A fórmula clássica usa suavização exponencial da diferença líquida (Net Advances)
     ema_19 = net_advances.ewm(span=19, adjust=False).mean()
     ema_39 = net_advances.ewm(span=39, adjust=False).mean()
     mcclellan_osc = ema_19 - ema_39
+
+    # --- NOVO: MACD Breadth ---
+    # Cálculo vetorizado do MACD (12, 26, 9) para todas as ações
+    ema12 = _precos_fechamento.ewm(span=12, adjust=False).mean()
+    ema26 = _precos_fechamento.ewm(span=26, adjust=False).mean()
+    macd_line = ema12 - ema26
+    signal_line = macd_line.ewm(span=9, adjust=False).mean()
+    histograma_macd = macd_line - signal_line
+    
+    # Conta quantos papeis tem Histograma > 0 (Tendência de Alta no MACD)
+    macd_bullish = (histograma_macd > 0).sum(axis=1)
+    # Reusa total_papeis_validos (aproximação) ou recalcula validos no MACD
+    validos_macd = histograma_macd.notna().sum(axis=1)
+    
+    # Evita divisão por zero
+    percentual_macd_bullish = (macd_bullish / validos_macd).fillna(0) * 100
 
     df_amplitude = pd.DataFrame({
         'market_breadth': percentual_acima_media.dropna(),
@@ -904,11 +912,11 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
         'breadth_red': cat_red,
         'breadth_yellow': cat_yellow,
         'breadth_green': cat_green,
-        # Novas Colunas
         'new_highs': new_highs,
         'new_lows': new_lows,
         'net_highs_lows': net_highs_lows,
-        'mcclellan': mcclellan_osc
+        'mcclellan': mcclellan_osc,
+        'macd_breadth': percentual_macd_bullish # <--- Nova Coluna
     })
     
     return df_amplitude.dropna()
@@ -1939,7 +1947,47 @@ elif pagina_selecionada == "Amplitude":
         st.plotly_chart(fig_mcclellan, use_container_width=True)
 
         st.markdown("---")
+        # --- SEÇÃO NOVA: MACD BREADTH ---
+        st.subheader("Amplitude MACD (% Compra)")
+        st.info("Percentual de ações da bolsa onde a linha MACD está acima da linha de sinal (Histograma > 0). Níveis muito baixos podem indicar sobrevenda extrema (oportunidade), e níveis muito altos indicam exaustão da tendência.")
 
+        macd_series = df_indicadores['macd_breadth']
+        
+        # Filtro de data para os gráficos (últimos 5 anos se disponível)
+        if not macd_series.empty:
+             cutoff_macd = macd_series.index.max() - pd.DateOffset(years=5)
+             macd_series = macd_series[macd_series.index >= cutoff_macd]
+
+        valor_atual_macd = macd_series.iloc[-1]
+        media_hist_macd = macd_series.mean()
+        
+        # Prepara análise de retornos (Heatmap)
+        df_analise_macd = df_analise_base.join(macd_series).dropna()
+        resultados_macd = analisar_retornos_por_faixa(df_analise_macd, 'macd_breadth', 10, 0, 100, '%')
+        
+        passo_macd = 10
+        faixa_atual_valor_macd = int(valor_atual_macd // passo_macd) * passo_macd
+        faixa_atual_macd = f'{faixa_atual_valor_macd} a {faixa_atual_valor_macd + passo_macd}%'
+
+        col1, col2 = st.columns([1,2])
+        with col1:
+            st.metric("Valor Atual (% Bullish)", f"{valor_atual_macd:.2f}%")
+            st.metric("Média Histórica", f"{media_hist_macd:.2f}%")
+            z_score_macd = (valor_atual_macd - media_hist_macd) / macd_series.std()
+            st.metric("Z-Score", f"{z_score_macd:.2f}")
+            percentil_macd = stats.percentileofscore(macd_series, valor_atual_macd)
+            st.metric("Percentil Histórico", f"{percentil_macd:.2f}%")
+        
+        with col2:
+            st.plotly_chart(gerar_grafico_historico_amplitude(macd_series, "Histórico MACD Breadth (% Papéis com MACD > Sinal)", valor_atual_macd, media_hist_macd), use_container_width=True)
+            
+        col1, col2 = st.columns(2)
+        with col1:
+            st.plotly_chart(gerar_histograma_amplitude(macd_series, "Distribuição Histórica MACD Breadth", valor_atual_macd, media_hist_macd), use_container_width=True)
+        with col2:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_macd['Retorno Médio'], faixa_atual_macd, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs MACD Breadth"), use_container_width=True)
+
+        st.markdown("---")
         # --- SEÇÃO 6: CBOE Brazil ETF Volatility Index (VXEWZCLS) ---
         st.subheader("Volatilidade Implícita Brasil (CBOE Brazil ETF Volatility Index - VXEWZ)")
         st.info(
@@ -2086,6 +2134,7 @@ elif pagina_selecionada == "Radar de Insiders":
                 st.warning("Por favor, digite um ticker.")
         
         # --- (FIM DA NOVA SEÇÃO) ---
+
 
 
 
