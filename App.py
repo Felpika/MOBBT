@@ -919,8 +919,11 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
 
 def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
     """
-    Gera o gráfico de amplitude de área com SOBREPOSIÇÃO (MM50/200).
+    Gera o gráfico de amplitude de área com SOBREPOSIÇÃO (MM50/200) e SELETOR DE TEMPO.
     """
+    if df_amplitude_plot.empty:
+        return go.Figure().update_layout(title_text="Sem dados para gerar o gráfico.", template='brokeberg')
+
     fig = go.Figure()
 
     # --- Gráfico de Área com Sobreposição ---
@@ -929,9 +932,9 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
         x=df_amplitude_plot.index, 
         y=df_amplitude_plot['breadth_green'], 
         name='Acima MM50 e MM200', 
-        line=dict(color='#4CAF50'),
-        fillcolor='rgba(76, 175, 80, 0.4)', # Verde com 40% opacidade
-        fill='tozeroy', # <-- ADICIONADO AQUI: Preenche a área até o eixo Y=0
+        line=dict(color='#4CAF50', width=1.5),
+        fillcolor='rgba(76, 175, 80, 0.4)', 
+        fill='tozeroy', 
         mode='lines'
     ))
     
@@ -939,9 +942,9 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
         x=df_amplitude_plot.index, 
         y=df_amplitude_plot['breadth_yellow'], 
         name='Abaixo MM50, Acima MM200', 
-        line=dict(color='#FFC107'),
-        fillcolor='rgba(255, 193, 7, 0.4)', # Amarelo/Laranja com 40% opacidade
-        fill='tozeroy', # <-- ADICIONADO AQUI
+        line=dict(color='#FFC107', width=1.5),
+        fillcolor='rgba(255, 193, 7, 0.4)', 
+        fill='tozeroy', 
         mode='lines'
     ))
     
@@ -949,15 +952,15 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
         x=df_amplitude_plot.index, 
         y=df_amplitude_plot['breadth_red'], 
         name='Abaixo MM50 e MM200', 
-        line=dict(color='#F44336'),
-        fillcolor='rgba(244, 67, 54, 0.4)', # Vermelho com 40% opacidade
-        fill='tozeroy', # <-- ADICIONADO AQUI
+        line=dict(color='#F44336', width=1.5),
+        fillcolor='rgba(244, 67, 54, 0.4)', 
+        fill='tozeroy', 
         mode='lines'
     ))
 
-    # Atualiza o layout para um gráfico único
+    # Atualiza o layout
     fig.update_layout(
-        title_text='Amplitude de Mercado (MM50/200) - Sobreposto',
+        title_text='Visão Geral: Amplitude de Mercado (MM50/200)',
         title_x=0,
         template='brokeberg',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -965,12 +968,30 @@ def gerar_grafico_amplitude_mm_stacked(df_amplitude_plot):
         xaxis_title="Data"
     )
     
-    # Define o range do eixo Y das barras para 0-100%
+    # Define o range do eixo Y para 0-100%
     fig.update_yaxes(range=[0, 100])
     
-    # Sincroniza o zoom inicial
+    # --- ADICIONADO: Seletor de Range de Tempo ---
+    fig.update_xaxes(
+        rangeselector=dict(
+            buttons=list([
+                dict(count=6, label="6M", step="month", stepmode="backward"),
+                dict(count=1, label="1A", step="year", stepmode="backward"),
+                dict(count=2, label="2A", step="year", stepmode="backward"),
+                dict(count=5, label="5A", step="year", stepmode="backward"),
+                dict(step="all", label="Tudo")
+            ]),
+            bgcolor="#333952",
+            font=dict(color="white")
+        ),
+        type="date"
+    )
+    
+    # Zoom inicial padrão: últimos 2 anos (para não ficar muito poluído)
     if not df_amplitude_plot.empty:
-        fig.update_xaxes(range=[df_amplitude_plot.index.min(), df_amplitude_plot.index.max()])
+        end_date = df_amplitude_plot.index.max()
+        start_date = end_date - pd.DateOffset(years=2)
+        fig.update_xaxes(range=[start_date, end_date])
 
     return fig
 def gerar_grafico_net_highs_lows(df_amplitude):
@@ -1923,67 +1944,105 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_heatmap_amplitude(resultados_net_ifr['Retorno Médio'], faixa_atual_net_ifr, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Net IFR"), use_container_width=True)
 # ... (código anterior da seção Net IFR) ...
         
-        # --- SEÇÃO 4: NOVAS MÁXIMAS VS MÍNIMAS (NOVO) ---
+        # --- SEÇÃO 4: NOVAS MÁXIMAS VS MÍNIMAS (ATUALIZADO) ---
         st.subheader("Novas Máximas vs. Novas Mínimas (52 Semanas)")
-        st.info("Este indicador mostra o saldo líquido de ações atingindo novas máximas de 52 semanas menos aquelas atingindo novas mínimas. Valores positivos indicam força ampla do mercado.")
-        
-        # Gera e exibe o gráfico
-        fig_nh_nl = gerar_grafico_net_highs_lows(df_indicadores)
-        st.plotly_chart(fig_nh_nl, use_container_width=True)
-        
-        st.markdown("---")
+        st.info("Saldo líquido de ações atingindo novas máximas de 52 semanas menos novas mínimas. Valores positivos indicam força ampla.")
 
-        # --- SEÇÃO 5: OSCILADOR MCCLELLAN (NOVO) ---
-        st.subheader("Oscilador McClellan")
-        st.info("Indicador de momentum de amplitude baseado no saldo de avanços e declínios. Cruzamentos acima de zero indicam entrada de fluxo comprador generalizado; abaixo de zero, fluxo vendedor. Divergências com o preço são sinais fortes de reversão.")
+        # Obtém a série de dados
+        nh_nl_series = df_indicadores['net_highs_lows']
         
-        # Gera e exibe o gráfico
-        fig_mcclellan = gerar_grafico_mcclellan(df_indicadores)
-        st.plotly_chart(fig_mcclellan, use_container_width=True)
+        # Filtra para os últimos 5 anos para as estatísticas não ficarem muito distorcidas por dados antigos
+        if not nh_nl_series.empty:
+             cutoff_nh = nh_nl_series.index.max() - pd.DateOffset(years=5)
+             nh_nl_series_recent = nh_nl_series[nh_nl_series.index >= cutoff_nh]
+        else:
+             nh_nl_series_recent = nh_nl_series
 
-        st.markdown("---")
-        # --- SEÇÃO NOVA: MACD BREADTH ---
-        st.subheader("Amplitude MACD (% Compra)")
-        st.info("Percentual de ações da bolsa onde a linha MACD está acima da linha de sinal (Histograma > 0). Níveis muito baixos podem indicar sobrevenda extrema (oportunidade), e níveis muito altos indicam exaustão da tendência.")
-
-        macd_series = df_indicadores['macd_breadth']
-        
-        # Filtro de data para os gráficos (últimos 5 anos se disponível)
-        if not macd_series.empty:
-             cutoff_macd = macd_series.index.max() - pd.DateOffset(years=5)
-             macd_series = macd_series[macd_series.index >= cutoff_macd]
-
-        valor_atual_macd = macd_series.iloc[-1]
-        media_hist_macd = macd_series.mean()
+        # Cálculos Estatísticos
+        valor_atual_nh = nh_nl_series.iloc[-1]
+        media_hist_nh = nh_nl_series_recent.mean()
         
         # Prepara análise de retornos (Heatmap)
-        df_analise_macd = df_analise_base.join(macd_series).dropna()
-        resultados_macd = analisar_retornos_por_faixa(df_analise_macd, 'macd_breadth', 10, 0, 100, '%')
+        # Definimos faixas. Como é um número absoluto (contagem), o range depende do n° de papéis.
+        # Vamos assumir um range amplo de -200 a +200 com passo de 20 para cobrir a maioria dos cenários da CVM.
+        df_analise_nh = df_analise_base.join(nh_nl_series).dropna()
+        resultados_nh = analisar_retornos_por_faixa(df_analise_nh, 'net_highs_lows', 20, -200, 200, '')
         
-        passo_macd = 10
-        faixa_atual_valor_macd = int(valor_atual_macd // passo_macd) * passo_macd
-        faixa_atual_macd = f'{faixa_atual_valor_macd} a {faixa_atual_valor_macd + passo_macd}%'
+        passo_nh = 20
+        # Lógica para encontrar o rótulo da faixa correta (arredondando para o múltiplo de 20 mais próximo abaixo)
+        faixa_atual_valor_nh = int(np.floor(valor_atual_nh / passo_nh)) * passo_nh
+        faixa_atual_nh = f'{faixa_atual_valor_nh} a {faixa_atual_valor_nh + passo_nh}'
 
+        # Exibição: Métricas e Gráfico Principal
         col1, col2 = st.columns([1,2])
         with col1:
-            st.metric("Valor Atual (% Bullish)", f"{valor_atual_macd:.2f}%")
-            st.metric("Média Histórica", f"{media_hist_macd:.2f}%")
-            z_score_macd = (valor_atual_macd - media_hist_macd) / macd_series.std()
-            st.metric("Z-Score", f"{z_score_macd:.2f}")
-            percentil_macd = stats.percentileofscore(macd_series, valor_atual_macd)
-            st.metric("Percentil Histórico", f"{percentil_macd:.2f}%")
+            st.metric("Saldo Líquido Atual", f"{valor_atual_nh:.0f} papéis")
+            st.metric("Média Histórica (5A)", f"{media_hist_nh:.0f} papéis")
+            z_score_nh = (valor_atual_nh - media_hist_nh) / nh_nl_series_recent.std()
+            st.metric("Z-Score", f"{z_score_nh:.2f}")
+            percentil_nh = stats.percentileofscore(nh_nl_series_recent, valor_atual_nh)
+            st.metric("Percentil Histórico", f"{percentil_nh:.2f}%")
         
         with col2:
-            st.plotly_chart(gerar_grafico_historico_amplitude(macd_series, "Histórico MACD Breadth (% Papéis com MACD > Sinal)", valor_atual_macd, media_hist_macd), use_container_width=True)
-            
-        col1, col2 = st.columns(2)
+            # Mantemos o gráfico de área original que você já tinha
+            fig_nh_nl = gerar_grafico_net_highs_lows(df_indicadores)
+            st.plotly_chart(fig_nh_nl, use_container_width=True)
+
+        # Exibição: Histograma e Heatmap
+        col_hist, col_heat = st.columns(2)
+        with col_hist:
+            st.plotly_chart(gerar_histograma_amplitude(nh_nl_series_recent, "Distribuição Histórica (Saldo Líquido)", valor_atual_nh, media_hist_nh, nbins=100), use_container_width=True)
+        with col_heat:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_nh['Retorno Médio'], faixa_atual_nh, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Net Highs/Lows"), use_container_width=True)
+        
+        st.markdown("---")
+        # --- SEÇÃO 6: OSCILADOR MCCLELLAN (ATUALIZADO) ---
+        st.subheader("Oscilador McClellan")
+        st.info("Indicador de momentum de amplitude. Cruzamentos acima de zero indicam fluxo comprador; abaixo, vendedor.")
+
+        mcclellan_series = df_indicadores['mcclellan']
+
+        if not mcclellan_series.empty:
+             cutoff_mcc = mcclellan_series.index.max() - pd.DateOffset(years=5)
+             mcclellan_series_recent = mcclellan_series[mcclellan_series.index >= cutoff_mcc]
+        else:
+             mcclellan_series_recent = mcclellan_series
+
+        # Cálculos
+        valor_atual_mcc = mcclellan_series.iloc[-1]
+        media_hist_mcc = mcclellan_series_recent.mean()
+
+        # Heatmap
+        # O oscilador geralmente flutua entre -100 e +100 (depende do volume de papéis, vamos por margem de segurança -150 a 150)
+        df_analise_mcc = df_analise_base.join(mcclellan_series).dropna()
+        resultados_mcc = analisar_retornos_por_faixa(df_analise_mcc, 'mcclellan', 15, -150, 150, '')
+        
+        passo_mcc = 15
+        faixa_atual_valor_mcc = int(np.floor(valor_atual_mcc / passo_mcc)) * passo_mcc
+        faixa_atual_mcc = f'{faixa_atual_valor_mcc} a {faixa_atual_valor_mcc + passo_mcc}'
+
+        # Layout
+        col1, col2 = st.columns([1,2])
         with col1:
-            st.plotly_chart(gerar_histograma_amplitude(macd_series, "Distribuição Histórica MACD Breadth", valor_atual_macd, media_hist_macd), use_container_width=True)
+            st.metric("Valor Atual", f"{valor_atual_mcc:.2f}")
+            st.metric("Média Histórica (5A)", f"{media_hist_mcc:.2f}")
+            z_score_mcc = (valor_atual_mcc - media_hist_mcc) / mcclellan_series_recent.std()
+            st.metric("Z-Score", f"{z_score_mcc:.2f}")
+            percentil_mcc = stats.percentileofscore(mcclellan_series_recent, valor_atual_mcc)
+            st.metric("Percentil Histórico", f"{percentil_mcc:.2f}%")
+        
         with col2:
-            st.plotly_chart(gerar_heatmap_amplitude(resultados_macd['Retorno Médio'], faixa_atual_macd, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs MACD Breadth"), use_container_width=True)
+            fig_mcclellan = gerar_grafico_mcclellan(df_indicadores)
+            st.plotly_chart(fig_mcclellan, use_container_width=True)
+
+        col_hist, col_heat = st.columns(2)
+        with col_hist:
+            st.plotly_chart(gerar_histograma_amplitude(mcclellan_series_recent, "Distribuição Histórica (McClellan)", valor_atual_mcc, media_hist_mcc, nbins=80), use_container_width=True)
+        with col_heat:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_mcc['Retorno Médio'], faixa_atual_mcc, f"Heatmap de Retorno ({ATIVO_ANALISE}) vs McClellan"), use_container_width=True)
 
         st.markdown("---")
-        # --- SEÇÃO 6: CBOE Brazil ETF Volatility Index (VXEWZCLS) ---
+        # --- SEÇÃO 7: CBOE Brazil ETF Volatility Index (VXEWZCLS) ---
         st.subheader("Volatilidade Implícita Brasil (CBOE Brazil ETF Volatility Index - VXEWZ)")
         st.info(
             "O índice **VXEWZ** mede a volatilidade implícita das opções do ETF EWZ (Brasil) negociado nos EUA, "
@@ -2129,6 +2188,7 @@ elif pagina_selecionada == "Radar de Insiders":
                 st.warning("Por favor, digite um ticker.")
         
         # --- (FIM DA NOVA SEÇÃO) ---
+
 
 
 
