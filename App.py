@@ -1291,25 +1291,76 @@ def buscar_market_caps_otimizado(df_lookup, force_refresh=False):
 
 @st.cache_data
 def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=False):
-    """Executa a análise para os meses selecionados."""
+    """
+    Análise de insiders com correção manual de Tickers e inclusão de Recompras.
+    """
     if not meses_selecionados:
         return pd.DataFrame()
 
+    # --- 1. Filtro de Movimentações (Inclui Recompras) ---
     df_periodo = _df_mov[_df_mov['Ano_Mes'].isin(meses_selecionados)].copy()
     if df_periodo.empty:
         st.warning("Não foram encontrados dados para os meses selecionados.")
         return pd.DataFrame()
 
-    df_periodo['Volume_Net'] = np.where(df_periodo['Tipo_Movimentacao'] == 'Compra à vista', df_periodo['Volume'], -df_periodo['Volume'])
+    tipos_compra = ['Compra à vista', 'Recompra', 'Recompra de ações']
+    tipos_venda = ['Venda à vista']
+    
+    df_periodo = df_periodo[df_periodo['Tipo_Movimentacao'].isin(tipos_compra + tipos_venda)].copy()
+
+    df_periodo['Volume_Net'] = np.where(
+        df_periodo['Tipo_Movimentacao'].isin(tipos_compra), 
+        df_periodo['Volume'], 
+        -df_periodo['Volume']
+    )
+
+    # Agrupa por CNPJ e Nome
     df_net_total = df_periodo.groupby(['CNPJ_Companhia', 'Nome_Companhia'])['Volume_Net'].sum().reset_index()
 
-    cnpjs_unicos = df_net_total[['CNPJ_Companhia']].drop_duplicates()
-    df_tickers = _df_cad[['CNPJ_Companhia', 'Codigo_Negociacao']].dropna().drop_duplicates(subset=['CNPJ_Companhia'])
-    df_lookup = pd.merge(cnpjs_unicos, df_tickers, on='CNPJ_Companhia', how='left')
-    
-    df_market_cap_lookup = buscar_market_caps_otimizado(df_lookup, force_refresh=force_refresh)
+    # --- 2. Tratamento de CNPJ e Tickers ---
+    def limpar_cnpj(series):
+        return series.astype(str).str.replace(r'[./-]', '', regex=True).str.strip()
 
-    df_final = pd.merge(df_net_total, df_market_cap_lookup, on='CNPJ_Companhia', how='left')
+    df_net_total['CNPJ_Limpo'] = limpar_cnpj(df_net_total['CNPJ_Companhia'])
+    
+    # Prepara o dataframe de cadastro (FCA)
+    df_cad_valido = _df_cad.copy()
+    if 'Valor_Mobiliario' in df_cad_valido.columns:
+        # Tenta filtrar apenas Ações para evitar pegar tickers de outros ativos
+        filtro = df_cad_valido['Valor_Mobiliario'].astype(str).str.contains('Aç|Ac', case=False, na=False)
+        if filtro.any():
+            df_cad_valido = df_cad_valido[filtro]
+            
+    df_cad_valido['CNPJ_Limpo'] = limpar_cnpj(df_cad_valido['CNPJ_Companhia'])
+    
+    # Pega o primeiro ticker encontrado para cada CNPJ
+    df_tickers = df_cad_valido[['CNPJ_Limpo', 'Codigo_Negociacao']].dropna().drop_duplicates(subset=['CNPJ_Limpo'])
+
+    # --- 3. Merge e CORREÇÃO MANUAL ---
+    df_merged = pd.merge(df_net_total, df_tickers, on='CNPJ_Limpo', how='left')
+
+    # >>> DICIONÁRIO DE CORREÇÃO <<<
+    # Adicione aqui os CNPJs (apenas números) e Tickers das empresas que estão vindo vazias
+    correcoes_manuais = {
+        '05878397000132': 'ALOS3',  # Exemplo: Vale
+        '59717553000102': 'MLAS3',  # Exemplo: Magalu
+        # Adicione outros conforme você identificar na tabela
+    }
+    
+    # Aplica a correção: Se Ticker for nulo, tenta buscar no dicionário pelo CNPJ
+    df_merged['Codigo_Negociacao'] = df_merged['Codigo_Negociacao'].fillna(df_merged['CNPJ_Limpo'].map(correcoes_manuais))
+    
+    # Se ainda estiver vazio, preenche com um placeholder para não quebrar a visualização
+    df_merged['Codigo_Negociacao'] = df_merged['Codigo_Negociacao'].fillna("SEM_TICKER")
+
+    # --- 4. Busca Market Cap ---
+    # Só busca Market Cap para quem tem ticker válido (diferente de SEM_TICKER)
+    df_lookup_mcap = df_merged[df_merged['Codigo_Negociacao'] != "SEM_TICKER"][['CNPJ_Companhia', 'Codigo_Negociacao']].drop_duplicates()
+    
+    df_market_cap_lookup = buscar_market_caps_otimizado(df_lookup_mcap, force_refresh=force_refresh)
+
+    # Merge final
+    df_final = pd.merge(df_merged, df_market_cap_lookup[['Codigo_Negociacao', 'MarketCap']], on='Codigo_Negociacao', how='left')
     
     market_cap_para_calculo = df_final['MarketCap'].fillna(0)
     df_final['Volume_vs_MarketCap_Pct'] = np.where(
@@ -1326,7 +1377,7 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
         'Volume_vs_MarketCap_Pct': '% do Market Cap'
     })
 
-    df_tabela = df_tabela.dropna(subset=['Ticker'])
+    # IMPORTANTE: Não removemos mais quem não tem ticker, apenas ordenamos
     return df_tabela.sort_values(by='Volume Líquido (R$)', ascending=False).reset_index(drop=True)
 # --- INÍCIO DAS NOVAS FUNÇÕES (Adicionar no Bloco 8) ---
 
@@ -2229,6 +2280,7 @@ elif pagina_selecionada == "Radar de Insiders":
                 st.warning("Por favor, digite um ticker.")
         
         # --- (FIM DA NOVA SEÇÃO) ---
+
 
 
 
