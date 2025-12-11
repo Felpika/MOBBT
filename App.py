@@ -1574,10 +1574,8 @@ def gerar_grafico_historico_insider(df_historico, ticker):
 
 # --- CONSTRUÇÃO DA INTERFACE (LAYOUT FINAL COM OPTION_MENU) ---
 
-# --- Lógica para carregar os dados principais uma vez ---
-df_tesouro = obter_dados_tesouro()
-
 # --- Configuração do Sidebar com o novo menu ---
+
 with st.sidebar:
     st.title("Brokeberg Terminal")
     st.caption(f"Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
@@ -1585,6 +1583,7 @@ with st.sidebar:
     pagina_selecionada = option_menu(
         menu_title="Monitoramento",
         options=[
+            "Início",  # <--- NOVA PÁGINA
             "Juros Brasil",
             "Crédito Privado",
             "Amplitude", 
@@ -1594,8 +1593,8 @@ with st.sidebar:
             "Ações BR",
             "Radar de Insiders",
         ],
-        # Ícones da https://icons.getbootstrap.com/
         icons=[
+            "house",  # <--- ÍCONE DA NOVA PÁGINA
             "graph-up-arrow",
             "wallet2",
             "water", 
@@ -1606,25 +1605,49 @@ with st.sidebar:
             "person-check-fill",
         ],
         menu_icon="speedometer2",
-        default_index=0,
+        default_index=0, # O índice 0 agora é "Início", que é leve
         styles={
             "container": {"padding": "5px !important", "background-color": "transparent"},
             "icon": {"color": "#636EFA", "font-size": "20px"},
             "nav-link": {"font-size": "16px", "text-align": "left", "margin": "0px", "--hover-color": "#262830"},
-            "nav-link-selected": {"background-color": "#333952"}, # Verde para destacar
+            "nav-link-selected": {"background-color": "#333952"},
         }
     )
 
-# --- Roteamento de Páginas (com nomes atualizados) ---
+# --- Roteamento de Páginas ---
 
-if pagina_selecionada == "Juros Brasil":
+if pagina_selecionada == "Início":
+    st.header("Bem-vindo ao Brokeberg Terminal")
+    st.markdown("---")
+    st.info("Selecione uma ferramenta no menu lateral para começar a análise.")
+    
+    # Você pode colocar um resumo ou métricas rápidas aqui que não exijam carregamento pesado
+    st.markdown("""
+    ### Ferramentas Disponíveis:
+    * **Juros Brasil:** Curvas de juros reais, nominais e spreads.
+    * **Crédito Privado:** Spreads de debêntures (IDEX JGP).
+    * **Amplitude:** Análise de Market Breadth (MM200, IFR, Highs/Lows).
+    * **Radar de Insiders:** Monitoramento de compras e vendas da CVM.
+    """)
+    
+elif pagina_selecionada == "Juros Brasil":
     st.header("Dashboard de Juros do Brasil")
-    st.info("Esta página consolida a análise de títulos públicos brasileiros: NTN-Bs (juros reais), títulos prefixados (juros nominais), e indicadores derivados.")
+    st.info("Esta página consolida a análise de títulos públicos brasileiros.")
     st.markdown("---")
 
+    # --- AQUI ESTÁ A MUDANÇA CRUCIAL ---
+    # Só carrega os dados SE o usuário estiver nesta página
+    df_tesouro = obter_dados_tesouro() 
+    # -----------------------------------
+
     if not df_tesouro.empty:
-        # --- SEÇÃO 1: CURVAS DE JUROS REAL E INFLACAO IMPLICITA ---
+        # ... (O RESTANTE DO CÓDIGO DESTA PÁGINA CONTINUA IGUAL ABAIXO) ...
+        # Copie o conteúdo original que estava dentro de "if not df_tesouro.empty:"
+        # ...
         st.subheader("Curvas de Juros Real e Inflação Implícita")
+        # (etc...)
+    else:
+        st.warning("Não foi possível carregar os dados do Tesouro Direto para exibir esta página.")
         
         col_curva_real, col_breakeven = st.columns(2)
         
@@ -2369,6 +2392,7 @@ elif pagina_selecionada == "Radar de Insiders":
                         st.info(f"Não foram encontradas operações detalhadas.")
         
         # --- (FIM DA NOVA SEÇÃO) ---
+
 
 
 
