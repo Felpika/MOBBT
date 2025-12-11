@@ -1255,109 +1255,78 @@ def baixar_e_extrair_zip_cvm(url, nome_csv_interno):
 
 def obter_market_cap_individual(ticker):
     """
-    Busca o valor de mercado usando Session para evitar bloqueios.
+    Busca simples e direta no Yahoo Finance.
+    Prioriza 'fast_info' e usa 'info' como backup.
     """
-    if pd.isna(ticker) or not isinstance(ticker, str) or ticker == "SEM_TICKER":
+    if pd.isna(ticker) or ticker == "SEM_TICKER":
         return ticker, np.nan
     
-    ticker_clean = ticker.strip().upper()
+    # Garante o sufixo .SA
+    ticker_clean = str(ticker).strip().upper()
     if not ticker_clean.endswith(".SA"):
         symbol = f"{ticker_clean}.SA"
     else:
         symbol = ticker_clean
-
-    try:
-        # Cria uma sessão com User-Agent para parecer um navegador real
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
-
-        stock = yf.Ticker(symbol, session=session)
         
-        # Tenta pegar pelo fast_info (mais confiável recentemente)
+    try:
+        stock = yf.Ticker(symbol)
+        
+        # 1. Tenta pegar pelo método rápido (sem scraping pesado)
         mcap = None
         try:
+            # Versões recentes do yfinance usam este atributo
             mcap = stock.fast_info.market_cap
         except:
             pass
             
-        # Fallback para info normal se fast_info falhar
-        if mcap is None or pd.isna(mcap):
+        # 2. Se falhar ou vier zerado, tenta o método tradicional (mais lento)
+        if pd.isna(mcap) or mcap is None or mcap == 0:
             try:
                 info = stock.info
                 mcap = info.get('marketCap')
             except:
                 pass
 
-        return ticker, mcap if mcap else np.nan
+        return ticker, mcap
     except Exception:
         return ticker, np.nan
 
-@st.cache_data(ttl=3600*4) # Cache de memória para navegação rápida
+@st.cache_data(ttl=3600*12) # Cache de 12 horas na memória para não travar navegação
 def buscar_market_caps_otimizado(df_lookup, force_refresh=False):
     """
-    Gerencia o cache de Market Caps em CSV.
-    - Se o ticker já estiver no CSV, usa o valor salvo.
-    - Se o ticker for novo (ex: ALOS3 adicionado manualmente), baixa e salva.
-    - Se force_refresh=True, apaga o CSV e baixa tudo de novo.
+    Busca Market Caps em paralelo, sem salvar arquivos CSV.
     """
-    cache_file = NOME_ARQUIVO_CACHE
+    # Lista única de tickers a buscar
+    tickers = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
+    tickers = [t for t in tickers if t != "SEM_TICKER"]
     
-    # 1. Prepara a lista de tickers necessários (filtrando vazios e SEM_TICKER)
-    tickers_necessarios = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
-    tickers_necessarios = [t for t in tickers_necessarios if t != "SEM_TICKER" and isinstance(t, str)]
+    resultados = {}
     
-    market_caps_dict = {}
-
-    # 2. Carrega Cache Existente (se não for refresh forçado)
-    if not force_refresh and os.path.exists(cache_file):
-        try:
-            df_cache = pd.read_csv(cache_file)
-            # Converte para dicionário
-            market_caps_dict = pd.Series(
-                df_cache['MarketCap'].values, 
-                index=df_cache['Codigo_Negociacao']
-            ).to_dict()
-        except Exception:
-            market_caps_dict = {} # Começa do zero se o arquivo estiver corrompido
-
-    # 3. Identifica quais tickers faltam no cache (Lógica Incremental)
-    tickers_faltantes = [t for t in tickers_necessarios if t not in market_caps_dict]
-
-    # 4. Baixa APENAS os faltantes (ou todos se for refresh)
-    if tickers_faltantes:
-        # Aviso discreto na tela
-        msg_place = st.empty()
-        if len(tickers_faltantes) > 5:
-            msg_place.info(f"Atualizando Market Cap de {len(tickers_faltantes)} ativos novos...")
+    if tickers:
+        # Barra de progresso para você ver que está funcionando
+        progresso = st.progress(0, text="Baixando valores de mercado...")
+        total = len(tickers)
         
-        with ThreadPoolExecutor(max_workers=3) as executor: # Reduzi workers para evitar bloqueio
+        # Usa Threads para baixar vários ao mesmo tempo
+        with ThreadPoolExecutor(max_workers=10) as executor:
             future_to_ticker = {
-                executor.submit(obter_market_cap_individual, ticker): ticker 
-                for ticker in tickers_faltantes
+                executor.submit(obter_market_cap_individual, t): t 
+                for t in tickers
             }
             
-            for future in as_completed(future_to_ticker):
+            for i, future in enumerate(as_completed(future_to_ticker)):
                 ticker, cap = future.result()
-                if pd.notna(cap):
-                    market_caps_dict[ticker] = cap
-                else:
-                    # Se falhar, salva NaN para não ficar tentando baixar infinitamente a cada reload,
-                    # a menos que force o refresh.
-                    market_caps_dict[ticker] = np.nan
-        
-        msg_place.empty()
-        
-        # 5. Salva o Cache Atualizado no Disco
-        # Converte o dict atualizado para DF e salva
-        df_atualizado = pd.DataFrame(list(market_caps_dict.items()), columns=['Codigo_Negociacao', 'MarketCap'])
-        df_atualizado.to_csv(cache_file, index=False)
-
-    # 6. Retorna o DataFrame final para o Merge
-    df_final_caps = pd.DataFrame(list(market_caps_dict.items()), columns=['Codigo_Negociacao', 'MarketCap'])
+                resultados[ticker] = cap
+                # Atualiza barra
+                progresso.progress((i + 1) / total, text=f"Baixando: {ticker}")
+                
+        progresso.empty() # Limpa a barra quando acabar
     
-    return pd.merge(df_lookup, df_final_caps, on="Codigo_Negociacao", how="left")
+    # Cria o DataFrame com os resultados
+    df_caps = pd.DataFrame(list(resultados.items()), columns=['Codigo_Negociacao', 'MarketCap'])
+    
+    # Junta com a tabela original
+    return pd.merge(df_lookup, df_caps, on='Codigo_Negociacao', how='left')
 
 @st.cache_data
 def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=False):
@@ -2424,6 +2393,7 @@ elif pagina_selecionada == "Radar de Insiders":
                     else:
                         st.info("Sem detalhes.")
                         
+
 
 
 
