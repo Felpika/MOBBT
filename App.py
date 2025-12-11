@@ -1972,73 +1972,16 @@ elif pagina_selecionada == "Juros Brasil":
             st.plotly_chart(fig_curva_real, use_container_width=True)
         
         with col_breakeven:
-            st.markdown("#### Histórico de Taxas Prefixadas")
-            st.info("Evolução das taxas dos títulos prefixados (LTN/NTN-F) ao longo do tempo. Selecione um período no gráfico para zoom.")
+            st.markdown("#### Histórico de Inflação Implícita (Breakeven)")
+            st.info("Evolução histórica do spread entre Prefixados e IPCA+ (Breakeven) para prazos de ~5 e ~10 anos. Indica a expectativa média de inflação do mercado.")
             
-            # --- NOVA FUNÇÃO INLINE (Ou poderia ser definida antes) ---
-            # Para manter organizado, vou definir a lógica aqui e gerar o gráfico
+            df_breakeven = calcular_breakeven_historico(df_tesouro)
             
-            df_pre_hist = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
-            
-            if not df_pre_hist.empty:
-                # Seleciona apenas os vencimentos que ainda existem ou são relevantes (ex: os 5 com mais liquidez recente/vencimento futuro)
-                # Vamos pegar contratos com vencimento > hoje
-                df_pre_hist = df_pre_hist[df_pre_hist['Data Vencimento'] > pd.Timestamp.now()]
-                
-                # Para não poluir, pegamos apenas alguns vencimentos representativos (ex: Curto 2026, Médio 2029, Longo 2031+)
-                # Ou simples: agrupa por vencimento e pega os TOP N
-                vencimentos_unicos = sorted(df_pre_hist['Data Vencimento'].unique())
-                
-                # Vamos plotar todos, mas com legendas claras
-                fig_pre = go.Figure()
-                
-                colors = px.colors.qualitative.Plotly
-                
-                for i, venc in enumerate(vencimentos_unicos):
-                    df_venc = df_pre_hist[df_pre_hist['Data Vencimento'] == venc]
-                    nome_legenda = f"Prefixado {pd.to_datetime(venc).year}"
-                    
-                    fig_pre.add_trace(go.Scatter(
-                        x=df_venc['Data Base'],
-                        y=df_venc['Taxa Compra Manha'],
-                        name=nome_legenda,
-                        mode='lines',
-                        connectgaps=True,
-                        line=dict(width=2)
-                    ))
-                
-                fig_pre.update_layout(
-                    title='Histórico de Taxas - Tesouro Prefixado',
-                    template='brokeberg',
-                    title_x=0,
-                    xaxis_title="Data",
-                    yaxis_title="Taxa (% a.a.)",
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                
-                # --- BOTÕES DE FILTRO DE TEMPO ---
-                fig_pre.update_xaxes(
-                    rangeselector=dict(
-                        buttons=list([
-                            dict(count=1, label="1M", step="month", stepmode="backward"),
-                            dict(count=6, label="6M", step="month", stepmode="backward"),
-                            dict(count=1, label="1Y", step="year", stepmode="backward"),
-                            dict(count=2, label="2Y", step="year", stepmode="backward"),
-                            dict(step="all", label="Tudo")
-                        ]),
-                        bgcolor="#333952",
-                        font=dict(color="white")
-                    )
-                )
-                
-                # Zoom inicial padrão: 1 Ano
-                end_date = df_pre_hist['Data Base'].max()
-                start_date = end_date - pd.DateOffset(years=1)
-                fig_pre.update_xaxes(range=[start_date, end_date])
-
-                st.plotly_chart(fig_pre, use_container_width=True)
+            if not df_breakeven.empty:
+                fig_breakeven = gerar_grafico_breakeven_historico(df_breakeven)
+                st.plotly_chart(fig_breakeven, use_container_width=True)
             else:
-                st.warning("Dados de títulos prefixados não disponíveis.")
+                st.warning("Não foi possível calcular o histórico de inflação implícita (dados insuficientes).")
 
 
         
