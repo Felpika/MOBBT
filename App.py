@@ -1985,28 +1985,27 @@ elif pagina_selecionada == "Juros Brasil":
                 # Vamos pegar contratos com vencimento > hoje
                 df_pre_hist = df_pre_hist[df_pre_hist['Data Vencimento'] > pd.Timestamp.now()]
                 
-                # Seleciona apenas o título mais próximo de 10 anos
-                target_date = pd.Timestamp.now() + pd.DateOffset(years=10)
+                # Para não poluir, pegamos apenas alguns vencimentos representativos (ex: Curto 2026, Médio 2029, Longo 2031+)
+                # Ou simples: agrupa por vencimento e pega os TOP N
                 vencimentos_unicos = sorted(df_pre_hist['Data Vencimento'].unique())
                 
-                # Encontra o vencimento mais próximo da data alvo (Hoje + 10 anos)
-                melhor_vencimento = min(vencimentos_unicos, key=lambda x: abs(x - target_date))
-                
-                # Filtra o DataFrame apenas para esse vencimento
-                df_venc = df_pre_hist[df_pre_hist['Data Vencimento'] == melhor_vencimento]
-                
+                # Vamos plotar todos, mas com legendas claras
                 fig_pre = go.Figure()
                 
-                nome_legenda = f"Prefixado {pd.to_datetime(melhor_vencimento).year} (~10 Anos)"
+                colors = px.colors.qualitative.Plotly
                 
-                fig_pre.add_trace(go.Scatter(
-                    x=df_venc['Data Base'],
-                    y=df_venc['Taxa Compra Manha'],
-                    name=nome_legenda,
-                    mode='lines',
-                    connectgaps=True,
-                    line=dict(width=2, color='#FFC107') # Amarelo/Dourado para destaque
-                ))
+                for i, venc in enumerate(vencimentos_unicos):
+                    df_venc = df_pre_hist[df_pre_hist['Data Vencimento'] == venc]
+                    nome_legenda = f"Prefixado {pd.to_datetime(venc).year}"
+                    
+                    fig_pre.add_trace(go.Scatter(
+                        x=df_venc['Data Base'],
+                        y=df_venc['Taxa Compra Manha'],
+                        name=nome_legenda,
+                        mode='lines',
+                        connectgaps=True,
+                        line=dict(width=2)
+                    ))
                 
                 fig_pre.update_layout(
                     title='Histórico de Taxas - Tesouro Prefixado',
