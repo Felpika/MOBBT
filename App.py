@@ -234,6 +234,162 @@ def calcular_inflacao_implicita(df):
     )
     return df_resultado
 
+
+def calcular_variacao_curva(df_tesouro, dias_atras=5):
+    """
+    Calcula a variação (diferença) das taxas dos contratos de DI (ou melhor, Títulos Prefixados)
+    entre a data mais recente e dias anteriores.
+    Retorna um DataFrame pivotado pronto para o Heatmap (Index=Data, Columns=Vencimento).
+    """
+    df_prefix = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
+    if df_prefix.empty: return pd.DataFrame()
+
+    datas_unicas = sorted(df_prefix['Data Base'].unique())
+    if len(datas_unicas) < 2: return pd.DataFrame()
+
+    # Pega as últimas N datas disponíveis
+    datas_recentes = datas_unicas[-dias_atras:]
+    df_recentes = df_prefix[df_prefix['Data Base'].isin(datas_recentes)].copy()
+
+    # Pivota: Linhas = Data Base, Colunas = Data Vencimento, Valores = Taxa
+    df_pivot = df_recentes.pivot(index='Data Base', columns='Data Vencimento', values='Taxa Compra Manha')
+    
+    # Filtra colunas (vencimentos) que tenham dados na data mais recente para evitar vazios
+    data_max = df_recentes['Data Base'].max()
+    valid_cols = df_pivot.loc[data_max].dropna().index
+    df_pivot = df_pivot[valid_cols]
+
+    # Calcula a diferença dia a dia (Diff)
+    # Como queremos ver a variação dia a dia, fazemos diff()
+    # Multiplicamos por 100 para ter em basis points (bps)
+    df_diff = df_pivot.diff() * 100
+    
+    # Ordena datas decrescente para o Heatmap (mais recente no topo)
+    return df_diff.sort_index(ascending=False)
+
+def gerar_heatmap_variacao_curva(df_diff):
+    """
+    Gera um heatmap de variação diária da curva de juros (Pre).
+    """
+    if df_diff.empty:
+        return go.Figure().update_layout(title_text="Sem dados suficientes para variação da curva.", template='brokeberg')
+
+    # Ajusta labels do eixo X (Anos de vencimento aproximado)
+    # Pegamos a data mais recente para calcular o "Prazo"
+    data_ref = df_diff.index.max()
+    x_labels = []
+    for col in df_diff.columns:
+        anos = (col - data_ref).days / 365.25
+        x_labels.append(f"{anos:.1f}y")
+
+    y_labels = df_diff.index.strftime('%d/%m')
+
+    fig = go.Figure(data=go.Heatmap(
+        z=df_diff.values,
+        x=x_labels,
+        y=y_labels,
+        colorscale='RdYlGn_r', # Red=Alta (ruim p/ PU), Green=Baixa (bom p/ PU). Invertido pois Alta de Juros = Ruim.
+        zmid=0,
+        text=df_diff.values,
+        texttemplate="%{text:+.1f}",
+        textfont={"size": 10},
+        hoverongaps=False
+    ))
+
+    fig.update_layout(
+        title='Variação Diária da Curva Prefixada (bps)',
+        template='brokeberg',
+        title_x=0,
+        xaxis_title="Vencimento (Prazo)",
+        yaxis_title="Data",
+    )
+    return fig
+
+@st.cache_data
+def calcular_breakeven_historico(df_tesouro):
+    """
+    Calcula o histórico do Breakeven de Inflação para prazos padronizados (ex: ~5 anos e ~10 anos).
+    Procura pares de NTN-F e NTN-B com vencimentos próximos em cada data base.
+    """
+    # Filtra tipos relevantes
+    df_pre = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
+    df_ipca = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro IPCA+'].copy() # Usando IPCA+ Principal para ser mais limpo (sem cupom)
+
+    if df_pre.empty or df_ipca.empty: return pd.DataFrame()
+
+    # Vamos iterar por datas base comuns
+    datas_comuns = sorted(list(set(df_pre['Data Base'].unique()) & set(df_ipca['Data Base'].unique())))
+    
+    resultados = []
+
+    # Definindo alvos aproximados em anos
+    alvos = [5, 10] 
+
+    for data in datas_comuns:
+        data_dt = pd.to_datetime(data)
+        df_pre_dia = df_pre[df_pre['Data Base'] == data]
+        df_ipca_dia = df_ipca[df_ipca['Data Base'] == data]
+
+        row = {'Data Base': data_dt}
+        
+        for alvo_anos in alvos:
+            target_date = data_dt + pd.DateOffset(years=alvo_anos)
+            
+            # Encontra vencimento pre mais proximo
+            venc_pre = min(df_pre_dia['Data Vencimento'], key=lambda x: abs(x - target_date))
+            # Encontra vencimento ipca mais proximo
+            venc_ipca = min(df_ipca_dia['Data Vencimento'], key=lambda x: abs(x - target_date))
+
+            # Verifica se são "casáveis" (diferença de vencimento não muito grande, ex: 1 ano)
+            if abs((venc_pre - venc_ipca).days) < 400:
+                taxa_pre = df_pre_dia[df_pre_dia['Data Vencimento'] == venc_pre]['Taxa Compra Manha'].iloc[0]
+                taxa_ipca = df_ipca_dia[df_ipca_dia['Data Vencimento'] == venc_ipca]['Taxa Compra Manha'].iloc[0]
+                
+                # Breakeven implícito
+                breakeven = (((1 + taxa_pre/100) / (1 + taxa_ipca/100)) - 1) * 100
+                row[f'Breakeven {alvo_anos}y'] = breakeven
+        
+        resultados.append(row)
+    
+    return pd.DataFrame(resultados).set_index('Data Base').sort_index()
+
+def gerar_grafico_breakeven_historico(df_breakeven):
+    if df_breakeven.empty:
+         return go.Figure().update_layout(title_text="Sem dados para histórico de inflação implícita.", template='brokeberg')
+
+    fig = go.Figure()
+    
+    # Adiciona traços para cada coluna (5y, 10y)
+    cores = {'Breakeven 5y': '#FFA726', 'Breakeven 10y': '#EF5350'}
+    
+    for col in df_breakeven.columns:
+        fig.add_trace(go.Scatter(
+            x=df_breakeven.index, 
+            y=df_breakeven[col], 
+            name=col, 
+            mode='lines',
+            line=dict(color=cores.get(col, '#CCCCCC'), width=1.5)
+        ))
+
+    # Adiciona meta de inflação (referência simples ~3%)
+    fig.add_hline(y=3.0, line_dash="dot", line_color="gray", annotation_text="Meta 3%", annotation_position="top left")
+
+    fig.update_layout(
+        title='Histórico de Inflação Implícita (Breakeven)',
+        template='brokeberg',
+        title_x=0,
+        xaxis_title="Data",
+        yaxis_title="Inflação Implícita (% a.a.)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    # Zoom inicial 2 anos
+    end_date = df_breakeven.index.max()
+    start_date = end_date - pd.DateOffset(years=2)
+    fig.update_xaxes(range=[start_date, end_date])
+
+    return fig
+
 def gerar_grafico_curva_juros_real_ntnb(df):
     """
     Gera o gráfico da curva de juros real (taxa IPCA+) das NTN-Bs.
@@ -905,7 +1061,7 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
     ema_39 = net_advances.ewm(span=39, adjust=False).mean()
     mcclellan_osc = ema_19 - ema_39
 
-    # --- 6. NOVO: MACD Breadth (O que faltava) ---
+    # --- 6. MACD Breadth ---
     ema12 = _precos_fechamento.ewm(span=12, adjust=False).mean()
     ema26 = _precos_fechamento.ewm(span=26, adjust=False).mean()
     macd_line = ema12 - ema26
@@ -915,6 +1071,10 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
     macd_bullish = (histograma_macd > 0).sum(axis=1)
     validos_macd = histograma_macd.notna().sum(axis=1)
     percentual_macd_bullish = (macd_bullish / validos_macd).fillna(0) * 100
+
+    # --- 7. NOVOS CÁLCULOS (Summation & Cumulative Highs/Lows) ---
+    summation_index = mcclellan_osc.cumsum()
+    cumulative_net_highs_lows = net_highs_lows.cumsum()
 
     df_amplitude = pd.DataFrame({
         'market_breadth': percentual_acima_media.dropna(),
@@ -929,7 +1089,9 @@ def calcular_indicadores_amplitude(_precos_fechamento, rsi_periodo=14):
         'new_lows': new_lows,
         'net_highs_lows': net_highs_lows,
         'mcclellan': mcclellan_osc,
-        'macd_breadth': percentual_macd_bullish # <--- ESSA LINHA É CRUCIAL
+        'macd_breadth': percentual_macd_bullish,
+        'summation_index': summation_index,    # <--- NOVO
+        'cumulative_net_highs': cumulative_net_highs_lows # <--- NOVO
     })
     
     return df_amplitude.dropna()
@@ -1150,6 +1312,80 @@ def gerar_grafico_mcclellan(df_amplitude):
     if len(series_mcclellan) > 252:
         end_date = series_mcclellan.index.max()
         start_date = end_date - pd.DateOffset(years=1)
+        fig.update_xaxes(range=[start_date, end_date])
+    
+    return fig
+    
+def gerar_grafico_summation(df_amplitude):
+    """Gera o gráfico do McClellan Summation Index."""
+    series_summation = df_amplitude['summation_index'].dropna()
+    
+    if series_summation.empty:
+        return go.Figure().update_layout(title_text="Sem dados para Summation Index", template='brokeberg')
+    
+    fig = go.Figure()
+    
+    # Adiciona a linha do índice
+    fig.add_trace(go.Scatter(
+        x=series_summation.index,
+        y=series_summation,
+        name='Summation Index',
+        mode='lines',
+        line=dict(color='#AB47BC', width=2),
+        fill='tozeroy',
+        fillcolor='rgba(171, 71, 188, 0.2)'
+    ))
+    
+    fig.add_hline(y=0, line_dash="solid", line_color="white", line_width=0.5)
+    
+    fig.update_layout(
+        title_text='McClellan Summation Index (Acumulado)',
+        title_x=0,
+        yaxis_title="Pontos",
+        xaxis_title="Data",
+        template='brokeberg',
+        showlegend=False
+    )
+    
+    # Zoom inicial padrão: últimos 2 anos
+    if len(series_summation) > 252*2:
+        end_date = series_summation.index.max()
+        start_date = end_date - pd.DateOffset(years=2)
+        fig.update_xaxes(range=[start_date, end_date])
+    
+    return fig
+
+def gerar_grafico_cumulative_highs_lows(df_amplitude):
+    """Gera o gráfico acumulado de Net New Highs/Lows."""
+    series_cum = df_amplitude['cumulative_net_highs'].dropna()
+    
+    if series_cum.empty:
+        return go.Figure().update_layout(title_text="Sem dados para New Highs/Lows Acumulado", template='brokeberg')
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=series_cum.index,
+        y=series_cum,
+        name='Net Highs/Lows Acumulado',
+        mode='lines',
+        line=dict(color='#29B6F6', width=2),
+        fill='tozeroy',
+        fillcolor='rgba(41, 182, 246, 0.2)'
+    ))
+    
+    fig.update_layout(
+        title_text='Acumulado de Novas Máximas - Mínimas (Cumulative AD Line)',
+        title_x=0,
+        yaxis_title="Acumulado",
+        xaxis_title="Data",
+        template='brokeberg',
+        showlegend=False
+    )
+    
+    if len(series_cum) > 252*2:
+        end_date = series_cum.index.max()
+        start_date = end_date - pd.DateOffset(years=2)
         fig.update_xaxes(range=[start_date, end_date])
     
     return fig
@@ -1760,6 +1996,33 @@ elif pagina_selecionada == "Juros Brasil":
         
         st.markdown("---")
         
+        # --- NOVO: SEÇÃO DE DINÂMICA DA CURVA ---
+        st.subheader("Dinâmica da Curva e Expectativas de Inflação")
+        
+        col_heatmap, col_breakeven_hist = st.columns(2)
+        
+        with col_heatmap:
+            st.markdown("#### Variação Diária da Curva Prefixada")
+            st.info("Heatmap mostrando a variação da taxa (em bps) dos títulos prefixados nos últimos 5 dias. Vermelho indica abertura da curva (taxas subindo, preços caindo).")
+            # Calcula variação
+            df_diff_curva = calcular_variacao_curva(df_tesouro, dias_atras=7) # Pega 7 dias para garantir 5 úteis
+            if not df_diff_curva.empty:
+                fig_heatmap_curva = gerar_heatmap_variacao_curva(df_diff_curva)
+                st.plotly_chart(fig_heatmap_curva, use_container_width=True)
+            else:
+                 st.warning("Dados insuficientes para calcular variação da curva Prefixada.")
+
+        with col_breakeven_hist:
+            st.markdown("#### Histórico de Inflação Implícita")
+            st.info("Evolução histórica do spread entre Prefixados e IPCA+ (Breakeven) para prazos de ~5 e ~10 anos. Indica a expectativa média de inflação do mercado.")
+            df_breakeven_hist = calcular_breakeven_historico(df_tesouro)
+            if not df_breakeven_hist.empty:
+                 fig_breakeven_hist = gerar_grafico_breakeven_historico(df_breakeven_hist)
+                 st.plotly_chart(fig_breakeven_hist, use_container_width=True)
+            else:
+                 st.warning("Não foi possível calcular o histórico de inflação implícita (falta de pares compatíveis).")
+
+        
         # --- SEÇÃO 2: ANÁLISE HISTÓRICA DE NTN-Bs ---
         st.subheader("Análise Histórica de NTN-Bs")
         st.info("Selecione um ou mais vencimentos para comparar a variação da taxa ou preço ao longo do tempo.")
@@ -2143,7 +2406,7 @@ elif pagina_selecionada == "Amplitude":
         
         # --- SEÇÃO 4: NOVAS MÁXIMAS VS MÍNIMAS (ATUALIZADO) ---
         st.subheader("Novas Máximas vs. Novas Mínimas (52 Semanas)")
-        st.info("Saldo líquido de ações atingindo novas máximas de 52 semanas menos novas mínimas. Valores positivos indicam força ampla.")
+        st.info("Saldo líquido de ações atingindo novas máximas de 52 semanas menos novas mínimas. Valores positivos indicam força ampla e tendência de alta.")
 
         # Obtém a série de dados
         nh_nl_series = df_indicadores['net_highs_lows']
@@ -2160,13 +2423,10 @@ elif pagina_selecionada == "Amplitude":
         media_hist_nh = nh_nl_series_recent.mean()
         
         # Prepara análise de retornos (Heatmap)
-        # Definimos faixas. Como é um número absoluto (contagem), o range depende do n° de papéis.
-        # Vamos assumir um range amplo de -200 a +200 com passo de 20 para cobrir a maioria dos cenários da CVM.
         df_analise_nh = df_analise_base.join(nh_nl_series).dropna()
         resultados_nh = analisar_retornos_por_faixa(df_analise_nh, 'net_highs_lows', 20, -200, 200, '')
         
         passo_nh = 20
-        # Lógica para encontrar o rótulo da faixa correta (arredondando para o múltiplo de 20 mais próximo abaixo)
         faixa_atual_valor_nh = int(np.floor(valor_atual_nh / passo_nh)) * passo_nh
         faixa_atual_nh = f'{faixa_atual_valor_nh} a {faixa_atual_valor_nh + passo_nh}'
 
@@ -2181,9 +2441,14 @@ elif pagina_selecionada == "Amplitude":
             st.metric("Percentil Histórico", f"{percentil_nh:.2f}%")
         
         with col2:
-            # Mantemos o gráfico de área original que você já tinha
             fig_nh_nl = gerar_grafico_net_highs_lows(df_indicadores)
             st.plotly_chart(fig_nh_nl, use_container_width=True)
+            
+            # --- NOVO GRÁFICO ACUMULADO ---
+            st.markdown("#### Acumulado (Cumulative AD Line)")
+            st.info("A linha cumulativa de Novas Máximas - Novas Mínimas ajuda a identificar a tendência primária. Se o mercado sobe mas a linha cai, é uma **divergência de baixa** (o rali é sustentado por poucas ações).")
+            fig_nh_cum = gerar_grafico_cumulative_highs_lows(df_indicadores)
+            st.plotly_chart(fig_nh_cum, use_container_width=True)
 
         # Exibição: Histograma e Heatmap
         col_hist, col_heat = st.columns(2)
@@ -2196,7 +2461,7 @@ elif pagina_selecionada == "Amplitude":
 
         # --- SEÇÃO 5: MACD BREADTH ---
         st.subheader("Amplitude MACD (% Compra)")
-        st.info("Percentual de ações da bolsa onde a linha MACD está acima da linha de sinal (Histograma > 0). Níveis muito baixos podem indicar sobrevenda extrema (oportunidade), e níveis muito altos indicam exaustão da tendência.")
+        st.info("Mede a porcentagem de ações com tendência de alta (MACD > Sinal). Útil para confirmar a força da tendência do índice. Se o índice sobe mas o MACD Breadth cai, cuidado (divergência). Níveis acima de 70-80% indicam euforia/sobrecompra; abaixo de 20-30%, pânico/sobrevenda.")
 
         macd_series = df_indicadores['macd_breadth']
         
@@ -2235,9 +2500,13 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_heatmap_amplitude(resultados_macd['Retorno Médio'], faixa_atual_macd, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs MACD Breadth"), use_container_width=True)
 
         st.markdown("---")
-        # --- SEÇÃO 6: OSCILADOR MCCLELLAN (INTERVALO REDUZIDO) ---
-        st.subheader("Oscilador McClellan")
-        st.info("Indicador de momentum de amplitude. Cruzamentos acima de zero indicam fluxo comprador; abaixo, vendedor.")
+        # --- SEÇÃO 6: OSCILADOR MCCLELLAN E SUMMATION INDEX ---
+        st.subheader("Oscilador McClellan e Summation Index")
+        st.info(
+            "**Oscilador McClellan:** Indicador de momentum de curto prazo (diferença entre média exponencial de 19 e 39 dias das ações em alta/baixa). Acima de zero = Bullish.\n\n"
+            "**Summation Index (Acumulado):** A soma cumulativa do Oscilador. É excelente para identificar a **tendência de médio/longo prazo** da amplitude. "
+            "Mudanças de direção no Summation Index frequentemente precedem mudanças no mercado."
+        )
 
         mcclellan_series = df_indicadores['mcclellan']
 
@@ -2250,9 +2519,7 @@ elif pagina_selecionada == "Amplitude":
         valor_atual_mcc = mcclellan_series.iloc[-1]
         media_hist_mcc = mcclellan_series_recent.mean()
 
-        # --- ALTERAÇÃO AQUI: Passo reduzido de 15 para 5 ---
         passo_mcc = 5
-        # Range ajustado para não gerar linhas vazias demais (-100 a 100 costuma ser suficiente)
         df_analise_mcc = df_analise_base.join(mcclellan_series).dropna()
         resultados_mcc = analisar_retornos_por_faixa(df_analise_mcc, 'mcclellan', passo_mcc, -100, 100, '')
         
@@ -2272,6 +2539,11 @@ elif pagina_selecionada == "Amplitude":
         with col2:
             fig_mcclellan = gerar_grafico_mcclellan(df_indicadores)
             st.plotly_chart(fig_mcclellan, use_container_width=True)
+            
+            # --- NOVO: SUMMATION INDEX ---
+            st.markdown("#### McClellan Summation Index")
+            fig_summation = gerar_grafico_summation(df_indicadores)
+            st.plotly_chart(fig_summation, use_container_width=True)
 
         col_hist, col_heat = st.columns(2)
         with col_hist:
