@@ -1236,11 +1236,11 @@ def gerar_heatmap_amplitude(tabela_media, faixa_atual, titulo):
 # --- FIM DO BLOCO 7 ---
 # --- FIM DO BLOCO 7 ---
 
-# --- BLOCO 8: LÓGICA DO RADAR DE INSIDERS (NOVO) ---
-NOME_ARQUIVO_CACHE = "market_caps.csv"
-CACHE_VALIDADE_DIAS = 1
+# --- BLOCO 8: LÓGICA DO RADAR DE INSIDERS (SIMPLIFICADO) ---
 
-@st.cache_data(ttl=3600*8) # Cache de 8 horas
+# Removemos NOME_ARQUIVO_CACHE e CACHE_VALIDADE_DIAS pois não usaremos mais CSV
+
+@st.cache_data(ttl=3600*8)
 def baixar_e_extrair_zip_cvm(url, nome_csv_interno):
     """Baixa e extrai um CSV de um arquivo ZIP da CVM em memória."""
     try:
@@ -1250,18 +1250,18 @@ def baixar_e_extrair_zip_cvm(url, nome_csv_interno):
             with z.open(nome_csv_interno) as f:
                 return pd.read_csv(f, sep=';', encoding='ISO-8859-1', on_bad_lines='skip')
     except Exception as e:
-        st.error(f"Erro ao baixar ou processar dados da CVM de {url}: {e}")
+        st.error(f"Erro ao baixar dados da CVM: {e}")
         return None
 
 def obter_market_cap_individual(ticker):
     """
     Busca simples e direta no Yahoo Finance.
-    Prioriza 'fast_info' e usa 'info' como backup.
+    Sem Session customizada, sem headers complexos, priorizando fast_info.
     """
     if pd.isna(ticker) or ticker == "SEM_TICKER":
         return ticker, np.nan
     
-    # Garante o sufixo .SA
+    # Garante o sufixo .SA e remove espaços
     ticker_clean = str(ticker).strip().upper()
     if not ticker_clean.endswith(".SA"):
         symbol = f"{ticker_clean}.SA"
@@ -1271,19 +1271,18 @@ def obter_market_cap_individual(ticker):
     try:
         stock = yf.Ticker(symbol)
         
-        # 1. Tenta pegar pelo método rápido (sem scraping pesado)
+        # 1. Tenta pegar pelo método rápido (fast_info)
+        # Esse método acessa uma API diferente do Yahoo que bloqueia menos
         mcap = None
         try:
-            # Versões recentes do yfinance usam este atributo
             mcap = stock.fast_info.market_cap
         except:
             pass
             
-        # 2. Se falhar ou vier zerado, tenta o método tradicional (mais lento)
+        # 2. Se falhar, tenta o método tradicional (.info)
         if pd.isna(mcap) or mcap is None or mcap == 0:
             try:
-                info = stock.info
-                mcap = info.get('marketCap')
+                mcap = stock.info.get('marketCap')
             except:
                 pass
 
@@ -1291,23 +1290,23 @@ def obter_market_cap_individual(ticker):
     except Exception:
         return ticker, np.nan
 
-@st.cache_data(ttl=3600*12) # Cache de 12 horas na memória para não travar navegação
+@st.cache_data(ttl=3600*4) # Cache apenas na memória RAM por 4 horas
 def buscar_market_caps_otimizado(df_lookup, force_refresh=False):
     """
-    Busca Market Caps em paralelo, sem salvar arquivos CSV.
+    Busca Market Caps em paralelo, SEM salvar em arquivo CSV (evita cache viciado).
     """
-    # Lista única de tickers a buscar
+    # Lista única de tickers a buscar (ignora os SEM_TICKER)
     tickers = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
     tickers = [t for t in tickers if t != "SEM_TICKER"]
     
     resultados = {}
     
     if tickers:
-        # Barra de progresso para você ver que está funcionando
+        # Mostra barra de progresso para você saber que está rodando
         progresso = st.progress(0, text="Baixando valores de mercado...")
         total = len(tickers)
         
-        # Usa Threads para baixar vários ao mesmo tempo
+        # Usa Threads para baixar vários ao mesmo tempo (máx 10 por vez)
         with ThreadPoolExecutor(max_workers=10) as executor:
             future_to_ticker = {
                 executor.submit(obter_market_cap_individual, t): t 
@@ -1317,16 +1316,19 @@ def buscar_market_caps_otimizado(df_lookup, force_refresh=False):
             for i, future in enumerate(as_completed(future_to_ticker)):
                 ticker, cap = future.result()
                 resultados[ticker] = cap
-                # Atualiza barra
-                progresso.progress((i + 1) / total, text=f"Baixando: {ticker}")
+                # Atualiza a barra de progresso visualmente
+                progresso.progress((i + 1) / total, text=f"Processando: {ticker}")
                 
-        progresso.empty() # Limpa a barra quando acabar
+        progresso.empty() # Remove a barra quando terminar
     
     # Cria o DataFrame com os resultados
     df_caps = pd.DataFrame(list(resultados.items()), columns=['Codigo_Negociacao', 'MarketCap'])
     
     # Junta com a tabela original
     return pd.merge(df_lookup, df_caps, on='Codigo_Negociacao', how='left')
+
+# (Mantenha a função analisar_dados_insiders como estava na última versão correta,
+# com o dicionário de correções manuais, pois ela não muda com essa simplificação)
 
 @st.cache_data
 def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=False):
@@ -2393,6 +2395,7 @@ elif pagina_selecionada == "Radar de Insiders":
                     else:
                         st.info("Sem detalhes.")
                         
+
 
 
 
