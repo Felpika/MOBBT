@@ -1255,35 +1255,41 @@ def baixar_e_extrair_zip_cvm(url, nome_csv_interno):
 
 def obter_market_cap_individual(ticker):
     """
-    Busca o valor de mercado. 
-    Tenta usar o método 'fast_info' (mais rápido/estável) e faz fallback para 'info'.
+    Busca o valor de mercado usando Session para evitar bloqueios.
     """
-    if pd.isna(ticker) or not isinstance(ticker, str): return ticker, np.nan
+    if pd.isna(ticker) or not isinstance(ticker, str) or ticker == "SEM_TICKER":
+        return ticker, np.nan
     
-    ticker_clean = ticker.strip()
-    # Remove sufixo se já tiver, para evitar .SA.SA
-    if ticker_clean.endswith(".SA"):
-        symbol = ticker_clean
-    else:
+    ticker_clean = ticker.strip().upper()
+    if not ticker_clean.endswith(".SA"):
         symbol = f"{ticker_clean}.SA"
+    else:
+        symbol = ticker_clean
 
     try:
-        stock = yf.Ticker(symbol)
-        mcap = None
-        
-        # TENTATIVA 1: fast_info (Muito mais rápido e não costuma dar rate limit)
-        try:
-            mcap = stock.fast_info['marketCap']
-        except Exception:
-            pass
+        # Cria uma sessão com User-Agent para parecer um navegador real
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
 
-        # TENTATIVA 2: info tradicional (Scraping, mais lento, fallback)
-        if pd.isna(mcap) or mcap is None:
-            try:
-                mcap = stock.info.get('marketCap')
-            except Exception:
-                pass
+        stock = yf.Ticker(symbol, session=session)
         
+        # Tenta pegar pelo fast_info (mais confiável recentemente)
+        mcap = None
+        try:
+            mcap = stock.fast_info.market_cap
+        except:
+            pass
+            
+        # Fallback para info normal se fast_info falhar
+        if mcap is None or pd.isna(mcap):
+            try:
+                info = stock.info
+                mcap = info.get('marketCap')
+            except:
+                pass
+
         return ticker, mcap if mcap else np.nan
     except Exception:
         return ticker, np.nan
@@ -1326,7 +1332,7 @@ def buscar_market_caps_otimizado(df_lookup, force_refresh=False):
         if len(tickers_faltantes) > 5:
             msg_place.info(f"Atualizando Market Cap de {len(tickers_faltantes)} ativos novos...")
         
-        with ThreadPoolExecutor(max_workers=5) as executor: # Reduzi workers para evitar bloqueio
+        with ThreadPoolExecutor(max_workers=3) as executor: # Reduzi workers para evitar bloqueio
             future_to_ticker = {
                 executor.submit(obter_market_cap_individual, ticker): ticker 
                 for ticker in tickers_faltantes
@@ -1356,12 +1362,12 @@ def buscar_market_caps_otimizado(df_lookup, force_refresh=False):
 @st.cache_data
 def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=False):
     """
-    Análise de insiders via CNPJ com Dicionário de Correção Manual para Tickers faltantes.
+    Análise de insiders com correção manual FORÇADA de Tickers.
     """
     if not meses_selecionados:
         return pd.DataFrame()
 
-    # --- 1. Filtro de Movimentações (Inclui Recompras) ---
+    # --- 1. Filtro de Movimentações ---
     df_periodo = _df_mov[_df_mov['Ano_Mes'].isin(meses_selecionados)].copy()
     if df_periodo.empty:
         st.warning("Não foram encontrados dados para os meses selecionados.")
@@ -1378,11 +1384,12 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
         -df_periodo['Volume']
     )
 
-    # Agrupa por CNPJ e Nome
+    # Agrupa por CNPJ
     df_net_total = df_periodo.groupby(['CNPJ_Companhia', 'Nome_Companhia'])['Volume_Net'].sum().reset_index()
 
     # --- 2. Normalização de CNPJ ---
     def limpar_cnpj(series):
+        # Garante que é string, remove pontos, traços e barras
         return series.astype(str).str.replace(r'[./-]', '', regex=True).str.strip()
 
     df_net_total['CNPJ_Limpo'] = limpar_cnpj(df_net_total['CNPJ_Companhia'])
@@ -1390,7 +1397,6 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
     # Prepara cadastro (FCA)
     df_cad_valido = _df_cad.copy()
     if 'Valor_Mobiliario' in df_cad_valido.columns:
-        # Filtra ações para pegar o ticker principal (ON/PN)
         filtro = df_cad_valido['Valor_Mobiliario'].astype(str).str.contains('Aç|Ac', case=False, na=False)
         if filtro.any():
             df_cad_valido = df_cad_valido[filtro]
@@ -1400,25 +1406,32 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
     # Lookup: CNPJ -> Ticker
     df_tickers = df_cad_valido[['CNPJ_Limpo', 'Codigo_Negociacao']].dropna().drop_duplicates(subset=['CNPJ_Limpo'])
 
-    # --- 3. Merge via CNPJ ---
+    # --- 3. Merge e CORREÇÃO FORÇADA ---
     df_merged = pd.merge(df_net_total, df_tickers, on='CNPJ_Limpo', how='left')
 
-    # >>> DICIONÁRIO DE CORREÇÃO MANUAL (CNPJ Numérico -> Ticker) <<<
-    # Aqui você adiciona as empresas que estão aparecendo como SEM_TICKER
+    # Dicionário de Correção Manual (CNPJ Numérico -> Ticker)
     correcoes_manuais = {
         '05878397000132': 'ALOS3',  # Allos
         '59717553000102': 'MLAS3',  # Grupo Multi
-        '00000000000000': 'SEU_TICKER_AQUI' # Exemplo para futuro
+        '08312229000173': 'EZTC3',  # EZTec (Exemplo do seu print)
+        '00001180000126': 'ELET3',  # Eletrobras (Exemplo do seu print)
+        '61088894000108': 'CAMB3',  # Cambuci
+        '60651809000105': 'SUZB3',  # Suzano (NEMO3 é holding, SUZB3 é operacional, ajuste conforme preferir)
+        '61156113000175': 'MYPK3',  # Iochpe
+        '28127603000178': 'BEES3',  # Banestes
+        '42771949000135': 'QUAL3',  # Aliança/Qualicorp (Verifique se é esse o caso)
     }
     
-    # Aplica a correção: Se Ticker for nulo, tenta buscar no dicionário pelo CNPJ Limpo
-    df_merged['Codigo_Negociacao'] = df_merged['Codigo_Negociacao'].fillna(df_merged['CNPJ_Limpo'].map(correcoes_manuais))
-    
-    # Preenche vazios restantes
+    # APLICAÇÃO FORÇADA: Sobrescreve o ticker se o CNPJ bater com o dicionário
+    # Isso resolve casos onde o ticker vem vazio, errado ou "SEM_TICKER"
+    for cnpj, ticker in correcoes_manuais.items():
+        df_merged.loc[df_merged['CNPJ_Limpo'] == cnpj, 'Codigo_Negociacao'] = ticker
+
+    # Preenche vazios restantes com placeholder
     df_merged['Codigo_Negociacao'] = df_merged['Codigo_Negociacao'].fillna("SEM_TICKER")
+    df_merged['Codigo_Negociacao'] = df_merged['Codigo_Negociacao'].replace('', 'SEM_TICKER')
 
     # --- 4. Market Cap e Finalização ---
-    # Busca Market Cap apenas para quem tem Ticker válido
     df_lookup_mcap = df_merged[df_merged['Codigo_Negociacao'] != "SEM_TICKER"][['Codigo_Negociacao']].drop_duplicates()
     df_market_cap_lookup = buscar_market_caps_otimizado(df_lookup_mcap, force_refresh=force_refresh)
 
@@ -1439,7 +1452,6 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
         'Volume_vs_MarketCap_Pct': '% do Market Cap'
     })
 
-    # Ordena mantendo os SEM_TICKER visíveis para você identificar novos CNPJs
     return df_tabela.sort_values(by='Volume Líquido (R$)', ascending=False).reset_index(drop=True)
     
 # --- INÍCIO DAS NOVAS FUNÇÕES (Adicionar no Bloco 8) ---
@@ -2412,6 +2424,7 @@ elif pagina_selecionada == "Radar de Insiders":
                     else:
                         st.info("Sem detalhes.")
                         
+
 
 
 
