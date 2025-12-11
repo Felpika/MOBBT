@@ -1263,31 +1263,69 @@ def obter_market_cap_individual(ticker):
     except Exception:
         return ticker, np.nan
 
+@st.cache_data(ttl=3600*8) # Cache de memória do Streamlit
 def buscar_market_caps_otimizado(df_lookup, force_refresh=False):
-    """Busca os valores de mercado usando cache e processamento paralelo."""
-    if force_refresh and os.path.exists(NOME_ARQUIVO_CACHE):
-        os.remove(NOME_ARQUIVO_CACHE)
+    """
+    Busca Market Caps de forma incremental:
+    1. Lê o CSV de cache.
+    2. Identifica quais tickers da lista atual NÃO estão no cache.
+    3. Baixa apenas os faltantes.
+    4. Atualiza o CSV.
+    """
+    cache_file = NOME_ARQUIVO_CACHE
+    market_caps_cache = {}
 
-    if not force_refresh and os.path.exists(NOME_ARQUIVO_CACHE):
-        data_modificacao = datetime.fromtimestamp(os.path.getmtime(NOME_ARQUIVO_CACHE))
-        if (datetime.now() - data_modificacao) < timedelta(days=CACHE_VALIDADE_DIAS):
-            df_cache = pd.read_csv(NOME_ARQUIVO_CACHE)
-            return pd.merge(df_lookup, df_cache, on="Codigo_Negociacao", how="left")
+    # 1. Tenta carregar o cache existente se não for forçado o refresh
+    if not force_refresh and os.path.exists(cache_file):
+        try:
+            df_cache = pd.read_csv(cache_file)
+            # Remove duplicatas e converte para dicionário para busca rápida
+            df_cache = df_cache.drop_duplicates(subset=['Codigo_Negociacao'])
+            market_caps_cache = pd.Series(
+                df_cache['MarketCap'].values, 
+                index=df_cache['Codigo_Negociacao']
+            ).to_dict()
+        except Exception:
+            market_caps_cache = {} # Se der erro ao ler, começa do zero
 
-    market_caps = {}
-    tickers_para_buscar = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
-    
-    with st.spinner(f"Buscando Market Cap para {len(tickers_para_buscar)} tickers... (pode levar alguns minutos)"):
+    # 2. Identifica quais tickers precisamos buscar (Incremental)
+    todos_tickers_necessarios = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
+    # Filtra tickers que não são "SEM_TICKER" e que não estão no cache
+    tickers_para_baixar = [
+        t for t in todos_tickers_necessarios 
+        if t not in market_caps_cache and t != "SEM_TICKER"
+    ]
+
+    # 3. Baixa apenas os que faltam (ou todos se force_refresh=True)
+    if tickers_para_baixar:
+        aviso = st.empty()
+        aviso.info(f"Baixando Market Cap de {len(tickers_para_baixar)} novos ativos...")
+        
         with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_ticker = {executor.submit(obter_market_cap_individual, ticker): ticker for ticker in tickers_para_buscar}
+            future_to_ticker = {
+                executor.submit(obter_market_cap_individual, ticker): ticker 
+                for ticker in tickers_para_baixar
+            }
             for future in as_completed(future_to_ticker):
-                ticker, market_cap = future.result()
-                if pd.notna(market_cap):
-                    market_caps[ticker] = market_cap
+                ticker, cap = future.result()
+                if pd.notna(cap):
+                    market_caps_cache[ticker] = cap
+                else:
+                    # Se falhar ou não achar, podemos salvar como 0 ou NaN para não tentar baixar sempre.
+                    # Aqui opto por salvar NaN mas manter no cache para evitar loops infinitos de request
+                    market_caps_cache[ticker] = np.nan
+        
+        aviso.empty()
 
-    df_market_caps = pd.DataFrame(list(market_caps.items()), columns=['Codigo_Negociacao', 'MarketCap'])
-    df_market_caps.to_csv(NOME_ARQUIVO_CACHE, index=False)
-    return pd.merge(df_lookup, df_market_caps, on="Codigo_Negociacao", how="left")
+        # 4. Salva o cache atualizado no CSV
+        df_atualizado = pd.DataFrame(list(market_caps_cache.items()), columns=['Codigo_Negociacao', 'MarketCap'])
+        df_atualizado.to_csv(cache_file, index=False)
+
+    # 5. Retorna o DataFrame mesclado
+    # Transforma o dicionário completo em DF para o merge
+    df_cache_final = pd.DataFrame(list(market_caps_cache.items()), columns=['Codigo_Negociacao', 'MarketCap'])
+    
+    return pd.merge(df_lookup, df_cache_final, on="Codigo_Negociacao", how="left")
 
 @st.cache_data
 def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=False):
@@ -2348,3 +2386,4 @@ elif pagina_selecionada == "Radar de Insiders":
                     else:
                         st.info("Sem detalhes.")
                         
+
