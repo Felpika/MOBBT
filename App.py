@@ -235,6 +235,7 @@ def calcular_inflacao_implicita(df):
     return df_resultado
 
 
+
 def calcular_variacao_curva(df_tesouro, dias_atras=5):
     """
     Calcula a variação (diferença) das taxas dos contratos de DI (ou melhor, Títulos Prefixados)
@@ -247,8 +248,8 @@ def calcular_variacao_curva(df_tesouro, dias_atras=5):
     datas_unicas = sorted(df_prefix['Data Base'].unique())
     if len(datas_unicas) < 2: return pd.DataFrame()
 
-    # Pega as últimas N datas disponíveis
-    datas_recentes = datas_unicas[-dias_atras:]
+    # Pega as últimas N datas disponíveis (+1 para o diff funcionar e sobrar dias_atras linhas)
+    datas_recentes = datas_unicas[-(dias_atras+1):]
     df_recentes = df_prefix[df_prefix['Data Base'].isin(datas_recentes)].copy()
 
     # Pivota: Linhas = Data Base, Colunas = Data Vencimento, Valores = Taxa
@@ -259,10 +260,11 @@ def calcular_variacao_curva(df_tesouro, dias_atras=5):
     valid_cols = df_pivot.loc[data_max].dropna().index
     df_pivot = df_pivot[valid_cols]
 
-    # Calcula a diferença dia a dia (Diff)
-    # Como queremos ver a variação dia a dia, fazemos diff()
-    # Multiplicamos por 100 para ter em basis points (bps)
+    # Calcula a diferença dia a dia (Diff) * 100 para bps
     df_diff = df_pivot.diff() * 100
+    
+    # Remove a primeira linha (que será NaN devido ao diff) e arredonda
+    df_diff = df_diff.dropna().round(1)
     
     # Ordena datas decrescente para o Heatmap (mais recente no topo)
     return df_diff.sort_index(ascending=False)
@@ -275,25 +277,41 @@ def gerar_heatmap_variacao_curva(df_diff):
         return go.Figure().update_layout(title_text="Sem dados suficientes para variação da curva.", template='brokeberg')
 
     # Ajusta labels do eixo X (Anos de vencimento aproximado)
-    # Pegamos a data mais recente para calcular o "Prazo"
     data_ref = df_diff.index.max()
     x_labels = []
     for col in df_diff.columns:
         anos = (col - data_ref).days / 365.25
-        x_labels.append(f"{anos:.1f}y")
+        # Arredonda para 0.5 mais próximo para ficar bonito (ex: 2.5y, 3.0y)
+        anos_rounded = round(anos * 2) / 2
+        x_labels.append(f"{anos_rounded}y")
 
     y_labels = df_diff.index.strftime('%d/%m')
+
+    # Paleta de cores divergente melhorada
+    # Vermelho escuro -> Vermelho claro -> Amarelo -> Verde claro -> Verde escuro
+    # Mas aqui queremos: Vermelho = Alta de juros (+), Verde = Queda de juros (-)
+    # O colorscale RdYlGn padrão faz Vermelho=Baixo, Verde=Alto.
+    # Se queremos High=Red (Bad) e Low=Green (Good), precisamos inverter?
+    # No diff de taxas: +10bps = Taxa subiu = Ruim p/ Marcado a Mercado = Vermelho
+    # Então Altos Valores (+) = Vermelho. Baixos Valores (-) = Verde.
+    # O padrão RdYlGn é: Red(0) ... Green(1). Então Red é o mínimo, Green é o máximo.
+    # Se usarmos RdYlGn direto: -10 (Min) = Red, +10 (Max) = Green. ISSO ESTÁ ERRADO para juros.
+    # Precisamos inverter: RdYlGn_r (Reverse).
+    # RdYlGn_r: Green(0=Min) ... Red(1=Max).
+    # Então -10 (Queda taxa) = Green. +10 (Alta taxa) = Red. CORRETO.
 
     fig = go.Figure(data=go.Heatmap(
         z=df_diff.values,
         x=x_labels,
         y=y_labels,
-        colorscale='RdYlGn_r', # Red=Alta (ruim p/ PU), Green=Baixa (bom p/ PU). Invertido pois Alta de Juros = Ruim.
-        zmid=0,
+        colorscale='RdYlGn_r', 
+        zmid=0, # Garante que o zero seja a cor central (amarelo/branco)
         text=df_diff.values,
-        texttemplate="%{text:+.1f}",
-        textfont={"size": 10},
-        hoverongaps=False
+        texttemplate="%{text:+g}", # +g mostra sinal e remove zeros desnecessários
+        textfont={"size": 11},
+        hoverongaps=False,
+        ygap=2, # Pequeno espaço entre linhas
+        xgap=2
     ))
 
     fig.update_layout(
@@ -302,6 +320,7 @@ def gerar_heatmap_variacao_curva(df_diff):
         title_x=0,
         xaxis_title="Vencimento (Prazo)",
         yaxis_title="Data",
+        height=350
     )
     return fig
 
@@ -309,19 +328,15 @@ def gerar_heatmap_variacao_curva(df_diff):
 def calcular_breakeven_historico(df_tesouro):
     """
     Calcula o histórico do Breakeven de Inflação para prazos padronizados (ex: ~5 anos e ~10 anos).
-    Procura pares de NTN-F e NTN-B com vencimentos próximos em cada data base.
     """
-    # Filtra tipos relevantes
     df_pre = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
-    df_ipca = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro IPCA+'].copy() # Usando IPCA+ Principal para ser mais limpo (sem cupom)
+    df_ipca = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro IPCA+'].copy()
 
     if df_pre.empty or df_ipca.empty: return pd.DataFrame()
 
-    # Vamos iterar por datas base comuns
     datas_comuns = sorted(list(set(df_pre['Data Base'].unique()) & set(df_ipca['Data Base'].unique())))
-    
     resultados = []
-
+    
     # Definindo alvos aproximados em anos
     alvos = [5, 10] 
 
@@ -335,19 +350,22 @@ def calcular_breakeven_historico(df_tesouro):
         for alvo_anos in alvos:
             target_date = data_dt + pd.DateOffset(years=alvo_anos)
             
-            # Encontra vencimento pre mais proximo
-            venc_pre = min(df_pre_dia['Data Vencimento'], key=lambda x: abs(x - target_date))
-            # Encontra vencimento ipca mais proximo
-            venc_ipca = min(df_ipca_dia['Data Vencimento'], key=lambda x: abs(x - target_date))
+            # Tenta encontrar títulos com vencimento próximo (tolerância de ~400 dias)
+            # Adicionei try/except para evitar falhas se a lista estiver vazia
+            try:
+                venc_pre = min(df_pre_dia['Data Vencimento'], key=lambda x: abs(x - target_date))
+                venc_ipca = min(df_ipca_dia['Data Vencimento'], key=lambda x: abs(x - target_date))
 
-            # Verifica se são "casáveis" (diferença de vencimento não muito grande, ex: 1 ano)
-            if abs((venc_pre - venc_ipca).days) < 400:
-                taxa_pre = df_pre_dia[df_pre_dia['Data Vencimento'] == venc_pre]['Taxa Compra Manha'].iloc[0]
-                taxa_ipca = df_ipca_dia[df_ipca_dia['Data Vencimento'] == venc_ipca]['Taxa Compra Manha'].iloc[0]
-                
-                # Breakeven implícito
-                breakeven = (((1 + taxa_pre/100) / (1 + taxa_ipca/100)) - 1) * 100
-                row[f'Breakeven {alvo_anos}y'] = breakeven
+                if abs((venc_pre - venc_ipca).days) < 450: # Aumentei levemente a tolerância
+                    taxa_pre = df_pre_dia[df_pre_dia['Data Vencimento'] == venc_pre]['Taxa Compra Manha'].iloc[0]
+                    taxa_ipca = df_ipca_dia[df_ipca_dia['Data Vencimento'] == venc_ipca]['Taxa Compra Manha'].iloc[0]
+                    
+                    breakeven = (((1 + taxa_pre/100) / (1 + taxa_ipca/100)) - 1) * 100
+                    row[f'Breakeven {alvo_anos}y'] = breakeven
+                else:
+                    row[f'Breakeven {alvo_anos}y'] = None # Marca como None se não casar, para o gráfico conectar ou pular
+            except ValueError:
+                pass # Lista vazia na data
         
         resultados.append(row)
     
@@ -359,7 +377,7 @@ def gerar_grafico_breakeven_historico(df_breakeven):
 
     fig = go.Figure()
     
-    # Adiciona traços para cada coluna (5y, 10y)
+    # Cores sólidas
     cores = {'Breakeven 5y': '#FFA726', 'Breakeven 10y': '#EF5350'}
     
     for col in df_breakeven.columns:
@@ -368,10 +386,10 @@ def gerar_grafico_breakeven_historico(df_breakeven):
             y=df_breakeven[col], 
             name=col, 
             mode='lines',
-            line=dict(color=cores.get(col, '#CCCCCC'), width=1.5)
+            connectgaps=True, # Importante: conecta pontos se houver falhas de 1 dia
+            line=dict(color=cores.get(col, '#CCCCCC'), width=2)
         ))
 
-    # Adiciona meta de inflação (referência simples ~3%)
     fig.add_hline(y=3.0, line_dash="dot", line_color="gray", annotation_text="Meta 3%", annotation_position="top left")
 
     fig.update_layout(
@@ -383,12 +401,8 @@ def gerar_grafico_breakeven_historico(df_breakeven):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     
-    # Zoom inicial 2 anos
-    end_date = df_breakeven.index.max()
-    start_date = end_date - pd.DateOffset(years=2)
-    fig.update_xaxes(range=[start_date, end_date])
-
     return fig
+
 
 def gerar_grafico_curva_juros_real_ntnb(df):
     """
