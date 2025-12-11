@@ -2039,25 +2039,7 @@ elif pagina_selecionada == "Juros Brasil":
                 st.plotly_chart(fig_pre, use_container_width=True)
             else:
                 st.warning("Dados de títulos prefixados não disponíveis.")
-                        "Inflação Implícita: %{y:.2f}%<extra></extra>"
-                    ),
-                    customdata=np.stack([
-                        df_breakeven_plot['Vencimento'].dt.strftime('%d/%m/%Y')
-                    ], axis=-1)
-                ))
 
-                fig_breakeven.update_layout(
-                    title=f'Curva de Inflação Implícita (Breakeven) - {data_ref.strftime("%d/%m/%Y")}',
-                    template='brokeberg',
-                    title_x=0,
-                    xaxis_title='Prazo até o Vencimento (anos)',
-                    yaxis_title='Inflação Implícita (% a.a.)',
-                    showlegend=False
-                )
-
-                fig_breakeven.update_yaxes(tickformat=".2f")
-
-                st.plotly_chart(fig_breakeven, use_container_width=True)
             else:
                 st.warning("Não há pares de títulos para calcular a inflação implícita hoje.")
         
