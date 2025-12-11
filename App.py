@@ -328,6 +328,7 @@ def gerar_heatmap_variacao_curva(df_diff):
 def calcular_breakeven_historico(df_tesouro):
     """
     Calcula o histórico do Breakeven de Inflação para prazos padronizados (ex: ~5 anos e ~10 anos).
+    Procura pares de NTN-F e NTN-B com vencimentos próximos em cada data base.
     """
     df_pre = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
     df_ipca = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro IPCA+'].copy()
@@ -350,22 +351,33 @@ def calcular_breakeven_historico(df_tesouro):
         for alvo_anos in alvos:
             target_date = data_dt + pd.DateOffset(years=alvo_anos)
             
-            # Tenta encontrar títulos com vencimento próximo (tolerância de ~400 dias)
-            # Adicionei try/except para evitar falhas se a lista estiver vazia
             try:
+                # 1. Encontra os vencimentos mais próximos do ALVO (ex: 5 anos à frente)
                 venc_pre = min(df_pre_dia['Data Vencimento'], key=lambda x: abs(x - target_date))
                 venc_ipca = min(df_ipca_dia['Data Vencimento'], key=lambda x: abs(x - target_date))
+                
+                # 2. VALIDAÇÃO DE PRAZO: O título encontrado é realmente próximo do alvo?
+                # Se o alvo é 5y e o título mais próximo é de 2y, descartamos.
+                # Aceitamos uma janela de +/- 1.5 ano para garantir liquidez histórica
+                dist_pre_target = abs((venc_pre - target_date).days)
+                dist_ipca_target = abs((venc_ipca - target_date).days)
+                
+                max_dist_dias = 550 # ~1.5 anos
 
-                if abs((venc_pre - venc_ipca).days) < 450: # Aumentei levemente a tolerância
+                if dist_pre_target > max_dist_dias or dist_ipca_target > max_dist_dias:
+                    row[f'Breakeven {alvo_anos}y'] = None
+                
+                # 3. CASAMENTO: Os dois títulos vencem perto um do outro?
+                elif abs((venc_pre - venc_ipca).days) < 450:
                     taxa_pre = df_pre_dia[df_pre_dia['Data Vencimento'] == venc_pre]['Taxa Compra Manha'].iloc[0]
                     taxa_ipca = df_ipca_dia[df_ipca_dia['Data Vencimento'] == venc_ipca]['Taxa Compra Manha'].iloc[0]
                     
                     breakeven = (((1 + taxa_pre/100) / (1 + taxa_ipca/100)) - 1) * 100
                     row[f'Breakeven {alvo_anos}y'] = breakeven
                 else:
-                    row[f'Breakeven {alvo_anos}y'] = None # Marca como None se não casar, para o gráfico conectar ou pular
+                    row[f'Breakeven {alvo_anos}y'] = None
             except ValueError:
-                pass # Lista vazia na data
+                pass 
         
         resultados.append(row)
     
@@ -386,7 +398,7 @@ def gerar_grafico_breakeven_historico(df_breakeven):
             y=df_breakeven[col], 
             name=col, 
             mode='lines',
-            connectgaps=True, # Importante: conecta pontos se houver falhas de 1 dia
+            connectgaps=False, # Linkar gaps cria linhas retas falsas quando falta dado por anos
             line=dict(color=cores.get(col, '#CCCCCC'), width=2)
         ))
 
