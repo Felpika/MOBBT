@@ -1972,16 +1972,53 @@ elif pagina_selecionada == "Juros Brasil":
             st.plotly_chart(fig_curva_real, use_container_width=True)
         
         with col_breakeven:
-            st.markdown("#### Histórico de Inflação Implícita (Breakeven)")
-            st.info("Evolução histórica do spread entre Prefixados e IPCA+ (Breakeven) para prazos de ~5 e ~10 anos. Indica a expectativa média de inflação do mercado.")
-            
-            df_breakeven = calcular_breakeven_historico(df_tesouro)
-            
+            st.markdown("#### Inflação Implícita (Breakeven)")
+            st.info("Inflação implícita calculada pela diferença entre títulos prefixados e IPCA+ com vencimentos próximos.")
+            df_breakeven = calcular_inflacao_implicita(df_tesouro)
             if not df_breakeven.empty:
-                fig_breakeven = gerar_grafico_breakeven_historico(df_breakeven)
+                # Prepara dados para uma curva mais intuitiva (prazo vs inflação implícita)
+                df_breakeven_plot = df_breakeven.reset_index().rename(columns={'Vencimento do Prefixo': 'Vencimento'})
+
+                # Se por algum motivo a coluna não existir (compatibilidade), calcula na hora
+                if 'Anos até Vencimento' not in df_breakeven_plot.columns:
+                    data_ref = df_tesouro['Data Base'].max()
+                    df_breakeven_plot['Anos até Vencimento'] = (
+                        (pd.to_datetime(df_breakeven_plot['Vencimento']) - data_ref).dt.days / 365.25
+                    )
+
+                data_ref = df_tesouro['Data Base'].max()
+
+                fig_breakeven = go.Figure()
+                fig_breakeven.add_trace(go.Scatter(
+                    x=df_breakeven_plot['Anos até Vencimento'],
+                    y=df_breakeven_plot['Inflação Implícita (% a.a.)'],
+                    mode='lines',
+                    line=dict(color='#FFB74D', width=2, shape='spline', smoothing=1.0),
+                    name='Inflação Implícita',
+                    hovertemplate=(
+                        "Vencimento: %{customdata[0]}<br>"
+                        "Prazo: %{x:.1f} anos<br>"
+                        "Inflação Implícita: %{y:.2f}%<extra></extra>"
+                    ),
+                    customdata=np.stack([
+                        df_breakeven_plot['Vencimento'].dt.strftime('%d/%m/%Y')
+                    ], axis=-1)
+                ))
+
+                fig_breakeven.update_layout(
+                    title=f'Curva de Inflação Implícita (Breakeven) - {data_ref.strftime("%d/%m/%Y")}',
+                    template='brokeberg',
+                    title_x=0,
+                    xaxis_title='Prazo até o Vencimento (anos)',
+                    yaxis_title='Inflação Implícita (% a.a.)',
+                    showlegend=False
+                )
+
+                fig_breakeven.update_yaxes(tickformat=".2f")
+
                 st.plotly_chart(fig_breakeven, use_container_width=True)
             else:
-                st.warning("Não foi possível calcular o histórico de inflação implícita (dados insuficientes).")
+                st.warning("Não há pares de títulos para calcular a inflação implícita hoje.")
 
 
         
