@@ -78,13 +78,21 @@ def obter_dados_tesouro():
     url = 'https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv'
     st.info("Carregando dados do Tesouro Direto... (Cache de 4h)")
     try:
-        df = pd.read_csv(url, sep=';', decimal=',')
+        # Adicionando headers para simular um navegador e evitar bloqueios/timeouts
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=30) # Timeout de 30 segundos
+        response.raise_for_status()
+        
+        df = pd.read_csv(io.BytesIO(response.content), sep=';', decimal=',')
         df['Data Vencimento'] = pd.to_datetime(df['Data Vencimento'], format='%d/%m/%Y')
         df['Data Base'] = pd.to_datetime(df['Data Base'], format='%d/%m/%Y')
         df['Tipo Titulo'] = df['Tipo Titulo'].astype('category')
         return df
     except Exception as e:
-        st.error(f"Erro ao baixar dados do Tesouro: {e}")
+        st.error(f"Erro ao baixar dados do Tesouro (Tentativa 1): {e}")
+        # Fallback opcional ou retentativa poderia ser adicionada aqui
         return pd.DataFrame()
 
 @st.cache_data
