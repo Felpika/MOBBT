@@ -1254,51 +1254,104 @@ def baixar_e_extrair_zip_cvm(url, nome_csv_interno):
         return None
 
 def obter_market_cap_individual(ticker):
-    """Busca o valor de mercado para um único ticker."""
+    """
+    Busca o valor de mercado. 
+    Tenta usar o método 'fast_info' (mais rápido/estável) e faz fallback para 'info'.
+    """
     if pd.isna(ticker) or not isinstance(ticker, str): return ticker, np.nan
+    
+    ticker_clean = ticker.strip()
+    # Remove sufixo se já tiver, para evitar .SA.SA
+    if ticker_clean.endswith(".SA"):
+        symbol = ticker_clean
+    else:
+        symbol = f"{ticker_clean}.SA"
+
     try:
-        stock = yf.Ticker(f"{ticker.strip()}.SA")
-        market_cap = stock.info.get('marketCap')
-        return ticker, market_cap if market_cap else np.nan
+        stock = yf.Ticker(symbol)
+        mcap = None
+        
+        # TENTATIVA 1: fast_info (Muito mais rápido e não costuma dar rate limit)
+        try:
+            mcap = stock.fast_info['marketCap']
+        except Exception:
+            pass
+
+        # TENTATIVA 2: info tradicional (Scraping, mais lento, fallback)
+        if pd.isna(mcap) or mcap is None:
+            try:
+                mcap = stock.info.get('marketCap')
+            except Exception:
+                pass
+        
+        return ticker, mcap if mcap else np.nan
     except Exception:
         return ticker, np.nan
 
-@st.cache_data(ttl=3600*4) # Cache apenas em memória (RAM) por 4 horas
+@st.cache_data(ttl=3600*4) # Cache de memória para navegação rápida
 def buscar_market_caps_otimizado(df_lookup, force_refresh=False):
     """
-    Busca Market Caps diretamente do Yahoo Finance (sem salvar em CSV).
-    Removemos a lógica de cache em disco para garantir que novos tickers sejam sempre buscados.
+    Gerencia o cache de Market Caps em CSV.
+    - Se o ticker já estiver no CSV, usa o valor salvo.
+    - Se o ticker for novo (ex: ALOS3 adicionado manualmente), baixa e salva.
+    - Se force_refresh=True, apaga o CSV e baixa tudo de novo.
     """
-    # 1. Identifica os tickers únicos que precisamos buscar
-    tickers_para_buscar = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
+    cache_file = NOME_ARQUIVO_CACHE
     
-    # Remove o placeholder e tickers vazios
-    tickers_para_buscar = [t for t in tickers_para_buscar if t != "SEM_TICKER" and isinstance(t, str)]
+    # 1. Prepara a lista de tickers necessários (filtrando vazios e SEM_TICKER)
+    tickers_necessarios = df_lookup['Codigo_Negociacao'].dropna().unique().tolist()
+    tickers_necessarios = [t for t in tickers_necessarios if t != "SEM_TICKER" and isinstance(t, str)]
+    
+    market_caps_dict = {}
 
-    market_caps = {}
-    
-    if tickers_para_buscar:
-        # Mensagem visual para você saber que está baixando
-        with st.spinner(f"Baixando Market Cap atualizado para {len(tickers_para_buscar)} ativos..."):
+    # 2. Carrega Cache Existente (se não for refresh forçado)
+    if not force_refresh and os.path.exists(cache_file):
+        try:
+            df_cache = pd.read_csv(cache_file)
+            # Converte para dicionário
+            market_caps_dict = pd.Series(
+                df_cache['MarketCap'].values, 
+                index=df_cache['Codigo_Negociacao']
+            ).to_dict()
+        except Exception:
+            market_caps_dict = {} # Começa do zero se o arquivo estiver corrompido
+
+    # 3. Identifica quais tickers faltam no cache (Lógica Incremental)
+    tickers_faltantes = [t for t in tickers_necessarios if t not in market_caps_dict]
+
+    # 4. Baixa APENAS os faltantes (ou todos se for refresh)
+    if tickers_faltantes:
+        # Aviso discreto na tela
+        msg_place = st.empty()
+        if len(tickers_faltantes) > 5:
+            msg_place.info(f"Atualizando Market Cap de {len(tickers_faltantes)} ativos novos...")
+        
+        with ThreadPoolExecutor(max_workers=5) as executor: # Reduzi workers para evitar bloqueio
+            future_to_ticker = {
+                executor.submit(obter_market_cap_individual, ticker): ticker 
+                for ticker in tickers_faltantes
+            }
             
-            # Executa os downloads em paralelo (rápido)
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                future_to_ticker = {
-                    executor.submit(obter_market_cap_individual, ticker): ticker 
-                    for ticker in tickers_para_buscar
-                }
-                
-                for future in as_completed(future_to_ticker):
-                    ticker, cap = future.result()
-                    # Salva apenas se encontrou um valor válido
-                    if pd.notna(cap):
-                        market_caps[ticker] = cap
+            for future in as_completed(future_to_ticker):
+                ticker, cap = future.result()
+                if pd.notna(cap):
+                    market_caps_dict[ticker] = cap
+                else:
+                    # Se falhar, salva NaN para não ficar tentando baixar infinitamente a cada reload,
+                    # a menos que force o refresh.
+                    market_caps_dict[ticker] = np.nan
+        
+        msg_place.empty()
+        
+        # 5. Salva o Cache Atualizado no Disco
+        # Converte o dict atualizado para DF e salva
+        df_atualizado = pd.DataFrame(list(market_caps_dict.items()), columns=['Codigo_Negociacao', 'MarketCap'])
+        df_atualizado.to_csv(cache_file, index=False)
 
-    # 2. Cria o DataFrame com os resultados obtidos
-    df_market_caps = pd.DataFrame(list(market_caps.items()), columns=['Codigo_Negociacao', 'MarketCap'])
+    # 6. Retorna o DataFrame final para o Merge
+    df_final_caps = pd.DataFrame(list(market_caps_dict.items()), columns=['Codigo_Negociacao', 'MarketCap'])
     
-    # 3. Faz o merge com a tabela original
-    return pd.merge(df_lookup, df_market_caps, on="Codigo_Negociacao", how="left")
+    return pd.merge(df_lookup, df_final_caps, on="Codigo_Negociacao", how="left")
 
 @st.cache_data
 def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=False):
@@ -2359,5 +2412,6 @@ elif pagina_selecionada == "Radar de Insiders":
                     else:
                         st.info("Sem detalhes.")
                         
+
 
 
