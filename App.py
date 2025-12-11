@@ -1292,18 +1292,17 @@ def buscar_market_caps_otimizado(df_lookup, force_refresh=False):
 @st.cache_data
 def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=False):
     """
-    Análise de insiders usando NOME DA EMPRESA para cruzamento.
+    Análise de insiders via CNPJ com Dicionário de Correção Manual para Tickers faltantes.
     """
     if not meses_selecionados:
         return pd.DataFrame()
 
-    # --- 1. Filtro de Movimentações ---
+    # --- 1. Filtro de Movimentações (Inclui Recompras) ---
     df_periodo = _df_mov[_df_mov['Ano_Mes'].isin(meses_selecionados)].copy()
     if df_periodo.empty:
         st.warning("Não foram encontrados dados para os meses selecionados.")
         return pd.DataFrame()
 
-    # Tipos de operação
     tipos_compra = ['Compra à vista', 'Recompra', 'Recompra de ações']
     tipos_venda = ['Venda à vista']
     
@@ -1315,41 +1314,51 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
         -df_periodo['Volume']
     )
 
-    # Agrupa por Nome (VLMO usa 'Nome_Companhia')
-    df_net_total = df_periodo.groupby('Nome_Companhia')['Volume_Net'].sum().reset_index()
+    # Agrupa por CNPJ e Nome
+    df_net_total = df_periodo.groupby(['CNPJ_Companhia', 'Nome_Companhia'])['Volume_Net'].sum().reset_index()
 
-    # --- 2. Normalização de Nomes ---
-    def normalizar_nome(series):
-        # Remove pontuação, espaços duplos e deixa maiúsculo para maximizar o 'match'
-        return series.astype(str).str.upper().str.replace(r'[.,\-/]', ' ', regex=True).str.replace(r'\s+', ' ', regex=True).str.strip()
+    # --- 2. Normalização de CNPJ ---
+    def limpar_cnpj(series):
+        return series.astype(str).str.replace(r'[./-]', '', regex=True).str.strip()
 
-    df_net_total['Nome_Limpo'] = normalizar_nome(df_net_total['Nome_Companhia'])
+    df_net_total['CNPJ_Limpo'] = limpar_cnpj(df_net_total['CNPJ_Companhia'])
     
-    # Prepara cadastro (FCA usa 'Nome_Empresarial')
+    # Prepara cadastro (FCA)
     df_cad_valido = _df_cad.copy()
     if 'Valor_Mobiliario' in df_cad_valido.columns:
+        # Filtra ações para pegar o ticker principal (ON/PN)
         filtro = df_cad_valido['Valor_Mobiliario'].astype(str).str.contains('Aç|Ac', case=False, na=False)
         if filtro.any():
             df_cad_valido = df_cad_valido[filtro]
             
-    df_cad_valido['Nome_Limpo'] = normalizar_nome(df_cad_valido['Nome_Empresarial'])
+    df_cad_valido['CNPJ_Limpo'] = limpar_cnpj(df_cad_valido['CNPJ_Companhia'])
     
-    # Lookup: Nome Limpo -> Ticker
-    # Drop duplicatas para não multiplicar linhas se a empresa tiver ON e PN (pega o primeiro)
-    df_tickers = df_cad_valido[['Nome_Limpo', 'Codigo_Negociacao']].dropna().drop_duplicates(subset=['Nome_Limpo'])
+    # Lookup: CNPJ -> Ticker
+    df_tickers = df_cad_valido[['CNPJ_Limpo', 'Codigo_Negociacao']].dropna().drop_duplicates(subset=['CNPJ_Limpo'])
 
-    # --- 3. Merge por NOME ---
-    df_merged = pd.merge(df_net_total, df_tickers, on='Nome_Limpo', how='left')
+    # --- 3. Merge via CNPJ ---
+    df_merged = pd.merge(df_net_total, df_tickers, on='CNPJ_Limpo', how='left')
 
-    # Correções Manuais de Ticker (Caso o nome não bata, você pode forçar via Nome_Limpo ou adicionar lógica extra)
-    # Ex: df_merged.loc[df_merged['Nome_Limpo'] == 'NOME DA EMPRESA', 'Codigo_Negociacao'] = 'XXXX3'
+    # >>> DICIONÁRIO DE CORREÇÃO MANUAL (CNPJ Numérico -> Ticker) <<<
+    # Aqui você adiciona as empresas que estão aparecendo como SEM_TICKER
+    correcoes_manuais = {
+        '05878397000132': 'ALOS3',  # Allos
+        '59717553000102': 'MLAS3',  # Grupo Multi
+        '00000000000000': 'SEU_TICKER_AQUI' # Exemplo para futuro
+    }
+    
+    # Aplica a correção: Se Ticker for nulo, tenta buscar no dicionário pelo CNPJ Limpo
+    df_merged['Codigo_Negociacao'] = df_merged['Codigo_Negociacao'].fillna(df_merged['CNPJ_Limpo'].map(correcoes_manuais))
+    
+    # Preenche vazios restantes
     df_merged['Codigo_Negociacao'] = df_merged['Codigo_Negociacao'].fillna("SEM_TICKER")
 
     # --- 4. Market Cap e Finalização ---
+    # Busca Market Cap apenas para quem tem Ticker válido
     df_lookup_mcap = df_merged[df_merged['Codigo_Negociacao'] != "SEM_TICKER"][['Codigo_Negociacao']].drop_duplicates()
     df_market_cap_lookup = buscar_market_caps_otimizado(df_lookup_mcap, force_refresh=force_refresh)
 
-    df_final = pd.merge(df_merged, df_market_cap_lookup, on='Codigo_Negociacao', how='left')
+    df_final = pd.merge(df_merged, df_market_cap_lookup[['Codigo_Negociacao', 'MarketCap']], on='Codigo_Negociacao', how='left')
     
     market_cap_para_calculo = df_final['MarketCap'].fillna(0)
     df_final['Volume_vs_MarketCap_Pct'] = np.where(
@@ -1358,28 +1367,43 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
         0
     )
 
-    # Renomeia para exibição (Usa Nome_Companhia original do VLMO que está 'bonito')
     df_tabela = df_final[[
-        'Codigo_Negociacao', 'Nome_Companhia', 'Volume_Net', 'MarketCap', 'Volume_vs_MarketCap_Pct'
+        'Codigo_Negociacao', 'Nome_Companhia', 'Volume_Net', 'MarketCap', 'Volume_vs_MarketCap_Pct', 'CNPJ_Companhia'
     ]].rename(columns={
         'Codigo_Negociacao': 'Ticker', 'Nome_Companhia': 'Empresa',
         'Volume_Net': 'Volume Líquido (R$)', 'MarketCap': 'Valor de Mercado (R$)',
         'Volume_vs_MarketCap_Pct': '% do Market Cap'
     })
 
+    # Ordena mantendo os SEM_TICKER visíveis para você identificar novos CNPJs
     return df_tabela.sort_values(by='Volume Líquido (R$)', ascending=False).reset_index(drop=True)
     
 # --- INÍCIO DAS NOVAS FUNÇÕES (Adicionar no Bloco 8) ---
 
 @st.cache_data
-def criar_lookup_ticker_nome(_df_cad):
+def criar_lookup_ticker_cnpj(_df_cad):
     """
-    Cria dicionário Ticker -> Nome da Empresa (para busca interna).
+    Cria dicionário Ticker -> CNPJ original (com pontos/traços).
+    Inclui correções manuais para a busca funcionar.
     """
-    df_tickers = _df_cad[['Nome_Empresarial', 'Codigo_Negociacao']].dropna()
-    # Prioriza o nome empresarial completo
+    # 1. Dados automáticos do FCA
+    df_tickers = _df_cad[['CNPJ_Companhia', 'Codigo_Negociacao']].dropna()
     df_tickers = df_tickers.drop_duplicates(subset=['Codigo_Negociacao'])
-    return pd.Series(df_tickers['Nome_Empresarial'].values, index=df_tickers['Codigo_Negociacao']).to_dict()
+    
+    lookup = pd.Series(df_tickers['CNPJ_Companhia'].values, index=df_tickers['Codigo_Negociacao']).to_dict()
+    
+    # 2. Inserção Manual Reversa (Ticker -> CNPJ Original Formatado)
+    # Precisamos do formato original (com pontos) se o seu arquivo VLMO tiver pontos.
+    # Se o VLMO tiver pontos e o dicionário manual não, a busca falhará.
+    # Vou assumir que o VLMO tem formatação padrão de CNPJ.
+    
+    correcoes_busca = {
+        'ALOS3': '05.878.397/0001-32',  # Allos
+        'MLAS3': '59.717.553/0001-02',  # Grupo Multi
+    }
+    lookup.update(correcoes_busca)
+    
+    return lookup
 
 @st.cache_data
 def analisar_historico_insider_por_nome(_df_mov, nome_alvo):
@@ -1467,73 +1491,39 @@ def obter_detalhes_insider_por_nome(_df_mov, nome_alvo):
 
 @st.cache_data
 def analisar_historico_insider_por_ticker(_df_mov, cnpj_alvo):
-    """
-    Filtra e agrega o histórico de volume líquido por mês para um único CNPJ.
-    Requer que _df_mov já contenha a coluna 'Ano_Mes'.
-    """
-    if not cnpj_alvo or _df_mov.empty:
-        return pd.DataFrame()
-
-    # Filtra movimentações apenas para o CNPJ da empresa alvo
+    """Filtra histórico usando CNPJ."""
+    if not cnpj_alvo or _df_mov.empty: return pd.DataFrame()
+    
     df_empresa = _df_mov[_df_mov['CNPJ_Companhia'] == cnpj_alvo].copy()
-    if df_empresa.empty:
-        return pd.DataFrame()
+    if df_empresa.empty: return pd.DataFrame()
 
-    # Calcula o Volume Líquido (Compra = positivo, Venda = negativo)
+    tipos_compra = ['Compra à vista', 'Recompra', 'Recompra de ações']
+    tipos_venda = ['Venda à vista']
+    df_empresa = df_empresa[df_empresa['Tipo_Movimentacao'].isin(tipos_compra + tipos_venda)]
+
     df_empresa['Volume_Net'] = np.where(
-        df_empresa['Tipo_Movimentacao'] == 'Compra à vista',
-        df_empresa['Volume'],
-        -df_empresa['Volume']
+        df_empresa['Tipo_Movimentacao'].isin(tipos_compra),
+        df_empresa['Volume'], -df_empresa['Volume']
     )
 
-    # Agrupa por Ano_Mes (que já foi pré-calculado na UI) e soma o volume líquido
-    df_historico = df_empresa.groupby('Ano_Mes')['Volume_Net'].sum().reset_index()
-
-    # Garante que está ordenado por data para o gráfico
-    df_historico = df_historico.sort_values(by='Ano_Mes')
-    
-    # Converte Ano_Mes para um objeto de data real (1º dia do mês) para o gráfico
+    df_historico = df_empresa.groupby('Ano_Mes')['Volume_Net'].sum().reset_index().sort_values('Ano_Mes')
     df_historico['Data'] = pd.to_datetime(df_historico['Ano_Mes'] + '-01')
-
     return df_historico[['Data', 'Volume_Net']]
 
 @st.cache_data
 def obter_detalhes_insider_por_ticker(_df_mov, cnpj_alvo):
-    """
-    Retorna um DataFrame detalhado com as movimentações individuais para um CNPJ específico.
-    Filtra apenas Compras e Vendas à vista e usa 'Grupo_Autor' para o cargo.
-    """
-    if not cnpj_alvo or _df_mov.empty:
-        return pd.DataFrame()
-
-    # 1. Filtra pelo CNPJ da empresa
-    df_detalhes = _df_mov[_df_mov['CNPJ_Companhia'] == cnpj_alvo].copy()
-
-    # 2. Filtra apenas operações "à vista" (NOVA LINHA)
-    operacoes_validas = ['Compra à vista', 'Venda à vista']
-    df_detalhes = df_detalhes[df_detalhes['Tipo_Movimentacao'].isin(operacoes_validas)]
-
-    if df_detalhes.empty:
-        return pd.DataFrame()
-
-    # 3. Seleciona e renomeia as colunas
-    colunas_desejadas = {
-        'Data_Movimentacao': 'Data',
-        'Tipo_Cargo': 'Cargo / Grupo', # Mantendo a correção anterior
-        'Tipo_Movimentacao': 'Operação',
-        'Quantidade': 'Qtd.',
-        'Preco_Unitario': 'Preço (R$)',
-        'Volume': 'Volume Total (R$)'
-    }
+    """Retorna detalhes filtrando por CNPJ."""
+    if not cnpj_alvo or _df_mov.empty: return pd.DataFrame()
     
-    cols_existentes = [c for c in colunas_desejadas.keys() if c in df_detalhes.columns]
-    df_exibicao = df_detalhes[cols_existentes].rename(columns=colunas_desejadas)
-
-    # 4. Ordena pela data (mais recente primeiro)
-    if 'Data' in df_exibicao.columns:
-        df_exibicao = df_exibicao.sort_values(by='Data', ascending=False)
-
-    return df_exibicao
+    df_detalhes = _df_mov[_df_mov['CNPJ_Companhia'] == cnpj_alvo].copy()
+    operacoes_validas = ['Compra à vista', 'Venda à vista', 'Recompra', 'Recompra de ações']
+    df_detalhes = df_detalhes[df_detalhes['Tipo_Movimentacao'].isin(operacoes_validas)]
+    
+    colunas = {'Data_Movimentacao': 'Data', 'Tipo_Cargo': 'Cargo / Grupo', 'Tipo_Movimentacao': 'Operação', 
+               'Quantidade': 'Qtd.', 'Preco_Unitario': 'Preço (R$)', 'Volume': 'Volume Total (R$)'}
+    
+    existentes = [c for c in colunas.keys() if c in df_detalhes.columns]
+    return df_detalhes[existentes].rename(columns=colunas).sort_values('Data', ascending=False)
 
 def gerar_grafico_historico_insider(df_historico, ticker):
     """
@@ -2319,99 +2309,42 @@ elif pagina_selecionada == "Radar de Insiders":
             else:
                 st.warning("Por favor, selecione pelo menos um mês para a análise.")
         # --- (INÍCIO DA NOVA SEÇÃO DE HISTÓRICO POR TICKER ATUALIZADA) ---
-        # --- SEÇÃO DE HISTÓRICO POR TICKER (ATUALIZADA P/ NOME) ---
+        # --- SEÇÃO DE HISTÓRICO POR TICKER (CNPJ COM CORREÇÃO) ---
         st.markdown("---")
         st.subheader("Analisar Histórico Detalhado por Ticker")
-        st.info("Digite o código de negociação (ex: PETR4, VALE3). O sistema buscará o nome da empresa e filtrará as movimentações.")
+        st.info("Digite o código de negociação (ex: PETR4, ALOS3).")
 
-        # Cria o lookup Ticker -> Nome
-        lookup_ticker_nome = criar_lookup_ticker_nome(df_cad_bruto)
+        # Cria o lookup Ticker -> CNPJ (incluindo os manuais)
+        lookup_ticker_cnpj = criar_lookup_ticker_cnpj(df_cad_bruto)
 
         col_search_1, col_search_2 = st.columns([0.8, 0.2])
         with col_search_1:
-            ticker_input = st.text_input(
-                "Digite o Ticker:", 
-                key="insider_ticker_input", 
-                placeholder="Ex: PETR4"
-            ).upper().strip()
+            ticker_input = st.text_input("Digite o Ticker:", key="insider_ticker_input", placeholder="Ex: PETR4").upper().strip()
         with col_search_2:
-            st.write("")
-            st.write("")
+            st.write(""); st.write("")
             btn_buscar = st.button("Buscar", use_container_width=True)
 
         if btn_buscar and ticker_input:
-            # Busca o Nome correspondente ao Ticker
-            nome_alvo = lookup_ticker_nome.get(ticker_input)
+            cnpj_alvo = lookup_ticker_cnpj.get(ticker_input)
             
-            if not nome_alvo:
-                st.error(f"Ticker '{ticker_input}' não encontrado no cadastro (FCA).")
+            if not cnpj_alvo:
+                st.error(f"Ticker '{ticker_input}' não encontrado. Adicione ao dicionário manual se necessário.")
             else:
-                with st.spinner(f"Analisando histórico para {ticker_input} ({nome_alvo})..."):
-                    
-                    # 1. Gráfico
-                    df_historico_ticker = analisar_historico_insider_por_nome(df_mov_bruto, nome_alvo)
-                    
-                    if not df_historico_ticker.empty:
-                        df_historico_ticker['Cor'] = np.where(df_historico_ticker['Volume_Net'] >= 0, '#4CAF50', '#F44336')
-                        fig_historico = px.bar(
-                            df_historico_ticker,
-                            x='Data',
-                            y='Volume_Net',
-                            title=f'Histórico de Volume Líquido: {nome_alvo} ({ticker_input})',
-                            template='brokeberg'
-                        )
-                        fig_historico.update_traces(marker_color=df_historico_ticker['Cor'])
-                        fig_historico.update_layout(title_x=0, yaxis_title='Volume Líquido (R$)', xaxis_title='Mês', showlegend=False)
-                        fig_historico.update_yaxes(tickformat="$,.0f")
-                        st.plotly_chart(fig_historico, use_container_width=True)
+                with st.spinner(f"Analisando histórico para {ticker_input}..."):
+                    df_hist = analisar_historico_insider_por_ticker(df_mov_bruto, cnpj_alvo)
+                    if not df_hist.empty:
+                        df_hist['Cor'] = np.where(df_hist['Volume_Net'] >= 0, '#4CAF50', '#F44336')
+                        fig = px.bar(df_hist, x='Data', y='Volume_Net', title=f'Histórico: {ticker_input}', template='brokeberg')
+                        fig.update_traces(marker_color=df_hist['Cor'])
+                        fig.update_layout(title_x=0, yaxis_title='R$', showlegend=False)
+                        st.plotly_chart(fig, use_container_width=True)
                     else:
-                        st.warning(f"Não há dados de movimentação para {nome_alvo}.")
+                        st.warning("Sem dados históricos.")
 
-                    # 2. Tabela
-                    st.markdown(f"#### 📋 Lista de Movimentações: {nome_alvo}")
-                    df_detalhes = obter_detalhes_insider_por_nome(df_mov_bruto, nome_alvo)
-                    
-                    if not df_detalhes.empty:
-                        def style_operacao(v):
-                            color = '#4CAF50' if v in ['Compra à vista', 'Recompra', 'Recompra de ações'] else '#F44336'
-                            return f'color: {color}; font-weight: bold;'
-
-                        st.dataframe(
-                            df_detalhes.style.format({
-                                'Data': '{:%d/%m/%Y}',
-                                'Preço (R$)': 'R$ {:,.2f}',
-                                'Volume Total (R$)': 'R$ {:,.2f}',
-                                'Qtd.': '{:,.0f}'
-                            }).map(style_operacao, subset=['Operação']),
-                            use_container_width=True, hide_index=True, height=400
-                        )
+                    st.markdown(f"#### 📋 Detalhes: {ticker_input}")
+                    df_det = obter_detalhes_insider_por_ticker(df_mov_bruto, cnpj_alvo)
+                    if not df_det.empty:
+                         st.dataframe(df_det.style.format({'Data': '{:%d/%m/%Y}', 'Preço (R$)': 'R$ {:,.2f}', 'Volume Total (R$)': 'R$ {:,.2f}', 'Qtd.': '{:,.0f}'}), use_container_width=True, hide_index=True)
                     else:
-                        st.info(f"Não foram encontradas operações detalhadas.")
-        
-        # --- (FIM DA NOVA SEÇÃO) ---
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+                        st.info("Sem detalhes.")
+                        
