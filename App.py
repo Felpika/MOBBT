@@ -1645,10 +1645,7 @@ elif pagina_selecionada == "Juros Brasil":
         # Copie o conteúdo original que estava dentro de "if not df_tesouro.empty:"
         # ...
         st.subheader("Curvas de Juros Real e Inflação Implícita")
-        # (etc...)
-    else:
-        st.warning("Não foi possível carregar os dados do Tesouro Direto para exibir esta página.")
-        
+              
         col_curva_real, col_breakeven = st.columns(2)
         
         with col_curva_real:
@@ -2392,6 +2389,7 @@ elif pagina_selecionada == "Radar de Insiders":
                         st.info(f"Não foram encontradas operações detalhadas.")
         
         # --- (FIM DA NOVA SEÇÃO) ---
+
 
 
 
