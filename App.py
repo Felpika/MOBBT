@@ -2555,17 +2555,60 @@ elif pagina_selecionada == "Amplitude":
         # --- SEÇÃO 7: CBOE Brazil ETF Volatility Index (VXEWZCLS) ---
         st.subheader("Volatilidade Implícita Brasil (CBOE Brazil ETF Volatility Index - VXEWZ)")
         st.info(
-            "O índice **VXEWZ** mede a volatilidade implícita das opções do ETF EWZ (Brasil) negociado nos EUA, "
-            "sendo um termômetro de medo/apetite a risco específico para Brasil. "
-            "Níveis elevados indicam maior incerteza e aversão ao risco."
+            "O índice **VXEWZ** mede a volatilidade implícita das opções do ETF EWZ (Brasil) negociado nos EUA. "
+            "Funciona como o 'VIX do Brasil'. **Valores altos** (acima de 30-40) indicam pânico/stress (oportunidade de compra de longo prazo?); "
+            "**valores baixos** (abaixo de 20) indicam complacência (risco de topo?)."
         )
 
         FRED_API_KEY = 'd78668ca6fc142a1248f7cb9132916b0'
         df_vxewz = carregar_dados_fred(FRED_API_KEY, {'VXEWZCLS': 'CBOE Brazil ETF Volatility Index (VXEWZ)'})
 
         if not df_vxewz.empty:
-            fig_vxewz = gerar_grafico_fred(df_vxewz, 'VXEWZCLS', 'CBOE Brazil ETF Volatility Index (VXEWZ)')
-            st.plotly_chart(fig_vxewz, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
+            
+            vxewz_series = df_vxewz['VXEWZCLS'].dropna()
+            
+            # Filtra para 5 anos recentes para estatísticas mais relevantes
+            if not vxewz_series.empty:
+                cutoff_vx = vxewz_series.index.max() - pd.DateOffset(years=5)
+                vxewz_series_recent = vxewz_series[vxewz_series.index >= cutoff_vx]
+            else:
+                vxewz_series_recent = vxewz_series
+
+            valor_atual_vx = vxewz_series.iloc[-1]
+            media_hist_vx = vxewz_series_recent.mean()
+
+            # Prepara Heatmap (cruzando com os retornos do ativo base, ex: BOVA11)
+            # Requer que a análise de amplitude tenha sido rodada para ter 'df_analise_base'
+            df_analise_vx = df_analise_base.join(vxewz_series, how='inner').dropna()
+            
+            # Define faixas de volatilidade (passo de 5 pontos)
+            passo_vx = 5
+            resultados_vx = analisar_retornos_por_faixa(df_analise_vx, 'VXEWZCLS', passo_vx, 10, 100, '') # Range 10 a 100
+            
+            faixa_atual_val_vx = int(valor_atual_vx // passo_vx) * passo_vx
+            faixa_atual_vx = f'{faixa_atual_val_vx} a {faixa_atual_val_vx + passo_vx}'
+
+            # Layout: Métricas e Gráfico de Linha
+            col1, col2 = st.columns([1,2])
+            with col1:
+                st.metric("Valor Atual", f"{valor_atual_vx:.2f}")
+                st.metric("Média Histórica (5A)", f"{media_hist_vx:.2f}")
+                z_score_vx = (valor_atual_vx - media_hist_vx) / vxewz_series_recent.std()
+                st.metric("Z-Score", f"{z_score_vx:.2f}")
+                percentil_vx = stats.percentileofscore(vxewz_series_recent, valor_atual_vx)
+                st.metric("Percentil Histórico", f"{percentil_vx:.2f}%")
+            
+            with col2:
+                fig_vxewz = gerar_grafico_historico_amplitude(vxewz_series, "Histórico VXEWZ", valor_atual_vx, media_hist_vx)
+                st.plotly_chart(fig_vxewz, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
+
+            # Layout: Histograma e Heatmap
+            col_hist, col_heat = st.columns(2)
+            with col_hist:
+                st.plotly_chart(gerar_histograma_amplitude(vxewz_series_recent, "Distribuição Histórica (VXEWZ)", valor_atual_vx, media_hist_vx, nbins=50), use_container_width=True)
+            with col_heat:
+                st.plotly_chart(gerar_heatmap_amplitude(resultados_vx['Retorno Médio'], faixa_atual_vx, f"Heatmap de Retorno ({ATIVO_ANALISE}) vs Nível de Volatilidade"), use_container_width=True)
+
         else:
             st.warning("Não foi possível carregar os dados do índice de volatilidade VXEWZ (VXEWZCLS) a partir do FRED.")
 
