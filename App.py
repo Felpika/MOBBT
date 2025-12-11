@@ -2040,8 +2040,7 @@ elif pagina_selecionada == "Juros Brasil":
             else:
                 st.warning("Dados de títulos prefixados não disponíveis.")
 
-            else:
-                st.warning("Não há pares de títulos para calcular a inflação implícita hoje.")
+
         
         st.markdown("---")
         
