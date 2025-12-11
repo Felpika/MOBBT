@@ -1972,32 +1972,73 @@ elif pagina_selecionada == "Juros Brasil":
             st.plotly_chart(fig_curva_real, use_container_width=True)
         
         with col_breakeven:
-            st.markdown("#### Inflação Implícita (Breakeven)")
-            st.info("Inflação implícita calculada pela diferença entre títulos prefixados e IPCA+ com vencimentos próximos.")
-            df_breakeven = calcular_inflacao_implicita(df_tesouro)
-            if not df_breakeven.empty:
-                # Prepara dados para uma curva mais intuitiva (prazo vs inflação implícita)
-                df_breakeven_plot = df_breakeven.reset_index().rename(columns={'Vencimento do Prefixo': 'Vencimento'})
-
-                # Se por algum motivo a coluna não existir (compatibilidade), calcula na hora
-                if 'Anos até Vencimento' not in df_breakeven_plot.columns:
-                    data_ref = df_tesouro['Data Base'].max()
-                    df_breakeven_plot['Anos até Vencimento'] = (
-                        (pd.to_datetime(df_breakeven_plot['Vencimento']) - data_ref).dt.days / 365.25
+            st.markdown("#### Histórico de Taxas Prefixadas")
+            st.info("Evolução das taxas dos títulos prefixados (LTN/NTN-F) ao longo do tempo. Selecione um período no gráfico para zoom.")
+            
+            # --- NOVA FUNÇÃO INLINE (Ou poderia ser definida antes) ---
+            # Para manter organizado, vou definir a lógica aqui e gerar o gráfico
+            
+            df_pre_hist = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
+            
+            if not df_pre_hist.empty:
+                # Seleciona apenas os vencimentos que ainda existem ou são relevantes (ex: os 5 com mais liquidez recente/vencimento futuro)
+                # Vamos pegar contratos com vencimento > hoje
+                df_pre_hist = df_pre_hist[df_pre_hist['Data Vencimento'] > pd.Timestamp.now()]
+                
+                # Para não poluir, pegamos apenas alguns vencimentos representativos (ex: Curto 2026, Médio 2029, Longo 2031+)
+                # Ou simples: agrupa por vencimento e pega os TOP N
+                vencimentos_unicos = sorted(df_pre_hist['Data Vencimento'].unique())
+                
+                # Vamos plotar todos, mas com legendas claras
+                fig_pre = go.Figure()
+                
+                colors = px.colors.qualitative.Plotly
+                
+                for i, venc in enumerate(vencimentos_unicos):
+                    df_venc = df_pre_hist[df_pre_hist['Data Vencimento'] == venc]
+                    nome_legenda = f"Prefixado {pd.to_datetime(venc).year}"
+                    
+                    fig_pre.add_trace(go.Scatter(
+                        x=df_venc['Data Base'],
+                        y=df_venc['Taxa Compra Manha'],
+                        name=nome_legenda,
+                        mode='lines',
+                        connectgaps=True,
+                        line=dict(width=2)
+                    ))
+                
+                fig_pre.update_layout(
+                    title='Histórico de Taxas - Tesouro Prefixado',
+                    template='brokeberg',
+                    title_x=0,
+                    xaxis_title="Data",
+                    yaxis_title="Taxa (% a.a.)",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                
+                # --- BOTÕES DE FILTRO DE TEMPO ---
+                fig_pre.update_xaxes(
+                    rangeselector=dict(
+                        buttons=list([
+                            dict(count=1, label="1M", step="month", stepmode="backward"),
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(count=1, label="1Y", step="year", stepmode="backward"),
+                            dict(count=2, label="2Y", step="year", stepmode="backward"),
+                            dict(step="all", label="Tudo")
+                        ]),
+                        bgcolor="#333952",
+                        font=dict(color="white")
                     )
+                )
+                
+                # Zoom inicial padrão: 1 Ano
+                end_date = df_pre_hist['Data Base'].max()
+                start_date = end_date - pd.DateOffset(years=1)
+                fig_pre.update_xaxes(range=[start_date, end_date])
 
-                data_ref = df_tesouro['Data Base'].max()
-
-                fig_breakeven = go.Figure()
-                fig_breakeven.add_trace(go.Scatter(
-                    x=df_breakeven_plot['Anos até Vencimento'],
-                    y=df_breakeven_plot['Inflação Implícita (% a.a.)'],
-                    mode='lines',
-                    line=dict(color='#FFB74D', width=2, shape='spline', smoothing=1.0),
-                    name='Inflação Implícita',
-                    hovertemplate=(
-                        "Vencimento: %{customdata[0]}<br>"
-                        "Prazo: %{x:.1f} anos<br>"
+                st.plotly_chart(fig_pre, use_container_width=True)
+            else:
+                st.warning("Dados de títulos prefixados não disponíveis.")
                         "Inflação Implícita: %{y:.2f}%<extra></extra>"
                     ),
                     customdata=np.stack([
