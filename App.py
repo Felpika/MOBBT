@@ -1671,6 +1671,7 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
         '61156113000175': 'MYPK3',  # Iochpe
         '28127603000178': 'BEES3',  # Banestes
         '42771949000135': 'QUAL3',  # Aliança/Qualicorp (Verifique se é esse o caso)
+        '50746577000115': 'CSAN3',  # COSAN
     }
     
     # APLICAÇÃO FORÇADA: Sobrescreve o ticker se o CNPJ bater com o dicionário
