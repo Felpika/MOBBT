@@ -2357,11 +2357,13 @@ elif pagina_selecionada == "Amplitude":
             st.metric("Percentil Histórico", f"{percentil_mb:.2f}%")
         with col2:
             st.plotly_chart(gerar_grafico_historico_amplitude(mb_series, "Histórico do Market Breadth (5 Anos)", valor_atual_mb, media_hist_mb), use_container_width=True)
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.plotly_chart(gerar_histograma_amplitude(mb_series, "Distribuição Histórica do Market Breadth", valor_atual_mb, media_hist_mb), use_container_width=True)
         with col2:
-            st.plotly_chart(gerar_heatmap_amplitude(resultados_mb['Retorno Médio'], faixa_atual_mb, f"Heatmap de Retorno Médio ({ATIVO_ANALISE})"), use_container_width=True)
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_mb['Retorno Médio'], faixa_atual_mb, f"Retorno Médio ({ATIVO_ANALISE})"), use_container_width=True)
+        with col3:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_mb['Taxa de Acerto'], faixa_atual_mb, f"Taxa de Acerto (% Subiu)"), use_container_width=True)
         
         st.markdown("---")
 
@@ -2391,11 +2393,13 @@ elif pagina_selecionada == "Amplitude":
             st.metric("Percentil Histórico", f"{percentil_ifr_media:.2f}%")
         with col2:
             st.plotly_chart(gerar_grafico_historico_amplitude(ifr_media_series, "Histórico da Média Geral do IFR (5 Anos)", valor_atual_ifr_media, media_hist_ifr_media), use_container_width=True)
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.plotly_chart(gerar_histograma_amplitude(ifr_media_series, "Distribuição Histórica da Média do IFR", valor_atual_ifr_media, media_hist_ifr_media), use_container_width=True)
         with col2:
-            st.plotly_chart(gerar_heatmap_amplitude(resultados_ifr_media['Retorno Médio'], faixa_atual_ifr_media, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Média IFR"), use_container_width=True)
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_ifr_media['Retorno Médio'], faixa_atual_ifr_media, f"Retorno Médio ({ATIVO_ANALISE})"), use_container_width=True)
+        with col3:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_ifr_media['Taxa de Acerto'], faixa_atual_ifr_media, f"Taxa de Acerto (% Subiu)"), use_container_width=True)
         
         st.markdown("---")
 
@@ -2425,11 +2429,13 @@ elif pagina_selecionada == "Amplitude":
             st.metric("Percentil Histórico", f"{percentil_net_ifr:.2f}%")
         with col2:
             st.plotly_chart(gerar_grafico_historico_amplitude(net_ifr_series, "Histórico do Net IFR (5 Anos)", valor_atual_net_ifr, media_hist_net_ifr), use_container_width=True)
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.plotly_chart(gerar_histograma_amplitude(net_ifr_series, "Distribuição Histórica do Net IFR", valor_atual_net_ifr, media_hist_net_ifr, nbins=100), use_container_width=True)
         with col2:
-            st.plotly_chart(gerar_heatmap_amplitude(resultados_net_ifr['Retorno Médio'], faixa_atual_net_ifr, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Net IFR"), use_container_width=True)
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_net_ifr['Retorno Médio'], faixa_atual_net_ifr, f"Retorno Médio ({ATIVO_ANALISE})"), use_container_width=True)
+        with col3:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_net_ifr['Taxa de Acerto'], faixa_atual_net_ifr, f"Taxa de Acerto (% Subiu)"), use_container_width=True)
 # ... (código anterior da seção Net IFR) ...
         
         # --- SEÇÃO 4: NOVAS MÁXIMAS VS MÍNIMAS (ATUALIZADO) ---
@@ -2479,11 +2485,13 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(fig_nh_cum, use_container_width=True)
 
         # Exibição: Histograma e Heatmap
-        col_hist, col_heat = st.columns(2)
+        col_hist, col_heat_ret, col_heat_hit = st.columns(3)
         with col_hist:
             st.plotly_chart(gerar_histograma_amplitude(nh_nl_series_recent, "Distribuição Histórica (Saldo Líquido)", valor_atual_nh, media_hist_nh, nbins=100), use_container_width=True)
-        with col_heat:
-            st.plotly_chart(gerar_heatmap_amplitude(resultados_nh['Retorno Médio'], faixa_atual_nh, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs Net Highs/Lows"), use_container_width=True)
+        with col_heat_ret:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_nh['Retorno Médio'], faixa_atual_nh, f"Retorno Médio ({ATIVO_ANALISE})"), use_container_width=True)
+        with col_heat_hit:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_nh['Taxa de Acerto'], faixa_atual_nh, f"Taxa de Acerto (% Subiu)"), use_container_width=True)
       
         st.markdown("---")
 
@@ -2521,11 +2529,13 @@ elif pagina_selecionada == "Amplitude":
         with col2:
             st.plotly_chart(gerar_grafico_historico_amplitude(macd_series, "Histórico MACD Breadth (% Papéis com MACD > Sinal)", valor_atual_macd, media_hist_macd), use_container_width=True)
             
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.plotly_chart(gerar_histograma_amplitude(macd_series, "Distribuição Histórica MACD Breadth", valor_atual_macd, media_hist_macd), use_container_width=True)
         with col2:
-            st.plotly_chart(gerar_heatmap_amplitude(resultados_macd['Retorno Médio'], faixa_atual_macd, f"Heatmap de Retorno Médio ({ATIVO_ANALISE}) vs MACD Breadth"), use_container_width=True)
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_macd['Retorno Médio'], faixa_atual_macd, f"Retorno Médio ({ATIVO_ANALISE})"), use_container_width=True)
+        with col3:
+            st.plotly_chart(gerar_heatmap_amplitude(resultados_macd['Taxa de Acerto'], faixa_atual_macd, f"Taxa de Acerto (% Subiu)"), use_container_width=True)
 
         st.markdown("---")
         # --- SEÇÃO 6: OSCILADOR MCCLELLAN E SUMMATION INDEX ---
