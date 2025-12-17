@@ -2597,9 +2597,10 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_histograma_amplitude(macd_series, "Distribuição Histórica MACD Breadth", valor_atual_macd, media_hist_macd), use_container_width=True)
         with col2:
              for ativo in ATIVOS_ANALISE:
-                 sufixo = f" ({ativo})"
+                 ativo_clean = ativo.replace('.SA', '')
+                 sufixo = f" ({ativo_clean})"
                  st.markdown(f"**{ativo}**")
-                 cols_ativo = [c for c in resultados_macd['Retorno Médio'].columns if ativo in c]
+                 cols_ativo = [c for c in resultados_macd['Retorno Médio'].columns if ativo_clean in c]
                  
                  if cols_ativo:
                      df_ret = resultados_macd['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
@@ -2660,9 +2661,10 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_histograma_amplitude(mcclellan_series_recent, "Distribuição (McClellan)", valor_atual_mcc, media_hist_mcc, nbins=80), use_container_width=True)
         with col_heat:
              for ativo in ATIVOS_ANALISE:
-                 sufixo = f" ({ativo})"
+                 ativo_clean = ativo.replace('.SA', '')
+                 sufixo = f" ({ativo_clean})"
                  st.markdown(f"**{ativo}**")
-                 cols_ativo = [c for c in resultados_mcc['Retorno Médio'].columns if ativo in c]
+                 cols_ativo = [c for c in resultados_mcc['Retorno Médio'].columns if ativo_clean in c]
                  
                  if cols_ativo:
                      df_ret = resultados_mcc['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
