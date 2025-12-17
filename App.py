@@ -2293,7 +2293,7 @@ elif pagina_selecionada == "Amplitude":
         st.session_state.analise_amplitude_executada = False
 
     if st.button("Executar Análise Completa de Amplitude", use_container_width=True):
-        with st.spinner("Realizando análise de amplitude... Este processo pode ser demorado na primeira vez."):
+        with st.spinner("Realizando análise de amplitude... Este processo pode ser demorado na primeira vez..."):
             # 1. Obter dados base
             tickers_cvm = obter_tickers_cvm_amplitude()
             if tickers_cvm:
