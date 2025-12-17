@@ -2383,9 +2383,10 @@ elif pagina_selecionada == "Amplitude":
              st.plotly_chart(gerar_histograma_amplitude(mb_series, "Distribuição Histórica do Market Breadth", valor_atual_mb, media_hist_mb), use_container_width=True)
         with col2:
              for ativo in ATIVOS_ANALISE:
-                 sufixo = f" ({ativo})"
+                 ativo_clean = ativo.replace('.SA', '')
+                 sufixo = f" ({ativo_clean})"
                  st.markdown(f"**{ativo}**")
-                 cols_ativo = [c for c in resultados_mb['Retorno Médio'].columns if ativo in c]
+                 cols_ativo = [c for c in resultados_mb['Retorno Médio'].columns if ativo_clean in c]
                  
                  if cols_ativo:
                      df_ret = resultados_mb['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
@@ -2428,9 +2429,10 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_histograma_amplitude(ifr_media_series, "Distribuição Histórica da Média do IFR", valor_atual_ifr_media, media_hist_ifr_media), use_container_width=True)
         with col2:
              for ativo in ATIVOS_ANALISE:
-                 sufixo = f" ({ativo})"
+                 ativo_clean = ativo.replace('.SA', '')
+                 sufixo = f" ({ativo_clean})"
                  st.markdown(f"**{ativo}**")
-                 cols_ativo = [c for c in resultados_ifr_media['Retorno Médio'].columns if ativo in c]
+                 cols_ativo = [c for c in resultados_ifr_media['Retorno Médio'].columns if ativo_clean in c]
                  
                  if cols_ativo:
                      df_ret = resultados_ifr_media['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
@@ -2473,9 +2475,10 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_histograma_amplitude(net_ifr_series, "Distribuição Histórica do Net IFR", valor_atual_net_ifr, media_hist_net_ifr, nbins=100), use_container_width=True)
         with col2:
              for ativo in ATIVOS_ANALISE:
-                 sufixo = f" ({ativo})"
+                 ativo_clean = ativo.replace('.SA', '')
+                 sufixo = f" ({ativo_clean})"
                  st.markdown(f"**{ativo}**")
-                 cols_ativo = [c for c in resultados_net_ifr['Retorno Médio'].columns if ativo in c]
+                 cols_ativo = [c for c in resultados_net_ifr['Retorno Médio'].columns if ativo_clean in c]
                  
                  if cols_ativo:
                      df_ret = resultados_net_ifr['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
@@ -2540,9 +2543,10 @@ elif pagina_selecionada == "Amplitude":
         
         with col_heat:
              for ativo in ATIVOS_ANALISE:
-                 sufixo = f" ({ativo})"
+                 ativo_clean = ativo.replace('.SA', '')
+                 sufixo = f" ({ativo_clean})"
                  st.markdown(f"**{ativo}**")
-                 cols_ativo = [c for c in resultados_nh['Retorno Médio'].columns if ativo in c]
+                 cols_ativo = [c for c in resultados_nh['Retorno Médio'].columns if ativo_clean in c]
                  
                  if cols_ativo:
                      df_ret = resultados_nh['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
