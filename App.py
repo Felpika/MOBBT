@@ -2516,7 +2516,6 @@ elif pagina_selecionada == "Amplitude":
              df_nh_plot_recent = df_nh_plot
 
         fig_nh = gerar_grafico_net_highs_lows(df_nh_plot_recent)
-        st.plotly_chart(fig_nh, use_container_width=True)
 
         # --- 4.2 Métricas de Net Highs/Lows ---
         valor_atual_nh = nh_nl_series.iloc[-1]
@@ -2539,6 +2538,8 @@ elif pagina_selecionada == "Amplitude":
             st.metric("Z-Score", f"{z_score_nh:.2f}")
             percentil_nh = stats.percentileofscore(nh_nl_series_recent, valor_atual_nh)
             st.metric("Percentil Histórico", f"{percentil_nh:.2f}%")
+        with col2:
+            st.plotly_chart(fig_nh, use_container_width=True)
 
         # --- 4.3 Gráfico Cumulative Net Highs/Lows (NOVO) ---
 
