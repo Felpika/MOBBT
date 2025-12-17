@@ -2357,14 +2357,10 @@ elif pagina_selecionada == "Amplitude":
         st.markdown("---") # Separa do próximo gráfico
         # --- FIM DO BLOCO DE CÓDIGO ATUALIZADO ---
 
-        # Criação das abas para compactar a visualização
-        tab_mb, tab_ifr_med, tab_net_ifr, tab_nh_nl, tab_macd, tab_mcc, tab_vol = st.tabs([
-            "Market Breadth", "IFR Médio", "Net IFR", "Highs/Lows", "MACD", "McClellan", "Volatilidade"
-        ])
+        # --- SEÇÕES DE ANÁLISE (Vertical Stack - Sequencial) ---
 
         # --- SEÇÃO 1: MARKET BREADTH (MM200) ---
-        with tab_mb:
-            st.subheader("Análise de Market Breadth (% de Ações acima da MM200)")
+        st.subheader("Análise de Market Breadth (% de Ações acima da MM200)")
             mb_series = df_indicadores['market_breadth']
             valor_atual_mb = mb_series.iloc[-1]
             media_hist_mb = mb_series.mean()
@@ -2402,9 +2398,10 @@ elif pagina_selecionada == "Amplitude":
                          c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_mb, "Retorno Médio"), use_container_width=True)
                          c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_mb, "Taxa de Acerto"), use_container_width=True)
         
+        st.markdown("---")
+
         # --- SEÇÃO 2: MÉDIA GERAL DO IFR (SEÇÃO ADICIONADA) ---
-        with tab_ifr_med:
-            st.subheader("Análise da Média Geral do IFR")
+        st.subheader("Análise da Média Geral do IFR")
             # Limita a análise da média geral do IFR aos últimos 5 anos
             ifr_media_series = df_indicadores['IFR_media_geral']
             if not ifr_media_series.empty:
@@ -2447,9 +2444,10 @@ elif pagina_selecionada == "Amplitude":
                          c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_ifr_media, "Retorno Médio"), use_container_width=True)
                          c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_ifr_media, "Taxa de Acerto"), use_container_width=True)
         
+        st.markdown("---")
+
         # --- SEÇÃO 3: ANÁLISE DE NET IFR (SEÇÃO ADICIONADA) ---
-        with tab_net_ifr:
-            st.subheader("Análise de Net IFR (% Sobrecomprados - % Sobrevendidos)")
+        st.subheader("Análise de Net IFR (% Sobrecomprados - % Sobrevendidos)")
             st.info("O **Net IFR** mede a diferença percentual entre ações sobrecompradas (IFR > 70) e ações sobrevendidas (IFR < 30). Valores positivos indicam euforia, negativos indicam pânico. Útil para identificar extremos de sentimento.")
             net_ifr_series = df_indicadores['IFR_net']
             if not net_ifr_series.empty:
@@ -2493,9 +2491,10 @@ elif pagina_selecionada == "Amplitude":
                          c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_net_ifr, "Retorno Médio"), use_container_width=True)
                          c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_net_ifr, "Taxa de Acerto"), use_container_width=True)
         
+        st.markdown("---")
+
         # --- SEÇÃO 4: NOVAS MÁXIMAS VS MÍNIMAS (ATUALIZADO) ---
-        with tab_nh_nl:
-            st.subheader("Novas Máximas vs Mínimas (52 Semanas)")
+        st.subheader("Novas Máximas vs Mínimas (52 Semanas)")
             st.info("Saldo líquido de ações atingindo novas máximas de 52 semanas menos novas mínimas. Valores positivos indicam força ampla e tendência de alta.")
 
             # --- 4.1 Gráfico de Histórico de Net Highs/Lows ---
@@ -2558,9 +2557,10 @@ elif pagina_selecionada == "Amplitude":
                          c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_nh, "Retorno Médio"), use_container_width=True)
                          c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_nh, "Taxa de Acerto"), use_container_width=True)
       
+        st.markdown("---")
+
         # --- SEÇÃO 5: MACD BREADTH (SEÇÃO ADICIONADA) ---
-        with tab_macd:
-            st.subheader("MACD Breadth")
+        st.subheader("MACD Breadth")
             st.info("Mede a porcentagem de ações com tendência de alta (MACD > Sinal). Útil para confirmar a força da tendência do índice. Se o índice sobe mas o MACD Breadth cai, cuidado (divergência). Níveis acima de 70-80% indicam euforia/sobrecompra; abaixo de 20-30%, pânico/sobrevenda.")
             macd_series = df_indicadores['macd_breadth']
             
@@ -2607,9 +2607,10 @@ elif pagina_selecionada == "Amplitude":
                          c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_macd, "Retorno Médio"), use_container_width=True)
                          c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_macd, "Taxa de Acerto"), use_container_width=True)
 
+        st.markdown("---")
+
         # --- SEÇÃO 6: OSCILADOR MCCLELLAN E SUMMATION INDEX ---
-        with tab_mcc:
-            st.subheader("Oscilador McClellan e Summation Index")
+        st.subheader("Oscilador McClellan e Summation Index")
             st.info(
                 "**Oscilador McClellan:** Indicador de momentum de curto prazo (diferença entre média exponencial de 19 e 39 dias das ações em alta/baixa). Acima de zero = Bullish.\n\n"
                 "**Summation Index (Acumulado):** A soma cumulativa do Oscilador. É excelente para identificar a **tendência de médio/longo prazo** da amplitude. "
@@ -2672,9 +2673,10 @@ elif pagina_selecionada == "Amplitude":
                          c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_mcc, "Retorno Médio"), use_container_width=True)
                          c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_mcc, "Taxa de Acerto"), use_container_width=True)
 
+        st.markdown("---")
+
         # --- SEÇÃO 7: CBOE Brazil ETF Volatility Index (VXEWZCLS) ---
-        with tab_vol:
-            st.subheader("Volatilidade Implícita Brasil (CBOE Brazil ETF Volatility Index - VXEWZ)")
+        st.subheader("Volatilidade Implícita Brasil (CBOE Brazil ETF Volatility Index - VXEWZ)")
             st.info(
                 "O índice **VXEWZ** mede a volatilidade implícita das opções do ETF EWZ (Brasil) negociado nos EUA. "
                 "Funciona como o 'VIX do Brasil'. **Valores altos** (acima de 30-40) indicam pânico/stress (oportunidade de compra de longo prazo?); "
