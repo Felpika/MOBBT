@@ -2335,13 +2335,7 @@ elif pagina_selecionada == "Amplitude":
             else:
                 st.error("Não foi possível obter a lista de tickers da CVM.")
     
-        st.session_state.df_analise_base = df_analise_base.dropna()
-                    st.session_state.analise_amplitude_executada = True
-                else:
-                    st.error("Não foi possível baixar os dados de preços necessários.")
-            else:
-                st.error("Não foi possível obter a lista de tickers da CVM.")
-    
+
     if st.session_state.analise_amplitude_executada:
         df_indicadores = st.session_state.df_indicadores
         df_analise_base = st.session_state.df_analise_base
