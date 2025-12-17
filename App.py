@@ -2541,10 +2541,7 @@ elif pagina_selecionada == "Amplitude":
             st.metric("Percentil Histórico", f"{percentil_nh:.2f}%")
 
         # --- 4.3 Gráfico Cumulative Net Highs/Lows (NOVO) ---
-        st.markdown("#### Acumulado (Cumulative AD Line)")
-        st.info("A linha cumulativa de Novas Máximas - Novas Mínimas ajuda a identificar a tendência primária. Se o mercado sobe mas a linha cai, é uma **divergência de baixa** (o rali é sustentado por poucas ações).")
-        fig_nh_cum = gerar_grafico_cumulative_highs_lows(df_indicadores)
-        st.plotly_chart(fig_nh_cum, use_container_width=True)
+
 
         # Exibição: Histograma e Heatmap
         col_hist, col_heat = st.columns([1, 2])
