@@ -2500,13 +2500,22 @@ elif pagina_selecionada == "Amplitude":
         # --- 4.1 Gráfico de Histórico de Net Highs/Lows ---
         # Recalculando séries recentes para garantir consistência
         nh_nl_series = df_indicadores['net_highs_lows']
+        
+        # Prepara DataFrame para o gráfico (precisa das 3 colunas)
+        cols_nh_plot = ['net_highs_lows', 'new_highs', 'new_lows']
+        # Garante que as colunas existem (pode ser que new_highs/lows não estejam no df_indicadores se algo mudou antes)
+        # Assumindo que existem pois a função de gráfico pede.
+        df_nh_plot = df_indicadores[cols_nh_plot]
+
         if not nh_nl_series.empty:
              cutoff_nh = nh_nl_series.index.max() - pd.DateOffset(years=5)
              nh_nl_series_recent = nh_nl_series[nh_nl_series.index >= cutoff_nh]
+             df_nh_plot_recent = df_nh_plot[df_nh_plot.index >= cutoff_nh]
         else:
              nh_nl_series_recent = nh_nl_series
+             df_nh_plot_recent = df_nh_plot
 
-        fig_nh = gerar_grafico_net_highs_lows(nh_nl_series_recent)
+        fig_nh = gerar_grafico_net_highs_lows(df_nh_plot_recent)
         st.plotly_chart(fig_nh, use_container_width=True)
 
         # --- 4.2 Métricas de Net Highs/Lows ---
