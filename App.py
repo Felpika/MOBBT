@@ -1500,7 +1500,8 @@ def gerar_heatmap_amplitude(tabela_media, faixa_atual, titulo):
         y=tabela_media.index,
         hoverongaps=False, colorscale='RdYlGn',
         text=tabela_media.map(lambda x: f'{x:.1f}%').values,
-        texttemplate="%{text}"
+        texttemplate="%{text}",
+        showscale=False # Remove a barra de cores lateral
     ))
     
     faixas_y = list(tabela_media.index)
@@ -2334,9 +2335,25 @@ elif pagina_selecionada == "Amplitude":
             else:
                 st.error("Não foi possível obter a lista de tickers da CVM.")
     
+        st.session_state.df_analise_base = df_analise_base.dropna()
+                    st.session_state.analise_amplitude_executada = True
+                else:
+                    st.error("Não foi possível baixar os dados de preços necessários.")
+            else:
+                st.error("Não foi possível obter a lista de tickers da CVM.")
+    
     if st.session_state.analise_amplitude_executada:
         df_indicadores = st.session_state.df_indicadores
         df_analise_base = st.session_state.df_analise_base
+        
+        # --- SELETOR DINÂMICO DE ATIVOS ---
+        col_ctrl1, col_ctrl2 = st.columns([0.2, 0.8])
+        with col_ctrl1:
+             ativo_selecionado = st.radio("Visualizar Ativo:", ["BOVA11", "SMAL11"], horizontal=True, label_visibility="collapsed")
+        
+        # Filtro de sufixo para as colunas
+        sufixo_ativo = f" ({ativo_selecionado})"
+
         # --- INÍCIO DO BLOCO DE CÓDIGO ATUALIZADO ---
         st.subheader("Visão Geral da Amplitude (MM50/200)")
         
@@ -2376,25 +2393,14 @@ elif pagina_selecionada == "Amplitude":
         with col1:
              st.plotly_chart(gerar_histograma_amplitude(mb_series, "Distribuição Histórica do Market Breadth", valor_atual_mb, media_hist_mb), use_container_width=True)
         with col2:
-             tab_bova, tab_smal = st.tabs(["BOVA11", "SMAL11"])
+             # Filtra as colunas do ativo selecionado
+             cols_ativo = [c for c in resultados_mb['Retorno Médio'].columns if ativo_selecionado in c]
+             df_ret = resultados_mb['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
+             df_hit = resultados_mb['Taxa de Acerto'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
              
-             with tab_bova:
-                 cols_bova = [c for c in resultados_mb['Retorno Médio'].columns if 'BOVA11' in c]
-                 df_ret_bova = resultados_mb['Retorno Médio'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 df_hit_bova = resultados_mb['Taxa de Acerto'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_bova, faixa_atual_mb, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_bova, faixa_atual_mb, "Taxa de Acerto"), use_container_width=True)
-
-             with tab_smal:
-                 cols_smal = [c for c in resultados_mb['Retorno Médio'].columns if 'SMAL11' in c]
-                 df_ret_smal = resultados_mb['Retorno Médio'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 df_hit_smal = resultados_mb['Taxa de Acerto'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_smal, faixa_atual_mb, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_smal, faixa_atual_mb, "Taxa de Acerto"), use_container_width=True)
+             c1, c2 = st.columns(2)
+             c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_mb, "Retorno Médio"), use_container_width=True)
+             c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_mb, "Taxa de Acerto"), use_container_width=True)
         
         st.markdown("---")
 
@@ -2428,25 +2434,13 @@ elif pagina_selecionada == "Amplitude":
         with col1:
             st.plotly_chart(gerar_histograma_amplitude(ifr_media_series, "Distribuição Histórica da Média do IFR", valor_atual_ifr_media, media_hist_ifr_media), use_container_width=True)
         with col2:
-             tab_bova, tab_smal = st.tabs(["BOVA11", "SMAL11"])
+             cols_ativo = [c for c in resultados_ifr_media['Retorno Médio'].columns if ativo_selecionado in c]
+             df_ret = resultados_ifr_media['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
+             df_hit = resultados_ifr_media['Taxa de Acerto'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
              
-             with tab_bova:
-                 cols_bova = [c for c in resultados_ifr_media['Retorno Médio'].columns if 'BOVA11' in c]
-                 df_ret_bova = resultados_ifr_media['Retorno Médio'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 df_hit_bova = resultados_ifr_media['Taxa de Acerto'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_bova, faixa_atual_ifr_media, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_bova, faixa_atual_ifr_media, "Taxa de Acerto"), use_container_width=True)
-
-             with tab_smal:
-                 cols_smal = [c for c in resultados_ifr_media['Retorno Médio'].columns if 'SMAL11' in c]
-                 df_ret_smal = resultados_ifr_media['Retorno Médio'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 df_hit_smal = resultados_ifr_media['Taxa de Acerto'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_smal, faixa_atual_ifr_media, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_smal, faixa_atual_ifr_media, "Taxa de Acerto"), use_container_width=True)
+             c1, c2 = st.columns(2)
+             c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_ifr_media, "Retorno Médio"), use_container_width=True)
+             c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_ifr_media, "Taxa de Acerto"), use_container_width=True)
         
         st.markdown("---")
 
@@ -2480,25 +2474,13 @@ elif pagina_selecionada == "Amplitude":
         with col1:
             st.plotly_chart(gerar_histograma_amplitude(net_ifr_series, "Distribuição Histórica do Net IFR", valor_atual_net_ifr, media_hist_net_ifr, nbins=100), use_container_width=True)
         with col2:
-             tab_bova, tab_smal = st.tabs(["BOVA11", "SMAL11"])
+             cols_ativo = [c for c in resultados_net_ifr['Retorno Médio'].columns if ativo_selecionado in c]
+             df_ret = resultados_net_ifr['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
+             df_hit = resultados_net_ifr['Taxa de Acerto'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
              
-             with tab_bova:
-                 cols_bova = [c for c in resultados_net_ifr['Retorno Médio'].columns if 'BOVA11' in c]
-                 df_ret_bova = resultados_net_ifr['Retorno Médio'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 df_hit_bova = resultados_net_ifr['Taxa de Acerto'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_bova, faixa_atual_net_ifr, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_bova, faixa_atual_net_ifr, "Taxa de Acerto"), use_container_width=True)
-
-             with tab_smal:
-                 cols_smal = [c for c in resultados_net_ifr['Retorno Médio'].columns if 'SMAL11' in c]
-                 df_ret_smal = resultados_net_ifr['Retorno Médio'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 df_hit_smal = resultados_net_ifr['Taxa de Acerto'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_smal, faixa_atual_net_ifr, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_smal, faixa_atual_net_ifr, "Taxa de Acerto"), use_container_width=True)
+             c1, c2 = st.columns(2)
+             c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_net_ifr, "Retorno Médio"), use_container_width=True)
+             c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_net_ifr, "Taxa de Acerto"), use_container_width=True)
 # ... (código anterior da seção Net IFR) ...
         
         # --- SEÇÃO 4: NOVAS MÁXIMAS VS MÍNIMAS (ATUALIZADO) ---
@@ -2554,25 +2536,13 @@ elif pagina_selecionada == "Amplitude":
             st.plotly_chart(gerar_histograma_amplitude(nh_nl_series_recent, "Distribuição do Saldo", valor_atual_nh, media_hist_nh, nbins=100), use_container_width=True)
         
         with col_heat:
-             tab_bova, tab_smal = st.tabs(["BOVA11", "SMAL11"])
+             cols_ativo = [c for c in resultados_nh['Retorno Médio'].columns if ativo_selecionado in c]
+             df_ret = resultados_nh['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
+             df_hit = resultados_nh['Taxa de Acerto'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
              
-             with tab_bova:
-                 cols_bova = [c for c in resultados_nh['Retorno Médio'].columns if 'BOVA11' in c]
-                 df_ret_bova = resultados_nh['Retorno Médio'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 df_hit_bova = resultados_nh['Taxa de Acerto'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_bova, faixa_atual_nh, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_bova, faixa_atual_nh, "Taxa de Acerto"), use_container_width=True)
-
-             with tab_smal:
-                 cols_smal = [c for c in resultados_nh['Retorno Médio'].columns if 'SMAL11' in c]
-                 df_ret_smal = resultados_nh['Retorno Médio'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 df_hit_smal = resultados_nh['Taxa de Acerto'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_smal, faixa_atual_nh, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_smal, faixa_atual_nh, "Taxa de Acerto"), use_container_width=True)
+             c1, c2 = st.columns(2)
+             c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_nh, "Retorno Médio"), use_container_width=True)
+             c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_nh, "Taxa de Acerto"), use_container_width=True)
       
         st.markdown("---")
 
@@ -2614,25 +2584,13 @@ elif pagina_selecionada == "Amplitude":
         with col1:
             st.plotly_chart(gerar_histograma_amplitude(macd_series, "Distribuição Histórica MACD Breadth", valor_atual_macd, media_hist_macd), use_container_width=True)
         with col2:
-             tab_bova, tab_smal = st.tabs(["BOVA11", "SMAL11"])
+             cols_ativo = [c for c in resultados_macd['Retorno Médio'].columns if ativo_selecionado in c]
+             df_ret = resultados_macd['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
+             df_hit = resultados_macd['Taxa de Acerto'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
              
-             with tab_bova:
-                 cols_bova = [c for c in resultados_macd['Retorno Médio'].columns if 'BOVA11' in c]
-                 df_ret_bova = resultados_macd['Retorno Médio'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 df_hit_bova = resultados_macd['Taxa de Acerto'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_bova, faixa_atual_macd, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_bova, faixa_atual_macd, "Taxa de Acerto"), use_container_width=True)
-
-             with tab_smal:
-                 cols_smal = [c for c in resultados_macd['Retorno Médio'].columns if 'SMAL11' in c]
-                 df_ret_smal = resultados_macd['Retorno Médio'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 df_hit_smal = resultados_macd['Taxa de Acerto'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_smal, faixa_atual_macd, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_smal, faixa_atual_macd, "Taxa de Acerto"), use_container_width=True)
+             c1, c2 = st.columns(2)
+             c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_macd, "Retorno Médio"), use_container_width=True)
+             c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_macd, "Taxa de Acerto"), use_container_width=True)
 
         st.markdown("---")
         # --- SEÇÃO 6: OSCILADOR MCCLELLAN E SUMMATION INDEX ---
@@ -2684,25 +2642,13 @@ elif pagina_selecionada == "Amplitude":
         with col_hist:
             st.plotly_chart(gerar_histograma_amplitude(mcclellan_series_recent, "Distribuição (McClellan)", valor_atual_mcc, media_hist_mcc, nbins=80), use_container_width=True)
         with col_heat:
-             tab_bova, tab_smal = st.tabs(["BOVA11", "SMAL11"])
+             cols_ativo = [c for c in resultados_mcc['Retorno Médio'].columns if ativo_selecionado in c]
+             df_ret = resultados_mcc['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
+             df_hit = resultados_mcc['Taxa de Acerto'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
              
-             with tab_bova:
-                 cols_bova = [c for c in resultados_mcc['Retorno Médio'].columns if 'BOVA11' in c]
-                 df_ret_bova = resultados_mcc['Retorno Médio'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 df_hit_bova = resultados_mcc['Taxa de Acerto'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_bova, faixa_atual_mcc, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_bova, faixa_atual_mcc, "Taxa de Acerto"), use_container_width=True)
-
-             with tab_smal:
-                 cols_smal = [c for c in resultados_mcc['Retorno Médio'].columns if 'SMAL11' in c]
-                 df_ret_smal = resultados_mcc['Retorno Médio'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 df_hit_smal = resultados_mcc['Taxa de Acerto'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                 
-                 c1, c2 = st.columns(2)
-                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret_smal, faixa_atual_mcc, "Retorno Médio"), use_container_width=True)
-                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit_smal, faixa_atual_mcc, "Taxa de Acerto"), use_container_width=True)
+             c1, c2 = st.columns(2)
+             c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_mcc, "Retorno Médio"), use_container_width=True)
+             c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_mcc, "Taxa de Acerto"), use_container_width=True)
 
         st.markdown("---")
         # --- SEÇÃO 7: CBOE Brazil ETF Volatility Index (VXEWZCLS) ---
@@ -2760,25 +2706,13 @@ elif pagina_selecionada == "Amplitude":
             with col_hist:
                 st.plotly_chart(gerar_histograma_amplitude(vxewz_series_recent, "Distribuição (VXEWZ)", valor_atual_vx, media_hist_vx, nbins=50), use_container_width=True)
             with col_heat:
-                 tab_bova, tab_smal = st.tabs(["BOVA11", "SMAL11"])
+                 cols_ativo = [c for c in resultados_vx['Retorno Médio'].columns if ativo_selecionado in c]
+                 df_ret = resultados_vx['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
+                 df_hit = resultados_vx['Taxa de Acerto'][cols_ativo].rename(columns=lambda x: x.replace(sufixo_ativo, ''))
                  
-                 with tab_bova:
-                     cols_bova = [c for c in resultados_vx['Retorno Médio'].columns if 'BOVA11' in c]
-                     df_ret_bova = resultados_vx['Retorno Médio'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                     df_hit_bova = resultados_vx['Taxa de Acerto'][cols_bova].rename(columns=lambda x: x.replace(' (BOVA11)', ''))
-                     
-                     c1, c2 = st.columns(2)
-                     c1.plotly_chart(gerar_heatmap_amplitude(df_ret_bova, faixa_atual_vx, "Retorno Médio"), use_container_width=True)
-                     c2.plotly_chart(gerar_heatmap_amplitude(df_hit_bova, faixa_atual_vx, "Taxa de Acerto"), use_container_width=True)
-
-                 with tab_smal:
-                     cols_smal = [c for c in resultados_vx['Retorno Médio'].columns if 'SMAL11' in c]
-                     df_ret_smal = resultados_vx['Retorno Médio'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                     df_hit_smal = resultados_vx['Taxa de Acerto'][cols_smal].rename(columns=lambda x: x.replace(' (SMAL11)', ''))
-                     
-                     c1, c2 = st.columns(2)
-                     c1.plotly_chart(gerar_heatmap_amplitude(df_ret_smal, faixa_atual_vx, "Retorno Médio"), use_container_width=True)
-                     c2.plotly_chart(gerar_heatmap_amplitude(df_hit_smal, faixa_atual_vx, "Taxa de Acerto"), use_container_width=True)
+                 c1, c2 = st.columns(2)
+                 c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_vx, "Retorno Médio"), use_container_width=True)
+                 c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_vx, "Taxa de Acerto"), use_container_width=True)
 
         else:
             st.warning("Não foi possível carregar os dados do índice de volatilidade VXEWZ (VXEWZCLS) a partir do FRED.")
