@@ -1657,8 +1657,29 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
     # Lookup: CNPJ -> Ticker
     df_tickers = df_cad_valido[['CNPJ_Limpo', 'Codigo_Negociacao']].dropna().drop_duplicates(subset=['CNPJ_Limpo'])
 
-    # --- 3. Merge e CORREÇÃO FORÇADA ---
+    # --- 3.5 Cálculo do Preço Médio de Compra ---
+    # Filtra apenas transações de compra para calcular o preço médio ponderado
+    df_compras = df_periodo[df_periodo['Tipo_Movimentacao'].isin(tipos_compra)].copy()
+    
+    if not df_compras.empty:
+        # Agrupa por CNPJ para somar volume e quantidade de compras
+        df_pm_compras = df_compras.groupby(['CNPJ_Companhia'])[['Volume', 'Quantidade']].sum().reset_index()
+        # Calcula PM = Volume Total / Quantidade Total
+        df_pm_compras['Preco_Medio_Compra'] = np.where(
+            df_pm_compras['Quantidade'] > 0,
+            df_pm_compras['Volume'] / df_pm_compras['Quantidade'],
+            0
+        )
+        df_pm_compras['CNPJ_Limpo'] = limpar_cnpj(df_pm_compras['CNPJ_Companhia'])
+        df_pm_compras = df_pm_compras[['CNPJ_Limpo', 'Preco_Medio_Compra']]
+    else:
+        df_pm_compras = pd.DataFrame(columns=['CNPJ_Limpo', 'Preco_Medio_Compra'])
+
+    # --- 4. Merge e CORREÇÃO FORÇADA ---
     df_merged = pd.merge(df_net_total, df_tickers, on='CNPJ_Limpo', how='left')
+    
+    # Faz merge com o Preço Médio
+    df_merged = pd.merge(df_merged, df_pm_compras, on='CNPJ_Limpo', how='left')
 
     # Dicionário de Correção Manual (CNPJ Numérico -> Ticker)
     correcoes_manuais = {
@@ -1683,7 +1704,7 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
     df_merged['Codigo_Negociacao'] = df_merged['Codigo_Negociacao'].fillna("SEM_TICKER")
     df_merged['Codigo_Negociacao'] = df_merged['Codigo_Negociacao'].replace('', 'SEM_TICKER')
 
-    # --- 4. Market Cap e Finalização ---
+    # --- 5. Market Cap e Finalização ---
     df_lookup_mcap = df_merged[df_merged['Codigo_Negociacao'] != "SEM_TICKER"][['Codigo_Negociacao']].drop_duplicates()
     df_market_cap_lookup = buscar_market_caps_otimizado(df_lookup_mcap, force_refresh=force_refresh)
 
@@ -1697,11 +1718,11 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
     )
 
     df_tabela = df_final[[
-        'Codigo_Negociacao', 'Nome_Companhia', 'Volume_Net', 'MarketCap', 'Volume_vs_MarketCap_Pct', 'CNPJ_Companhia'
+        'Codigo_Negociacao', 'Nome_Companhia', 'Volume_Net', 'MarketCap', 'Volume_vs_MarketCap_Pct', 'Preco_Medio_Compra', 'CNPJ_Companhia'
     ]].rename(columns={
         'Codigo_Negociacao': 'Ticker', 'Nome_Companhia': 'Empresa',
         'Volume_Net': 'Volume Líquido (R$)', 'MarketCap': 'Valor de Mercado (R$)',
-        'Volume_vs_MarketCap_Pct': '% do Market Cap'
+        'Volume_vs_MarketCap_Pct': '% do Market Cap', 'Preco_Medio_Compra': 'Preço Médio Compras (R$)'
     })
 
     return df_tabela.sort_values(by='Volume Líquido (R$)', ascending=False).reset_index(drop=True)
@@ -2701,7 +2722,8 @@ elif pagina_selecionada == "Radar de Insiders":
                 st.dataframe(df_resultado.style.format({
                     'Volume Líquido (R$)': '{:,.0f}',
                     'Valor de Mercado (R$)': '{:,.0f}',
-                    '% do Market Cap': '{:.4f}%'
+                    '% do Market Cap': '{:.4f}%',
+                    'Preço Médio Compras (R$)': 'R$ {:,.2f}'
                 }), use_container_width=True)
 
                 # Destaques
