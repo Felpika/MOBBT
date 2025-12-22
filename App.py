@@ -16,8 +16,9 @@ import io  # Adicionado para a nova funcionalidade
 from streamlit_option_menu import option_menu
 import pandas_ta as ta
 from scipy import stats
-import plotly.io as pio  # <--- Adicione esta linha
-import plotly.io as pio  # <--- Adicione esta linha
+import plotly.io as pio
+import json
+import base64
 
 
 # --- DEFINIÇÃO DO TEMA CUSTOMIZADO (BROKEBERG) ---
