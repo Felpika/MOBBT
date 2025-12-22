@@ -304,16 +304,16 @@ def get_sector_indices_chart():
         # Calculate Deviation
         deviation = ((sector_val - ma50) / ma50) * 100
 
-        # DEBUG SPECIFIC SECTORS
-        if sector in ['UTIL', 'IEEX', 'INDX']:
-             st.write(f"--- DEBUG {sector} ---")
-             st.write(f"Weights sum: {weights.sum()}")
-             st.write(f"Sector Val range: {sector_val.min()} to {sector_val.max()}")
-             st.write(f"MA50 NaNs: {ma50.isnull().sum()} / {len(ma50)}")
-             st.write(f"Deviation Valid Count: {deviation.count()}")
-             if deviation.count() == 0:
-                  st.error(f"{sector} resultou em série vazia.")
-             st.write("--------------------")
+        # DEBUG SPECIFIC SECTORS (Disabled)
+        # if sector in ['UTIL', 'IEEX', 'INDX']:
+             # st.write(f"--- DEBUG {sector} ---")
+             # st.write(f"Weights sum: {weights.sum()}")
+             # st.write(f"Sector Val range: {sector_val.min()} to {sector_val.max()}")
+             # st.write(f"MA50 NaNs: {ma50.isnull().sum()} / {len(ma50)}")
+             # st.write(f"Deviation Valid Count: {deviation.count()}")
+             # if deviation.count() == 0:
+                  # st.error(f"{sector} resultou em série vazia.")
+             # st.write("--------------------")
         
         results[sector] = deviation
 
