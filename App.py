@@ -18,6 +18,14 @@ from streamlit_option_menu import option_menu
 import pandas_ta as ta
 from scipy import stats
 import plotly.io as pio  # <--- Adicione esta linha
+import plotly.io as pio  # <--- Adicione esta linha
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import base64
+import json
+
+# Configuração para evitar erro de thread do Matplotlib no Streamlit
+plt.switch_backend('Agg')
 
 # --- DEFINIÇÃO DO TEMA CUSTOMIZADO (BROKEBERG) ---
 def configurar_tema_brokeberg():
@@ -2295,8 +2303,250 @@ elif pagina_selecionada == "Ações BR":
         st.plotly_chart(st.session_state.fig_ratio, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
     st.markdown("---")
     
-    # Seção 2: Análise de Insiders (código original mantido)
-    # SUBSTITUA a seção "Radar de Insiders" existente por ESTE BLOCO DE CÓDIGO
+# --- HELPER FUNCTIONS PARA ÍNDICES SETORIAIS (Incorporado) ---
+
+def parse_pt_br_float(s):
+    try:
+        if isinstance(s, (int, float)):
+            return float(s)
+        if isinstance(s, str):
+            # Remove pontos de milhar e troca vírgula por ponto
+            return float(s.replace('.', '').replace(',', '.'))
+        return 0.0
+    except:
+        return 0.0
+
+@st.cache_data(ttl=3600*24) # Cache de 24 horas para composição
+def fetch_index_composition(index_code):
+    """
+    Fetches the current composition of a B3 index using their internal API.
+    index_code: str (e.g., 'ICON', 'IEEX', 'IMOB')
+    """
+    url_template = "https://sistemaswebb3-listados.b3.com.br/indexProxy/indexCall/GetPortfolioDay/{}"
+    
+    # Payload structure expected by B3
+    payload_dict = {"index": index_code, "language": "pt-br"}
+    payload_json = json.dumps(payload_dict)
+    payload_b64 = base64.b64encode(payload_json.encode('utf-8')).decode('utf-8')
+    
+    url = url_template.format(payload_b64)
+    
+    # print(f"Fetching {index_code} composition from B3...")
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # 'results' key contains the list of assets
+        if 'results' not in data:
+            # print(f"Error: 'results' key not found in response for {index_code}")
+            return pd.DataFrame()
+            
+        assets = data['results']
+        
+        # Convert to DataFrame
+        # We need 'cod' (Ticker) and 'theoricalQty' (Quantity)
+        df = pd.DataFrame(assets)
+        
+        if df.empty:
+             # print(f"Warning: API returned empty list for {index_code}")
+             return pd.DataFrame()
+
+        # Rename and clean
+        df = df[['cod', 'theoricalQty']].copy()
+        df.columns = ['Ticker', 'Qty']
+        
+        # Clean Ticker (add .SA)
+        df['Ticker'] = df['Ticker'].astype(str).str.strip() + ".SA"
+        
+        # Clean Qty
+        df['Qty'] = df['Qty'].apply(parse_pt_br_float)
+        
+        return df
+        
+    except Exception as e:
+        # print(f"Failed to fetch {index_code}: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600*4) # Cache de 4 horas para preços
+def download_prices_sector(tickers, start_date):
+    if not tickers:
+        return pd.DataFrame()
+    return yf.download(tickers, start=start_date, progress=False, threads=True)
+
+def get_sector_indices_chart():
+    # 1. Configuration 
+    start_date = "2022-01-01"
+    
+    # Map filenames to legible names and colors
+    index_meta = {
+        'IMOB': {'color': '#008000', 'name': 'Imobiliario'},       # Green
+        'IFNC': {'color': '#1E90FF', 'name': 'Financeiro'},        # Blue
+        'ICON': {'color': '#DADADA', 'name': 'Consumo'},           # White/Gray (Changed from black for dark mode)
+        'UTIL': {'color': '#FF1493', 'name': 'Utilidade Publica'}, # DeepPink/Magenta
+        'IEEX': {'color': '#8B4513', 'name': 'Energia Eletrica'},  # SaddleBrown
+        'IMAT': {'color': '#FFD700', 'name': 'Materiais Basicos'}, # Gold
+        'INDX': {'color': '#FF8C00', 'name': 'Industria'}          # DarkOrange
+    }
+    
+    compositions = {}
+    all_tickers = set()
+    
+    # 2. Fetch Compositions Automatically
+    progress_bar = st.progress(0, text="Baixando composição dos índices...")
+    
+    total_indices = len(index_meta)
+    for i, sector_code in enumerate(index_meta.keys()):
+        df = fetch_index_composition(sector_code)
+        if not df.empty:
+            compositions[sector_code] = df
+            all_tickers.update(df['Ticker'].tolist())
+        progress_bar.progress((i + 1) / (total_indices * 2), text=f"Baixando composição: {sector_code}")
+            
+    if not all_tickers:
+        progress_bar.empty()
+        st.error("Não foi possível encontrar tickers para nenhum setor.")
+        return None
+
+    # 3. Download Data
+    progress_bar.progress(0.6, text=f"Baixando preços de {len(all_tickers)} ativos...")
+    try:
+        data = download_prices_sector(list(all_tickers), start_date)
+        
+        # Flatten the MultiIndex manually
+        prices = pd.DataFrame(index=data.index)
+        
+        if isinstance(data.columns, pd.MultiIndex):
+            for ticker in all_tickers:
+                if ('Adj Close', ticker) in data.columns:
+                    prices[ticker] = data[('Adj Close', ticker)]
+                elif ('Close', ticker) in data.columns:
+                    prices[ticker] = data[('Close', ticker)]
+        else:
+            if 'Adj Close' in data.columns:
+                 prices = data['Adj Close']
+            elif 'Close' in data.columns:
+                 prices = data['Close']
+            else:
+                 prices = data 
+        
+        if isinstance(prices, pd.Series):
+             prices = prices.to_frame()
+             
+    except Exception as e:
+        progress_bar.empty()
+        st.error(f"Falha ao baixar dados: {e}")
+        return None
+
+    if prices.empty:
+        progress_bar.empty()
+        st.error("Nenhum dado de preço retornado.")
+        return None
+
+    # 4. Calculate Indices
+    progress_bar.progress(0.8, text="Calculando índices setoriais...")
+    results = pd.DataFrame()
+    
+    for sector, comp_df in compositions.items():
+        valid_tickers = [t for t in comp_df['Ticker'] if t in prices.columns]
+        
+        if not valid_tickers:
+            continue
+        
+        # Check for bad tickers
+        sector_slice = prices[valid_tickers]
+        valid_counts = sector_slice.count()
+        total_rows = len(sector_slice)
+        bad_tickers = valid_counts[valid_counts < 0.8 * total_rows].index.tolist()
+        
+        if bad_tickers:
+            valid_tickers = [t for t in valid_tickers if t not in bad_tickers]
+        
+        if not valid_tickers:
+             continue
+
+        sector_prices = prices[valid_tickers].ffill()
+        
+        comp_df = comp_df.set_index('Ticker')
+        weights = comp_df.loc[valid_tickers, 'Qty']
+        
+        # Calculate Index Value
+        sector_val = sector_prices.dot(weights)
+        
+        # Calculate MA50
+        ma50 = sector_val.rolling(window=50).mean()
+        
+        # Calculate Deviation
+        deviation = ((sector_val - ma50) / ma50) * 100
+        
+        results[sector] = deviation
+
+    progress_bar.empty()
+
+    if results.empty:
+        st.warning("Nenhum resultado calculado.")
+        return None
+
+    # 5. Plotting
+    # Configuração de estilo escuro para combinar com o app
+    plt.style.use('dark_background')
+    
+    # Criar figura e eixos
+    fig, ax = plt.subplots(figsize=(12, 7))
+    
+    # Definir cor de fundo da figura e dos eixos
+    fig.patch.set_facecolor('#0E1117') # Cor de fundo do Streamlit dark mode aprox
+    ax.set_facecolor('#0E1117')
+
+    for sector in results.columns:
+        meta = index_meta.get(sector, {})
+        color = meta.get('color', 'grey')
+        label = meta.get('name', sector)
+        
+        series = results[sector].dropna()
+        ax.plot(series.index, series, label=label, color=color, linewidth=1.5, alpha=0.9)
+        
+        if not series.empty:
+            last_val = series.iloc[-1]
+            last_date = series.index[-1]
+            ax.annotate(f'{last_val:.2f}%', 
+                        xy=(last_date, last_val), 
+                        xytext=(5, 0), 
+                        textcoords="offset points", 
+                        va='center', 
+                        color='black', # Texto preto para contraste no label colorido
+                        bbox=dict(boxstyle="square,pad=0.3", fc=color, ec="none"),
+                        fontname='Segoe UI', fontsize=9, fontweight='bold')
+
+    ax.axhline(0, color='white', linewidth=1, linestyle='--', alpha=0.5)
+
+    ax.set_title("Desvio dos Índices Setoriais em Relação à MMA 50", fontsize=14, pad=20, color='white')
+    ax.set_ylabel("Variação % da MMA 50", fontsize=10, color='gray')
+    
+    # Legenda
+    legend = ax.legend(loc='upper left', frameon=False, fontsize=9)
+    for text in legend.get_texts():
+        text.set_color("white")
+    
+    # Formatação dos Eixos
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b\n%y'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+    
+    ax.grid(True, linestyle=':', alpha=0.2, color='gray')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_color('#30363D')
+    ax.spines['left'].set_color('#30363D')
+    ax.tick_params(axis='x', colors='gray')
+    ax.tick_params(axis='y', colors='gray')
+
+    plt.tight_layout()
+    
+    return fig
+
+# Seção 2: Análise de Insiders (código original mantido)
+# SUBSTITUA a seção "Radar de Insiders" existente por ESTE BLOCO DE CÓDIGO
 elif pagina_selecionada == "Amplitude":
     st.header("Análise de Amplitude de Mercado (Market Breadth)")
     st.info(
@@ -2377,6 +2627,21 @@ elif pagina_selecionada == "Amplitude":
         
         st.markdown("---") # Separa do próximo gráfico
         # --- FIM DO BLOCO DE CÓDIGO ATUALIZADO ---
+
+        # --- SEÇÃO: ÍNDICES SETORIAIS (NOVO) ---
+        st.subheader("Índices Setoriais (Desvio da MMA50)")
+        st.info("Visualiza o desvio percentual dos principais índices setoriais (IMOB, IFNC, etc.) em relação à sua Média Móvel de 50 dias.")
+        
+        if st.button("Gerar Gráfico de Índices Setoriais", type="primary", use_container_width=True):
+            with st.spinner("Buscando composições e calculando índices..."):
+                fig_sector = get_sector_indices_chart()
+                if fig_sector:
+                    st.pyplot(fig_sector)
+                else:
+                    st.error("Não foi possível gerar o gráfico.")
+        
+        st.markdown("---")
+
 
         # --- SEÇÕES DE ANÁLISE (Vertical Stack - Sequencial) ---
 
