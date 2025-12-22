@@ -86,7 +86,7 @@ def parse_pt_br_float(s):
     except:
         return 0.0
 
-@st.cache_data(ttl=3600*24) # Cache de 24 horas para composição
+@st.cache_data(ttl=3600*25) # Cache de 25 horas (Alterado para forçar refresh)
 def fetch_index_composition(index_code):
     """
     Fetches the current composition of a B3 index using their internal API.
@@ -139,7 +139,7 @@ def fetch_index_composition(index_code):
         # print(f"Failed to fetch {index_code}: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600*4) # Cache de 4 horas para preços
+@st.cache_data(ttl=3600*25) # Cache de 25 horas (Alterado para forçar refresh)
 def download_prices_sector(tickers, start_date):
     if not tickers:
         return pd.DataFrame()
