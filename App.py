@@ -233,6 +233,7 @@ def get_sector_indices_chart():
     progress_bar.progress(0.8)
     results = pd.DataFrame()
     
+    for sector, comp_df in compositions.items():
         # Filter tickers that we actually have prices for
         valid_tickers = [t for t in comp_df['Ticker'] if t in prices.columns]
         
