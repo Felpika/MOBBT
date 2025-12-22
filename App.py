@@ -249,10 +249,23 @@ def get_sector_indices_chart():
         # Check for data quality (avoid tickers with too many NaNs)
         sector_slice = prices[valid_tickers]
         
+        # Filter tickers with too much missing data (e.g. recent IPOs)
+        total_rows = len(sector_slice)
+        # Count non-NaN values for each column
+        valid_counts = sector_slice.count()
+        # Tickers with less than 80% valid data
+        bad_tickers = valid_counts[valid_counts < 0.8 * total_rows].index.tolist()
         
-        # DEBUG: Check null percentage
-        # nan_pct = sector_slice.isnull().mean()
-        # st.write(f"Percentual de falhas por ativo: {nan_pct[nan_pct > 0.2]}")
+        if bad_tickers:
+            # st.warning(f"Setor {sector}: Removendo {len(bad_tickers)} ativos com histórico insuficiente: {bad_tickers}")
+            valid_tickers = [t for t in valid_tickers if t not in bad_tickers]
+            
+        if not valid_tickers:
+             st.error(f"Setor {sector} pulado: Sobraram 0 ativos após filtro de qualidade.")
+             continue
+             
+        # Re-slice with only good tickers
+        sector_slice = prices[valid_tickers]
         
         # Drop columns that are entirely NaN
         sector_slice = sector_slice.dropna(axis=1, how='all')
