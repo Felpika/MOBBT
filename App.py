@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -19,13 +18,7 @@ import pandas_ta as ta
 from scipy import stats
 import plotly.io as pio  # <--- Adicione esta linha
 import plotly.io as pio  # <--- Adicione esta linha
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import base64
-import json
 
-# Configuração para evitar erro de thread do Matplotlib no Streamlit
-plt.switch_backend('Agg')
 
 # --- DEFINIÇÃO DO TEMA CUSTOMIZADO (BROKEBERG) ---
 def configurar_tema_brokeberg():
@@ -153,101 +146,118 @@ def download_prices_sector(tickers, start_date):
 
 def get_sector_indices_chart():
     # 1. Configuration 
-    start_date = "2022-01-01"
+    start_date = "2023-01-01" # Pegando um pouco mais de histórico para garantir MA50
     
-    # Map filenames to legible names and colors
+    # Map filenames to legible names and colors (Cyberpunk/Brokeberg Palette)
     index_meta = {
-        'IMOB': {'color': '#008000', 'name': 'Imobiliario'},       # Green
-        'IFNC': {'color': '#1E90FF', 'name': 'Financeiro'},        # Blue
-        'ICON': {'color': '#DADADA', 'name': 'Consumo'},           # White/Gray (Changed from black for dark mode)
-        'UTIL': {'color': '#FF1493', 'name': 'Utilidade Publica'}, # DeepPink/Magenta
-        'IEEX': {'color': '#8B4513', 'name': 'Energia Eletrica'},  # SaddleBrown
-        'IMAT': {'color': '#FFD700', 'name': 'Materiais Basicos'}, # Gold
-        'INDX': {'color': '#FF8C00', 'name': 'Industria'}          # DarkOrange
+        'IMOB': {'color': '#39E58C', 'name': 'Imobiliário (IMOB)'},       # VERDE_NEON
+        'IFNC': {'color': '#00D4FF', 'name': 'Financeiro (IFNC)'},        # CIANO_NEON
+        'ICON': {'color': '#F0F6FC', 'name': 'Consumo (ICON)'},           # TEXTO_PRINCIPAL (Branco/Cinza claro)
+        'UTIL': {'color': '#FF4B4B', 'name': 'Utilidade Pública (UTIL)'}, # VERMELHO_NEON
+        'IEEX': {'color': '#FFB302', 'name': 'Energia Elétrica (IEEX)'},  # AMARELO_OURO
+        'IMAT': {'color': '#AB47BC', 'name': 'Materiais Básicos (IMAT)'}, # Roxo
+        'INDX': {'color': '#5C6BC0', 'name': 'Indústria (INDX)'}          # Azul Índigo
     }
     
     compositions = {}
     all_tickers = set()
     
     # 2. Fetch Compositions Automatically
-    progress_bar = st.progress(0, text="Baixando composição dos índices...")
+    # Using st.empty() to update progress without stealing focus from main app
+    progress_text = st.empty()
+    progress_bar = st.progress(0)
     
     total_indices = len(index_meta)
+    
     for i, sector_code in enumerate(index_meta.keys()):
+        progress_text.text(f"Baixando composição: {sector_code}...")
         df = fetch_index_composition(sector_code)
         if not df.empty:
             compositions[sector_code] = df
             all_tickers.update(df['Ticker'].tolist())
-        progress_bar.progress((i + 1) / (total_indices * 2), text=f"Baixando composição: {sector_code}")
+        progress_bar.progress((i + 1) / (total_indices * 2))
             
     if not all_tickers:
         progress_bar.empty()
-        st.error("Não foi possível encontrar tickers para nenhum setor.")
+        progress_text.empty()
+        st.error("Não foi possível encontrar tickers para nenhum setor. Verifique a conexão com a B3.")
         return None
 
     # 3. Download Data
-    progress_bar.progress(0.6, text=f"Baixando preços de {len(all_tickers)} ativos...")
+    progress_text.text(f"Baixando preços de {len(all_tickers)} ativos...")
+    progress_bar.progress(0.6)
+    
     try:
+        # Extend start_date back to ensure we have enough data for MA50
         data = download_prices_sector(list(all_tickers), start_date)
         
-        # Flatten the MultiIndex manually
+        # Flatten the MultiIndex manually if needed
         prices = pd.DataFrame(index=data.index)
         
+        # Handle yfinance multi-level columns
         if isinstance(data.columns, pd.MultiIndex):
             for ticker in all_tickers:
+                # Try Adj Close first, then Close
                 if ('Adj Close', ticker) in data.columns:
                     prices[ticker] = data[('Adj Close', ticker)]
                 elif ('Close', ticker) in data.columns:
                     prices[ticker] = data[('Close', ticker)]
         else:
+            # Single ticker or flat request scenario (unlikely with list)
             if 'Adj Close' in data.columns:
                  prices = data['Adj Close']
             elif 'Close' in data.columns:
                  prices = data['Close']
             else:
                  prices = data 
-        
+
+        # Clean up any potential Series to DataFrame ambiguity
         if isinstance(prices, pd.Series):
              prices = prices.to_frame()
              
     except Exception as e:
         progress_bar.empty()
-        st.error(f"Falha ao baixar dados: {e}")
+        progress_text.empty()
+        st.error(f"Falha ao baixar dados de preços: {e}")
         return None
 
     if prices.empty:
         progress_bar.empty()
-        st.error("Nenhum dado de preço retornado.")
+        progress_text.empty()
+        st.error("Nenhum dado de preço retornado pelo Yahoo Finance.")
         return None
 
     # 4. Calculate Indices
-    progress_bar.progress(0.8, text="Calculando índices setoriais...")
+    progress_text.text("Calculando desvios dos índices setoriais...")
+    progress_bar.progress(0.8)
     results = pd.DataFrame()
     
     for sector, comp_df in compositions.items():
+        # Filter tickers that we actually have prices for
         valid_tickers = [t for t in comp_df['Ticker'] if t in prices.columns]
         
         if not valid_tickers:
             continue
         
-        # Check for bad tickers
+        # Check for data quality (avoid tickers with too many NaNs)
         sector_slice = prices[valid_tickers]
-        valid_counts = sector_slice.count()
-        total_rows = len(sector_slice)
-        bad_tickers = valid_counts[valid_counts < 0.8 * total_rows].index.tolist()
-        
-        if bad_tickers:
-            valid_tickers = [t for t in valid_tickers if t not in bad_tickers]
-        
+        # Drop columns that are entirely NaN
+        sector_slice = sector_slice.dropna(axis=1, how='all')
+        valid_tickers = sector_slice.columns.tolist()
+
         if not valid_tickers:
              continue
 
-        sector_prices = prices[valid_tickers].ffill()
+        # Forward fill to handle missing days
+        sector_prices = sector_slice.ffill()
         
-        comp_df = comp_df.set_index('Ticker')
-        weights = comp_df.loc[valid_tickers, 'Qty']
+        # Get weights
+        comp_df_sector = comp_df.set_index('Ticker')
+        # Filter weights for only valid tickers
+        weights = comp_df_sector.loc[valid_tickers, 'Qty']
         
-        # Calculate Index Value
+        # Calculate Index Value (Simple Weighted Sum for this proxy)
+        # Note: Official indices use more complex divisors, but this is a valid proxy for *trend* and *deviation*
         sector_val = sector_prices.dot(weights)
         
         # Calculate MA50
@@ -259,65 +269,67 @@ def get_sector_indices_chart():
         results[sector] = deviation
 
     progress_bar.empty()
+    progress_text.empty()
 
     if results.empty:
-        st.warning("Nenhum resultado calculado.")
+        st.warning("Não foi possível calcular nenhum índice setorial. Verifique se os dados da B3 foram baixados corretamente.")
         return None
 
-    # 5. Plotting
-    # Configuração de estilo escuro para combinar com o app
-    plt.style.use('dark_background')
-    
-    # Criar figura e eixos
-    fig, ax = plt.subplots(figsize=(12, 7))
-    
-    # Definir cor de fundo da figura e dos eixos
-    fig.patch.set_facecolor('#0E1117') # Cor de fundo do Streamlit dark mode aprox
-    ax.set_facecolor('#0E1117')
+    # 5. Plotting with Plotly
+    fig = go.Figure()
 
     for sector in results.columns:
         meta = index_meta.get(sector, {})
-        color = meta.get('color', 'grey')
+        color = meta.get('color', '#808080')
         label = meta.get('name', sector)
         
         series = results[sector].dropna()
-        ax.plot(series.index, series, label=label, color=color, linewidth=1.5, alpha=0.9)
+        if series.empty:
+            continue
+            
+        fig.add_trace(go.Scatter(
+            x=series.index,
+            y=series,
+            mode='lines',
+            name=label,
+            line=dict(color=color, width=2),
+            hovertemplate=f"<b>{label}</b><br>Data: %{{x|%d/%m/%Y}}<br>Desvio: %{{y:.2f}}%<extra></extra>"
+        ))
         
-        if not series.empty:
-            last_val = series.iloc[-1]
-            last_date = series.index[-1]
-            ax.annotate(f'{last_val:.2f}%', 
-                        xy=(last_date, last_val), 
-                        xytext=(5, 0), 
-                        textcoords="offset points", 
-                        va='center', 
-                        color='black', # Texto preto para contraste no label colorido
-                        bbox=dict(boxstyle="square,pad=0.3", fc=color, ec="none"),
-                        fontname='Segoe UI', fontsize=9, fontweight='bold')
+        # Annotation for the last value
+        last_val = series.iloc[-1]
+        last_date = series.index[-1]
+        
+        fig.add_annotation(
+            x=last_date,
+            y=last_val,
+            text=f"{last_val:.2f}%",
+            showarrow=False,
+            xanchor="left",
+            font=dict(color=color, size=12),
+            bgcolor="#161B22",
+            bordercolor=color,
+            borderwidth=1,
+            xshift=5
+        )
 
-    ax.axhline(0, color='white', linewidth=1, linestyle='--', alpha=0.5)
+    # Zero line
+    fig.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
 
-    ax.set_title("Desvio dos Índices Setoriais em Relação à MMA 50", fontsize=14, pad=20, color='white')
-    ax.set_ylabel("Variação % da MMA 50", fontsize=10, color='gray')
-    
-    # Legenda
-    legend = ax.legend(loc='upper left', frameon=False, fontsize=9)
-    for text in legend.get_texts():
-        text.set_color("white")
-    
-    # Formatação dos Eixos
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b\n%y'))
-    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
-    
-    ax.grid(True, linestyle=':', alpha=0.2, color='gray')
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_color('#30363D')
-    ax.spines['left'].set_color('#30363D')
-    ax.tick_params(axis='x', colors='gray')
-    ax.tick_params(axis='y', colors='gray')
-
-    plt.tight_layout()
+    fig.update_layout(
+        title="<b>Desvio dos Índices Setoriais vs MMA 50</b>",
+        yaxis_title="Variação % da MMA 50",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        height=600,
+        margin=dict(l=40, r=40, t=80, b=40),
+        hovermode="x unified"
+    )
     
     return fig
 
@@ -816,9 +828,7 @@ def gerar_grafico_spread_juros(df):
             ]),
             bgcolor="#333952",
             font=dict(color="white")
-        ),
-        rangeslider=dict(visible=False),
-        type="date"
+        )
     )
     
     # Define a visualização inicial padrão para os últimos 5 anos
@@ -1969,11 +1979,11 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
     )
 
     df_tabela = df_final[[
-        'Codigo_Negociacao', 'Nome_Companhia', 'Volume_Net', 'MarketCap', 'Volume_vs_MarketCap_Pct', 'Preco_Medio_Compra', 'CNPJ_Companhia'
+        'Codigo_Negociacao', 'Nome_Companhia', 'Volume_Net', 'MarketCap', 'Volume_vs_MarketCap_Pct', 'Preco_Medio_Compras', 'CNPJ_Companhia'
     ]].rename(columns={
         'Codigo_Negociacao': 'Ticker', 'Nome_Companhia': 'Empresa',
         'Volume_Net': 'Volume Líquido (R$)', 'MarketCap': 'Valor de Mercado (R$)',
-        'Volume_vs_MarketCap_Pct': '% do Market Cap', 'Preco_Medio_Compra': 'Preço Médio Compras (R$)'
+        'Volume_vs_MarketCap_Pct': '% do Market Cap', 'Preco_Medio_Compras': 'Preço Médio Compras (R$)'
     })
 
     return df_tabela.sort_values(by='Volume Líquido (R$)', ascending=False).reset_index(drop=True)
@@ -2558,29 +2568,15 @@ elif pagina_selecionada == "Amplitude":
     )
     st.markdown("---")
 
-    # --- SEÇÃO: ÍNDICES SETORIAIS (NOVO) - MOVIDO PARA O TOPO ---
-    st.subheader("Índices Setoriais (Desvio da MMA50)")
-    st.info("Visualiza o desvio percentual dos principais índices setoriais (IMOB, IFNC, etc.) em relação à sua Média Móvel de 50 dias.")
-    
-    if st.button("Gerar Gráfico de Índices Setoriais", type="primary", use_container_width=True):
-        with st.spinner("Buscando composições e calculando índices..."):
-            fig_sector = get_sector_indices_chart()
-            if fig_sector:
-                st.pyplot(fig_sector)
-            else:
-                st.error("Não foi possível gerar o gráfico.")
-    
-    st.markdown("---")
+
 
     # Parâmetros da análise
     ATIVOS_ANALISE = ['BOVA11.SA', 'SMAL11.SA']
     ANOS_HISTORICO = 10
     PERIODOS_RETORNO = {'1 Mês': 21, '3 Meses': 63, '6 Meses': 126, '1 Ano': 252}
 
-    if 'analise_amplitude_executada' not in st.session_state:
-        st.session_state.analise_amplitude_executada = False
-
-    if st.button("Executar Análise Completa de Amplitude", use_container_width=True):
+    # A análise de amplitude agora é executada automaticamente ao carregar a página
+    if 'df_indicadores' not in st.session_state or 'df_analise_base' not in st.session_state:
         with st.spinner("Realizando análise de amplitude... Este processo pode ser demorado na primeira vez..."):
             # 1. Obter dados base
             tickers_cvm = obter_tickers_cvm_amplitude()
@@ -2621,6 +2617,9 @@ elif pagina_selecionada == "Amplitude":
                     st.error("Não foi possível baixar os dados de preços necessários.")
             else:
                 st.error("Não foi possível obter a lista de tickers da CVM.")
+
+            # 2. Obter Índices Setoriais (NOVO - Executado junto)
+            st.session_state.fig_sector = get_sector_indices_chart()
     
 
     if st.session_state.analise_amplitude_executada:
@@ -2644,7 +2643,15 @@ elif pagina_selecionada == "Amplitude":
         st.markdown("---") # Separa do próximo gráfico
         # --- FIM DO BLOCO DE CÓDIGO ATUALIZADO ---
 
-
+        # --- SEÇÃO: ÍNDICES SETORIAIS (NOVO) ---
+        st.subheader("Índices Setoriais (Desvio da MMA50)")
+        st.info("Visualiza o desvio percentual dos principais índices setoriais (IMOB, IFNC, etc.) em relação à sua Média Móvel de 50 dias.")
+        
+        if st.session_state.get('fig_sector'):
+             st.plotly_chart(st.session_state.fig_sector, use_container_width=True, config={'modeBarButtonsToRemove': ['autoscale']})
+        else:
+             st.warning("Gráfico de índices setoriais não gerado ou dados indisponíveis.")
+        
         st.markdown("---")
 
 
