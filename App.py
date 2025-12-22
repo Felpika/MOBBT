@@ -147,7 +147,7 @@ def download_prices_sector(tickers, start_date):
 
 def get_sector_indices_chart():
     # 1. Configuration 
-    start_date = "2023-01-01" # Pegando um pouco mais de histórico para garantir MA50
+    start_date = "2022-01-01" # Pegando um pouco mais de histórico para garantir MA50
     
     # Map filenames to legible names and colors (Cyberpunk/Brokeberg Palette)
     index_meta = {
