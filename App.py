@@ -2556,6 +2556,20 @@ elif pagina_selecionada == "Amplitude":
     )
     st.markdown("---")
 
+    # --- SEÇÃO: ÍNDICES SETORIAIS (NOVO) - MOVIDO PARA O TOPO ---
+    st.subheader("Índices Setoriais (Desvio da MMA50)")
+    st.info("Visualiza o desvio percentual dos principais índices setoriais (IMOB, IFNC, etc.) em relação à sua Média Móvel de 50 dias.")
+    
+    if st.button("Gerar Gráfico de Índices Setoriais", type="primary", use_container_width=True):
+        with st.spinner("Buscando composições e calculando índices..."):
+            fig_sector = get_sector_indices_chart()
+            if fig_sector:
+                st.pyplot(fig_sector)
+            else:
+                st.error("Não foi possível gerar o gráfico.")
+    
+    st.markdown("---")
+
     # Parâmetros da análise
     ATIVOS_ANALISE = ['BOVA11.SA', 'SMAL11.SA']
     ANOS_HISTORICO = 10
@@ -2628,19 +2642,9 @@ elif pagina_selecionada == "Amplitude":
         st.markdown("---") # Separa do próximo gráfico
         # --- FIM DO BLOCO DE CÓDIGO ATUALIZADO ---
 
-        # --- SEÇÃO: ÍNDICES SETORIAIS (NOVO) ---
-        st.subheader("Índices Setoriais (Desvio da MMA50)")
-        st.info("Visualiza o desvio percentual dos principais índices setoriais (IMOB, IFNC, etc.) em relação à sua Média Móvel de 50 dias.")
-        
-        if st.button("Gerar Gráfico de Índices Setoriais", type="primary", use_container_width=True):
-            with st.spinner("Buscando composições e calculando índices..."):
-                fig_sector = get_sector_indices_chart()
-                if fig_sector:
-                    st.pyplot(fig_sector)
-                else:
-                    st.error("Não foi possível gerar o gráfico.")
-        
+
         st.markdown("---")
+
 
 
         # --- SEÇÕES DE ANÁLISE (Vertical Stack - Sequencial) ---
