@@ -237,10 +237,10 @@ def get_sector_indices_chart():
         # Filter tickers that we actually have prices for
         valid_tickers = [t for t in comp_df['Ticker'] if t in prices.columns]
         
-        # DEBUG LOGGING
-        st.write(f"**Analisando {sector}:**")
-        st.write(f"Tickers na composição: {len(comp_df)}")
-        st.write(f"Tickers com preço: {len(valid_tickers)}")
+        # DEBUG LOGGING (Reduced)
+        # st.write(f"**Analisando {sector}:**")
+        # st.write(f"Tickers na composição: {len(comp_df)}")
+        # st.write(f"Tickers com preço: {len(valid_tickers)}")
         
         if not valid_tickers:
             st.error(f"Setor {sector} pulado: Nenhum ticker com preço encontrado.")
@@ -249,8 +249,9 @@ def get_sector_indices_chart():
         # Check for data quality (avoid tickers with too many NaNs)
         sector_slice = prices[valid_tickers]
         
+        
         # DEBUG: Check null percentage
-        nan_pct = sector_slice.isnull().mean()
+        # nan_pct = sector_slice.isnull().mean()
         # st.write(f"Percentual de falhas por ativo: {nan_pct[nan_pct > 0.2]}")
         
         # Drop columns that are entirely NaN
@@ -289,6 +290,17 @@ def get_sector_indices_chart():
         
         # Calculate Deviation
         deviation = ((sector_val - ma50) / ma50) * 100
+
+        # DEBUG SPECIFIC SECTORS
+        if sector in ['UTIL', 'IEEX', 'INDX']:
+             st.write(f"--- DEBUG {sector} ---")
+             st.write(f"Weights sum: {weights.sum()}")
+             st.write(f"Sector Val range: {sector_val.min()} to {sector_val.max()}")
+             st.write(f"MA50 NaNs: {ma50.isnull().sum()} / {len(ma50)}")
+             st.write(f"Deviation Valid Count: {deviation.count()}")
+             if deviation.count() == 0:
+                  st.error(f"{sector} resultou em série vazia.")
+             st.write("--------------------")
         
         results[sector] = deviation
 
