@@ -233,20 +233,31 @@ def get_sector_indices_chart():
     progress_bar.progress(0.8)
     results = pd.DataFrame()
     
-    for sector, comp_df in compositions.items():
         # Filter tickers that we actually have prices for
         valid_tickers = [t for t in comp_df['Ticker'] if t in prices.columns]
         
+        # DEBUG LOGGING
+        st.write(f"**Analisando {sector}:**")
+        st.write(f"Tickers na composição: {len(comp_df)}")
+        st.write(f"Tickers com preço: {len(valid_tickers)}")
+        
         if not valid_tickers:
+            st.error(f"Setor {sector} pulado: Nenhum ticker com preço encontrado.")
             continue
         
         # Check for data quality (avoid tickers with too many NaNs)
         sector_slice = prices[valid_tickers]
+        
+        # DEBUG: Check null percentage
+        nan_pct = sector_slice.isnull().mean()
+        # st.write(f"Percentual de falhas por ativo: {nan_pct[nan_pct > 0.2]}")
+        
         # Drop columns that are entirely NaN
         sector_slice = sector_slice.dropna(axis=1, how='all')
         valid_tickers = sector_slice.columns.tolist()
 
         if not valid_tickers:
+             st.error(f"Setor {sector} pulado após filtrar colunas vazias.")
              continue
 
         # Forward fill to handle missing days
@@ -255,11 +266,22 @@ def get_sector_indices_chart():
         # Get weights
         comp_df_sector = comp_df.set_index('Ticker')
         # Filter weights for only valid tickers
-        weights = comp_df_sector.loc[valid_tickers, 'Qty']
+        # Use intersection to avoid KeyError if index is not unique or missing
+        valid_weights_keys = [t for t in valid_tickers if t in comp_df_sector.index]
+        weights = comp_df_sector.loc[valid_weights_keys, 'Qty']
+        
+        # Ensure alignment
+        sector_prices = sector_prices[valid_weights_keys]
+        
+        # DEBUG: Shapes
+        # st.write(f"Shape preços: {sector_prices.shape}, Shape pesos: {weights.shape}")
         
         # Calculate Index Value (Simple Weighted Sum for this proxy)
-        # Note: Official indices use more complex divisors, but this is a valid proxy for *trend* and *deviation*
-        sector_val = sector_prices.dot(weights)
+        try:
+             sector_val = sector_prices.dot(weights)
+        except Exception as e:
+             st.error(f"Erro ao calcular dot product para {sector}: {e}")
+             continue
         
         # Calculate MA50
         ma50 = sector_val.rolling(window=50).mean()
