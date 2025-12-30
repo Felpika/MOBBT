@@ -2028,11 +2028,11 @@ def analisar_dados_insiders(_df_mov, _df_cad, meses_selecionados, force_refresh=
     )
 
     df_tabela = df_final[[
-        'Codigo_Negociacao', 'Nome_Companhia', 'Volume_Net', 'MarketCap', 'Volume_vs_MarketCap_Pct', 'Preco_Medio_Compras', 'CNPJ_Companhia'
+        'Codigo_Negociacao', 'Nome_Companhia', 'Volume_Net', 'MarketCap', 'Volume_vs_MarketCap_Pct', 'Preco_Medio_Compra', 'CNPJ_Companhia'
     ]].rename(columns={
         'Codigo_Negociacao': 'Ticker', 'Nome_Companhia': 'Empresa',
         'Volume_Net': 'Volume Líquido (R$)', 'MarketCap': 'Valor de Mercado (R$)',
-        'Volume_vs_MarketCap_Pct': '% do Market Cap', 'Preco_Medio_Compras': 'Preço Médio Compras (R$)'
+        'Volume_vs_MarketCap_Pct': '% do Market Cap', 'Preco_Medio_Compra': 'Preço Médio Compras (R$)'
     })
 
     return df_tabela.sort_values(by='Volume Líquido (R$)', ascending=False).reset_index(drop=True)
