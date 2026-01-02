@@ -1316,17 +1316,36 @@ def obter_tickers_cvm_amplitude():
     """Esta função busca a lista de tickers da CVM."""
     st.info("Buscando lista de tickers da CVM... (Cache de 8h)")
     ano = datetime.now().year
-    url = f'https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ano}.zip'
-    try:
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-            with z.open(f'fca_cia_aberta_valor_mobiliario_{ano}.csv') as f:
-                df = pd.read_csv(f, sep=';', encoding='ISO-8859-1', dtype={'Valor_Mobiliario': 'category', 'Mercado': 'category'})
-        df_filtrado = df[(df['Valor_Mobiliario'].isin(['Ações Ordinárias', 'Ações Preferenciais'])) & (df['Mercado'] == 'Bolsa')]
-        return df_filtrado['Codigo_Negociacao'].dropna().unique().tolist()
-    except Exception as e:
-        st.error(f"Erro ao obter tickers da CVM: {e}")
+    
+    # Função interna para tentar baixar de um ano específico
+    def tentar_baixar(ano_target):
+        url = f'https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ano_target}.zip'
+        try:
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+                with z.open(f'fca_cia_aberta_valor_mobiliario_{ano_target}.csv') as f:
+                    return pd.read_csv(f, sep=';', encoding='ISO-8859-1', dtype={'Valor_Mobiliario': 'category', 'Mercado': 'category'})
+        except Exception:
+            return None
+
+    # Tenta ano atual
+    df = tentar_baixar(ano)
+    
+    # Se falhar, tenta ano anterior e avisa
+    if df is None:
+        st.warning(f"Dados de {ano} não encontrados. Tentando ano anterior ({ano-1})...")
+        df = tentar_baixar(ano - 1)
+
+    if df is not None:
+        try:
+            df_filtrado = df[(df['Valor_Mobiliario'].isin(['Ações Ordinárias', 'Ações Preferenciais'])) & (df['Mercado'] == 'Bolsa')]
+            return df_filtrado['Codigo_Negociacao'].dropna().unique().tolist()
+        except Exception as e:
+            st.error(f"Erro ao processar arquivo da CVM: {e}")
+            return None
+    else:
+        st.error(f"Erro ao obter tickers da CVM (Tentativas {ano} e {ano-1} falharam).")
         return None
 
 @st.cache_data(ttl=3600*8) # Cache de 8 horas
@@ -2672,7 +2691,7 @@ elif pagina_selecionada == "Amplitude":
             st.session_state.fig_sector = get_sector_indices_chart()
     
 
-    if st.session_state.analise_amplitude_executada:
+    if st.session_state.get('analise_amplitude_executada', False):
         df_indicadores = st.session_state.df_indicadores
         df_analise_base = st.session_state.df_analise_base
         
