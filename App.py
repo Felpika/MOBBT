@@ -1831,7 +1831,7 @@ def gerar_heatmap_amplitude(tabela_media, faixa_atual, titulo):
 # Removemos NOME_ARQUIVO_CACHE e CACHE_VALIDADE_DIAS pois não usaremos mais CSV
 
 @st.cache_data(ttl=3600*8)
-def baixar_e_extrair_zip_cvm(url, nome_csv_interno):
+def baixar_e_extrair_zip_cvm(url, nome_csv_interno, show_error=True):
     """Baixa e extrai um CSV de um arquivo ZIP da CVM em memória."""
     try:
         response = requests.get(url, timeout=30)
@@ -1840,7 +1840,8 @@ def baixar_e_extrair_zip_cvm(url, nome_csv_interno):
             with z.open(nome_csv_interno) as f:
                 return pd.read_csv(f, sep=';', encoding='ISO-8859-1', on_bad_lines='skip')
     except Exception as e:
-        st.error(f"Erro ao baixar dados da CVM: {e}")
+        if show_error:
+            st.error(f"Erro ao baixar dados da CVM: {e}")
         return None
 
 def obter_market_cap_individual(ticker):
@@ -3118,9 +3119,22 @@ elif pagina_selecionada == "Radar de Insiders":
     CSV_CADASTRO = f"fca_cia_aberta_valor_mobiliario_{ANO_ATUAL}.csv"
 
     # Carrega os dados base com cache
-    with st.spinner("Baixando e pré-processando dados da CVM..."):
-        df_mov_bruto = baixar_e_extrair_zip_cvm(URL_MOVIMENTACOES, CSV_MOVIMENTACOES)
-        df_cad_bruto = baixar_e_extrair_zip_cvm(URL_CADASTRO, CSV_CADASTRO)
+    with st.spinner(f"Baixando e pré-processando dados da CVM ({ANO_ATUAL})..."):
+        df_mov_bruto = baixar_e_extrair_zip_cvm(URL_MOVIMENTACOES, CSV_MOVIMENTACOES, show_error=False)
+        df_cad_bruto = baixar_e_extrair_zip_cvm(URL_CADASTRO, CSV_CADASTRO, show_error=False)
+
+    if df_mov_bruto is None or df_cad_bruto is None:
+        ANO_ANTERIOR = ANO_ATUAL - 1
+        st.warning(f"Dados de {ANO_ATUAL} ainda não disponíveis na CVM. Utilizando dados de {ANO_ANTERIOR}...")
+        
+        URL_MOVIMENTACOES = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/VLMO/DADOS/vlmo_cia_aberta_{ANO_ANTERIOR}.zip"
+        URL_CADASTRO = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_{ANO_ANTERIOR}.zip"
+        CSV_MOVIMENTACOES = f"vlmo_cia_aberta_con_{ANO_ANTERIOR}.csv"
+        CSV_CADASTRO = f"fca_cia_aberta_valor_mobiliario_{ANO_ANTERIOR}.csv"
+        
+        with st.spinner(f"Baixando dados do ano anterior ({ANO_ANTERIOR})..."):
+            df_mov_bruto = baixar_e_extrair_zip_cvm(URL_MOVIMENTACOES, CSV_MOVIMENTACOES, show_error=True)
+            df_cad_bruto = baixar_e_extrair_zip_cvm(URL_CADASTRO, CSV_CADASTRO, show_error=True)
 
     if df_mov_bruto is not None and df_cad_bruto is not None:
         df_mov_bruto['Data_Movimentacao'] = pd.to_datetime(df_mov_bruto['Data_Movimentacao'], errors='coerce')
