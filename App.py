@@ -3419,26 +3419,179 @@ elif pagina_selecionada == "Calculadora Put":
         pct_cdi = (yield_pct / selic_monthly) * 100 if selic_monthly > 0 else 0
         total_credit = qty_contracts * option_price
         
+        # === NOVOS CÁLCULOS ===
+        # Break-Even: preço onde você começa a perder dinheiro
+        break_even = selected_strike - option_price
+        break_even_pct = ((asset_price - break_even) / asset_price) * 100
+        
+        # Máximo Prejuízo: se o ativo for a zero
+        max_loss = (selected_strike - option_price) * qty_contracts
+        
+        # Yield Anualizado (compondo mensalmente)
+        yield_anual = ((1 + yield_pct/100) ** 12 - 1) * 100
+        pct_cdi_anual = (yield_anual / selic_annual) * 100 if selic_annual > 0 else 0
+        
+        # Moneyness
+        moneyness = ((selected_strike - asset_price) / asset_price) * 100
+        moneyness_label = "ATM" if abs(moneyness) < 1 else ("OTM" if moneyness < 0 else "ITM")
+        
         # Exibe resultados
-        st.markdown("## Resultados")
+        st.markdown("## 📊 Resultados Principais")
         
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Yield (Retorno)", f"{yield_pct:.2f}%")
+        m1.metric("Yield Mensal", f"{yield_pct:.2f}%")
         m2.metric("% do CDI", f"{pct_cdi:.0f}%")
         m3.metric("Qtd Contratos", f"{qty_contracts}")
         m4.metric("Crédito Total", f"R$ {total_credit:,.2f}")
         
+        # Segunda linha de métricas - Yield Anualizado
+        st.markdown("### 📈 Projeção Anual")
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("Yield Anualizado", f"{yield_anual:.2f}%", help="Retorno anual se a estratégia for repetida mensalmente")
+        a2.metric("% CDI Anual", f"{pct_cdi_anual:.0f}%", help="Comparativo com o CDI anual")
+        a3.metric("Crédito Anual Est.", f"R$ {total_credit * 12:,.2f}", help="Soma linear dos prêmios em 12 meses")
+        a4.metric("Moneyness", f"{moneyness_label} ({moneyness:+.1f}%)", help="ATM=no dinheiro, OTM=fora do dinheiro, ITM=dentro")
+        
+        # Terceira linha - Análise de Risco
+        st.markdown("### ⚠️ Análise de Risco")
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("Break-Even", f"R$ {break_even:.2f}", help="Preço onde você começa a ter prejuízo")
+        r2.metric("Margem de Segurança", f"{break_even_pct:.1f}%", help="Quanto o ativo pode cair até o break-even")
+        r3.metric("Máx. Prejuízo Teórico", f"R$ {max_loss:,.2f}", help="Prejuízo se o ativo for a zero (improvável)")
+        r4.metric("Colateral Usado", f"{(notional/collateral)*100:.1f}%", help="Percentual do colateral utilizado")
+        
+        st.markdown("---")
+        
+        # === GRÁFICO DE PAYOFF ===
+        st.markdown("### 📉 Gráfico de Payoff (Lucro/Prejuízo)")
+        
+        # Gera range de preços para o gráfico
+        price_range = np.linspace(asset_price * 0.5, asset_price * 1.3, 100)
+        payoff = []
+        
+        for p in price_range:
+            if p >= selected_strike:
+                # Acima do strike: mantém o prêmio total
+                result = option_price * qty_contracts
+            else:
+                # Abaixo do strike: prejuízo = (strike - preço) - prêmio recebido
+                result = (option_price - (selected_strike - p)) * qty_contracts
+            payoff.append(result)
+        
+        payoff = np.array(payoff)
+        
+        # Cores: verde para lucro, vermelho para prejuízo
+        colors = np.where(payoff >= 0, '#39E58C', '#FF4B4B')
+        
+        fig_payoff = go.Figure()
+        
+        # Área de lucro/prejuízo
+        fig_payoff.add_trace(go.Scatter(
+            x=price_range, y=payoff,
+            mode='lines',
+            line=dict(color='#00D4FF', width=3),
+            name='P&L',
+            fill='tozeroy',
+            fillcolor='rgba(0, 212, 255, 0.2)'
+        ))
+        
+        # Linha do zero
+        fig_payoff.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
+        
+        # Linha vertical no preço atual
+        fig_payoff.add_vline(x=asset_price, line_dash="dot", line_color="#FFB302", 
+                            annotation_text=f"Preço Atual: R${asset_price:.2f}")
+        
+        # Linha vertical no break-even
+        fig_payoff.add_vline(x=break_even, line_dash="dot", line_color="#FF4B4B",
+                            annotation_text=f"Break-Even: R${break_even:.2f}")
+        
+        # Linha vertical no strike
+        fig_payoff.add_vline(x=selected_strike, line_dash="solid", line_color="#39E58C",
+                            annotation_text=f"Strike: R${selected_strike:.2f}")
+        
+        fig_payoff.update_layout(
+            title="Perfil de Lucro/Prejuízo da Venda de PUT",
+            xaxis_title="Preço do Ativo no Vencimento (R$)",
+            yaxis_title="Lucro/Prejuízo (R$)",
+            template='brokeberg',
+            height=400,
+            showlegend=False
+        )
+        
+        st.plotly_chart(fig_payoff, use_container_width=True)
+        
+        # === TABELA COMPARATIVA DE STRIKES ===
+        st.markdown("### 🎯 Comparativo de Strikes")
+        st.caption("Simulação de diferentes strikes para o mesmo ativo e colateral")
+        
+        # Gera strikes: ATM, OTM 2.5%, 5%, 7.5%, 10%
+        strikes_compare = [
+            ("ATM", round(asset_price, 0)),
+            ("OTM 2.5%", round(asset_price * 0.975, 0)),
+            ("OTM 5%", round(asset_price * 0.95, 0)),
+            ("OTM 7.5%", round(asset_price * 0.925, 0)),
+            ("OTM 10%", round(asset_price * 0.90, 0)),
+        ]
+        
+        # Estima prêmios (simplificado - assume decay linear do prêmio)
+        # Na prática, prêmios OTM são menores proporcionalmente
+        base_premium = option_price
+        premium_decay = 0.25  # 25% de redução do prêmio a cada 2.5% OTM
+        
+        comparison_data = []
+        for label, stk in strikes_compare:
+            otm_level = (asset_price - stk) / asset_price * 100
+            
+            # Estima prêmio baseado no nível OTM (simplificado)
+            if stk == round(asset_price, 0):
+                est_premium = base_premium
+            else:
+                otm_steps = abs(otm_level) / 2.5
+                est_premium = base_premium * (1 - premium_decay) ** otm_steps
+            
+            # Calcula métricas para este strike
+            raw_q = math.floor(collateral / stk)
+            q = (raw_q // 100) * 100
+            y = (est_premium / asset_price) * 100
+            be = stk - est_premium
+            margin = ((asset_price - be) / asset_price) * 100
+            credit = q * est_premium
+            
+            comparison_data.append({
+                "Strike": label,
+                "Preço Strike": f"R$ {stk:.0f}",
+                "Prêmio Est.": f"R$ {est_premium:.2f}",
+                "Yield": f"{y:.2f}%",
+                "Qtd": f"{q}",
+                "Crédito": f"R$ {credit:,.0f}",
+                "Break-Even": f"R$ {be:.2f}",
+                "Margem Seg.": f"{margin:.1f}%"
+            })
+        
+        df_compare = pd.DataFrame(comparison_data)
+        st.dataframe(df_compare, use_container_width=True, hide_index=True)
+        
+        st.caption("⚠️ Prêmios estimados são aproximações. Consulte o book de ofertas para valores reais.")
+        
+        st.markdown("---")
+        
+        # Tabela resumo original
+        st.markdown("### 📋 Resumo da Operação")
         results_data = {
-            "Métrica": ["Preço Ativo", "Selic a.a", "Preço Put", "Yield", "% CDI", "Qtd Contratos", "Notional/Colateral", "Valor Venda Put"],
+            "Métrica": ["Preço Ativo", "Strike", "Prêmio Put", "Yield Mensal", "Yield Anual", "% CDI", "Qtd Contratos", "Colateral Usado", "Crédito Total", "Break-Even", "Margem de Segurança"],
             "Valor": [
                 f"R$ {asset_price:.2f}",
-                f"{selic_annual:.2f}%",
+                f"R$ {selected_strike:.2f}",
                 f"R$ {option_price:.2f}",
                 f"{yield_pct:.2f}%",
+                f"{yield_anual:.2f}%",
                 f"{pct_cdi:.0f}%",
                 f"{qty_contracts}",
                 f"R$ {notional:,.2f}",
-                f"R$ {total_credit:,.2f}"
+                f"R$ {total_credit:,.2f}",
+                f"R$ {break_even:.2f}",
+                f"{break_even_pct:.1f}%"
             ]
         }
         df_results = pd.DataFrame(results_data)
