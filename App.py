@@ -1848,6 +1848,65 @@ def gerar_heatmap_amplitude(tabela_media, faixa_atual, titulo):
 # --- FIM DO BLOCO 7 ---
 # --- FIM DO BLOCO 7 ---
 
+# --- BLOCO 7.5: FUNÇÕES HELPER PARA CALCULADORA DE PUT WRITING ---
+
+from dateutil.relativedelta import relativedelta
+import math
+
+def get_selic_annual():
+    """Fetches the latest annualized Selic Meta from BCB API (Series 432)."""
+    try:
+        # API BCB Series 432 (Taxa de juros - Meta Selic definida pelo Copom)
+        url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/1?formato=json"
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        return float(data[0]['valor'])
+    except Exception as e:
+        st.error(f"Erro ao buscar Selic: {e}. Usando valor padrão 11.25%")
+        return 11.25 # Fallback
+
+def get_asset_price_putcalc(ticker):
+    """Fetches the latest closing price for the asset from yfinance."""
+    try:
+        # Append .SA for Brazilian stocks if not present
+        full_ticker = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
+        stock = yf.Ticker(full_ticker)
+        hist = stock.history(period="1d")
+        if not hist.empty:
+            return hist['Close'].iloc[-1]
+        else:
+            return 0.0
+    except Exception as e:
+        return 0.0
+
+def get_third_friday(year, month):
+    """Calculates the date of the 3rd Friday of a given year and month."""
+    from datetime import date, timedelta
+    d = date(year, month, 1)
+    days_to_first_friday = (4 - d.weekday() + 7) % 7
+    first_friday = d + timedelta(days=days_to_first_friday)
+    third_friday = first_friday + timedelta(days=14)
+    return third_friday
+
+def get_next_expiration(current_date):
+    """Finds the next valid monthly expiration (3rd Friday)."""
+    next_month_date = current_date + relativedelta(months=1)
+    expiry = get_third_friday(next_month_date.year, next_month_date.month)
+    return expiry
+
+def get_put_ticker_letter(month):
+    """Returns the B3 Put option letter for a given month (M-X)."""
+    return chr(76 + month)
+
+def generate_put_ticker(root, expiry_date, strike):
+    """Generates a theoretical B3 ticker: ROOT + LETTER + STRIKE_INT."""
+    letter = get_put_ticker_letter(expiry_date.month)
+    strike_str = str(int(strike))
+    return f"{root}{letter}{strike_str}"
+
+# --- FIM DO BLOCO 7.5 ---
+
 # --- BLOCO 8: LÓGICA DO RADAR DE INSIDERS (SIMPLIFICADO) ---
 
 # Removemos NOME_ARQUIVO_CACHE e CACHE_VALIDADE_DIAS pois não usaremos mais CSV
@@ -2264,6 +2323,7 @@ with st.sidebar:
             "Internacional",
             "Ações BR",
             "Radar de Insiders",
+            "Calculadora Put",
         ],
         icons=[
             "house",  # <--- ÍCONE DA NOVA PÁGINA
@@ -2275,6 +2335,7 @@ with st.sidebar:
             "globe-americas",
             "kanban-fill",
             "person-check-fill",
+            "calculator",
         ],
         menu_icon="speedometer2",
         default_index=0, # O índice 0 agora é "Início", que é leve
@@ -3253,7 +3314,120 @@ elif pagina_selecionada == "Radar de Insiders":
                          st.dataframe(df_det.style.format({'Data': '{:%d/%m/%Y}', 'Preço (R$)': 'R$ {:,.2f}', 'Volume Total (R$)': 'R$ {:,.2f}', 'Qtd.': '{:,.0f}'}), use_container_width=True, hide_index=True)
                     else:
                         st.info("Sem detalhes.")
-                        
+
+elif pagina_selecionada == "Calculadora Put":
+    st.header("🛡️ Calculadora de Yield - Put Writing")
+    st.info(
+        "Esta ferramenta calcula o yield potencial de uma estratégia de venda de PUTs (Put Writing). "
+        "Insira os dados do ativo e do colateral disponível para ver o retorno estimado."
+    )
+    st.markdown("---")
+    
+    # Busca Selic automaticamente
+    with st.spinner("Buscando Taxa Selic..."):
+        selic_annual = get_selic_annual()
+    selic_monthly = (pow(1 + selic_annual/100, 1/12) - 1) * 100
+    
+    # Exibe Selic na sidebar para esta página
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Dados de Mercado")
+    st.sidebar.metric("Selic Meta (a.a)", f"{selic_annual:.2f}%")
+    st.sidebar.metric("Selic (a.m estimada)", f"{selic_monthly:.4f}%")
+    
+    # Inputs principais
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        asset_ticker = st.text_input("Ativo Objeto", value="BOVA11", key="putcalc_ticker").upper()
+        from datetime import date
+        current_date = st.date_input("Data Base", value=date.today(), key="putcalc_date")
+    
+    with col2:
+        # Auto-fetch do preço
+        asset_price = 0.0
+        if asset_ticker:
+            with st.spinner(f"Buscando preço {asset_ticker}..."):
+                fetched_price = get_asset_price_putcalc(asset_ticker)
+            
+            if fetched_price > 0:
+                asset_price = fetched_price
+                st.success(f"Preço Atual: R$ {asset_price:.2f}")
+            else:
+                asset_price = st.number_input("Preço do Ativo (Manual - Falha na Busca)", value=0.0, step=0.01, format="%.2f", key="putcalc_price_manual")
+        else:
+            asset_price = st.number_input("Preço do Ativo (R$)", value=0.0, step=0.01, format="%.2f", key="putcalc_price")
+        
+        collateral = st.number_input("Colateral Disponível (R$)", value=31018.00, step=100.0, format="%.2f", key="putcalc_collateral")
+    
+    # Lógica de sugestão
+    expiry = get_next_expiration(current_date)
+    suggested_strike = round(asset_price, 0) if asset_price > 0 else 0.0
+    suggested_ticker = generate_put_ticker(asset_ticker[:4], expiry, suggested_strike) if asset_price > 0 else ""
+    
+    with col3:
+        st.markdown("### Sugestão Automática")
+        if asset_price > 0:
+            st.info(f"Vencimento: **{expiry.strftime('%d/%m/%Y')}**")
+            st.info(f"Strike ATM: **R$ {suggested_strike:.2f}**")
+            st.info(f"Ticker: **{suggested_ticker}**")
+        else:
+            st.warning("Aguardando preço do ativo...")
+    
+    st.markdown("---")
+    
+    # Inputs da opção
+    st.subheader("Dados da Opção")
+    c_op1, c_op2, c_op3 = st.columns(3)
+    
+    with c_op1:
+        selected_strike = st.number_input("Strike Selecionado", value=suggested_strike, step=0.5, format="%.2f", key="putcalc_strike")
+    
+    with c_op2:
+        actual_ticker = generate_put_ticker(asset_ticker[:4], expiry, selected_strike) if selected_strike > 0 else ""
+        st.text_input("Código da Opção (Teórico)", value=actual_ticker, disabled=True, key="putcalc_ticker_display")
+        
+    with c_op3:
+        option_price = st.number_input("Preço da Put (Prêmio)", value=2.62, step=0.01, format="%.2f", key="putcalc_premium")
+    
+    # Cálculos
+    if selected_strike > 0 and option_price > 0 and asset_price > 0:
+        qty_contracts = math.floor(collateral / selected_strike)
+        notional = qty_contracts * selected_strike
+        yield_pct = (option_price / asset_price) * 100 
+        pct_cdi = (yield_pct / selic_monthly) * 100 if selic_monthly > 0 else 0
+        total_credit = qty_contracts * option_price
+        
+        # Exibe resultados
+        st.markdown("## Resultados")
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Yield (Retorno)", f"{yield_pct:.2f}%")
+        m2.metric("% do CDI", f"{pct_cdi:.0f}%")
+        m3.metric("Qtd Contratos", f"{qty_contracts}")
+        m4.metric("Crédito Total", f"R$ {total_credit:,.2f}")
+        
+        results_data = {
+            "Métrica": ["Preço Ativo", "Selic a.a", "Preço Put", "Yield", "% CDI", "Qtd Contratos", "Notional/Colateral", "Valor Venda Put"],
+            "Valor": [
+                f"R$ {asset_price:.2f}",
+                f"{selic_annual:.2f}%",
+                f"R$ {option_price:.2f}",
+                f"{yield_pct:.2f}%",
+                f"{pct_cdi:.0f}%",
+                f"{qty_contracts}",
+                f"R$ {notional:,.2f}",
+                f"R$ {total_credit:,.2f}"
+            ]
+        }
+        df_results = pd.DataFrame(results_data)
+        st.table(df_results)
+        st.caption(f"Cálculo baseado no strike R$ {selected_strike:.2f} e vencimento {expiry.strftime('%Y-%m-%d')}")
+    
+    elif asset_price <= 0:
+        st.info("Aguardando preço do ativo para calcular...")
+    else:
+        st.warning("Insira o preço da opção para calcular.")
+
 
 
 
