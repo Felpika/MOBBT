@@ -3391,7 +3391,9 @@ elif pagina_selecionada == "Calculadora Put":
     
     # Cálculos
     if selected_strike > 0 and option_price > 0 and asset_price > 0:
-        qty_contracts = math.floor(collateral / selected_strike)
+        # Calcula quantidade bruta e arredonda para baixo para múltiplo de 100
+        raw_qty = math.floor(collateral / selected_strike)
+        qty_contracts = (raw_qty // 100) * 100
         notional = qty_contracts * selected_strike
         yield_pct = (option_price / asset_price) * 100 
         pct_cdi = (yield_pct / selic_monthly) * 100 if selic_monthly > 0 else 0
