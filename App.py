@@ -3498,17 +3498,23 @@ elif pagina_selecionada == "Calculadora Put":
         # Linha do zero
         fig_payoff.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.5)
         
-        # Linha vertical no preço atual
+        # Linha vertical no preço atual (posição: topo)
         fig_payoff.add_vline(x=asset_price, line_dash="dot", line_color="#FFB302", 
-                            annotation_text=f"Preço Atual: R${asset_price:.2f}")
+                            annotation_text=f"Preço Atual: R${asset_price:.2f}",
+                            annotation_position="top left",
+                            annotation_font_size=11)
         
-        # Linha vertical no break-even
+        # Linha vertical no break-even (posição: meio)
         fig_payoff.add_vline(x=break_even, line_dash="dot", line_color="#FF4B4B",
-                            annotation_text=f"Break-Even: R${break_even:.2f}")
+                            annotation_text=f"Break-Even: R${break_even:.2f}",
+                            annotation_position="bottom left",
+                            annotation_font_size=11)
         
-        # Linha vertical no strike
+        # Linha vertical no strike (posição: inferior)
         fig_payoff.add_vline(x=selected_strike, line_dash="solid", line_color="#39E58C",
-                            annotation_text=f"Strike: R${selected_strike:.2f}")
+                            annotation_text=f"Strike: R${selected_strike:.2f}",
+                            annotation_position="top right",
+                            annotation_font_size=11)
         
         fig_payoff.update_layout(
             title="Perfil de Lucro/Prejuízo da Venda de PUT",
