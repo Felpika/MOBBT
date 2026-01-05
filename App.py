@@ -3465,8 +3465,8 @@ elif pagina_selecionada == "Calculadora Put":
         # === GRÁFICO DE PAYOFF ===
         st.markdown("### 📉 Gráfico de Payoff (Lucro/Prejuízo)")
         
-        # Gera range de preços para o gráfico
-        price_range = np.linspace(asset_price * 0.5, asset_price * 1.3, 100)
+        # Gera range de preços para o gráfico (focado ±15% do strike)
+        price_range = np.linspace(selected_strike * 0.85, selected_strike * 1.15, 100)
         payoff = []
         
         for p in price_range:
