@@ -3364,6 +3364,16 @@ elif pagina_selecionada == "Calculadora Put":
     suggested_strike = round(asset_price, 0) if asset_price > 0 else 0.0
     suggested_ticker = generate_put_ticker(asset_ticker[:4], expiry, suggested_strike) if asset_price > 0 else ""
     
+    # Detecta mudança de ticker para resetar o strike automaticamente
+    if 'putcalc_last_ticker' not in st.session_state:
+        st.session_state.putcalc_last_ticker = asset_ticker
+        st.session_state.putcalc_auto_strike = suggested_strike
+    
+    # Se o ticker mudou, atualiza o strike para o novo sugerido
+    if st.session_state.putcalc_last_ticker != asset_ticker:
+        st.session_state.putcalc_last_ticker = asset_ticker
+        st.session_state.putcalc_auto_strike = suggested_strike
+    
     with col3:
         st.markdown("### Sugestão Automática")
         if asset_price > 0:
@@ -3380,14 +3390,23 @@ elif pagina_selecionada == "Calculadora Put":
     c_op1, c_op2, c_op3 = st.columns(3)
     
     with c_op1:
-        selected_strike = st.number_input("Strike Selecionado", value=suggested_strike, step=0.5, format="%.2f", key="putcalc_strike")
+        # Usa o valor do session_state que é atualizado quando o ticker muda
+        selected_strike = st.number_input(
+            "Strike Selecionado", 
+            value=st.session_state.putcalc_auto_strike, 
+            step=0.5, 
+            format="%.2f", 
+            key="putcalc_strike_input"
+        )
+        # Atualiza o session_state com o valor digitado pelo usuário
+        st.session_state.putcalc_auto_strike = selected_strike
     
     with c_op2:
         actual_ticker = generate_put_ticker(asset_ticker[:4], expiry, selected_strike) if selected_strike > 0 else ""
         st.text_input("Código da Opção (Teórico)", value=actual_ticker, disabled=True, key="putcalc_ticker_display")
         
     with c_op3:
-        option_price = st.number_input("Preço da Put (Prêmio)", value=2.62, step=0.01, format="%.2f", key="putcalc_premium")
+        option_price = st.number_input("Preço da Put (Prêmio)", value=0.0, step=0.01, format="%.2f", key="putcalc_premium")
     
     # Cálculos
     if selected_strike > 0 and option_price > 0 and asset_price > 0:
