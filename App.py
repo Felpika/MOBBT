@@ -3404,7 +3404,7 @@ elif pagina_selecionada == "Calculadora Put":
     
     with c_op2:
         actual_ticker = generate_put_ticker(asset_ticker[:4], expiry, selected_strike) if selected_strike > 0 else ""
-        st.text_input("Código da Opção (Teórico)", value=actual_ticker, disabled=True, key="putcalc_ticker_display")
+        st.text_input("Código da Opção (Teórico)", value=actual_ticker, disabled=True)
         
     with c_op3:
         option_price = st.number_input("Preço da Put (Prêmio)", value=0.0, step=0.01, format="%.2f", key="putcalc_premium")
