@@ -3540,42 +3540,59 @@ elif pagina_selecionada == "Calculadora Put":
                         
                         # Expander com detalhes
                         with st.expander("📈 Ver distribuição histórica de retornos"):
-                            # Histograma dos retornos
+                            # Histograma dos retornos - versão simplificada
                             fig_hist = go.Figure()
                             
-                            # Cores diferentes para abaixo e acima do threshold
-                            below_threshold = returns[returns < threshold]
-                            above_threshold = returns[returns >= threshold]
-                            
+                            # Histograma único com cor gradiente
                             fig_hist.add_trace(go.Histogram(
-                                x=above_threshold,
-                                name='Sem exercício',
-                                marker_color='#39E58C',
-                                opacity=0.7
+                                x=returns,
+                                nbinsx=50,
+                                name='Retornos',
+                                marker_color='#00D4FF',
+                                opacity=0.8
                             ))
                             
-                            fig_hist.add_trace(go.Histogram(
-                                x=below_threshold,
-                                name='Com exercício',
-                                marker_color='#FF4B4B',
-                                opacity=0.7
-                            ))
+                            # Adiciona área sombreada para zona de exercício (esquerda do threshold)
+                            y_max = returns.value_counts(bins=50).max() * 1.1
+                            fig_hist.add_vrect(
+                                x0=returns.min(),
+                                x1=threshold,
+                                fillcolor="rgba(255, 75, 75, 0.3)",
+                                layer="below",
+                                line_width=0,
+                                annotation_text="Zona de Exercício",
+                                annotation_position="top left",
+                                annotation_font_color="#FF4B4B"
+                            )
                             
-                            # Linha vertical no threshold
+                            # Linha vertical no threshold (break-even)
                             fig_hist.add_vline(
                                 x=threshold, 
+                                line_dash="solid", 
+                                line_color="#FF4B4B",
+                                line_width=2,
+                                annotation_text=f"Break-Even: {threshold:.1f}%",
+                                annotation_position="top right",
+                                annotation_font_color="#FF4B4B"
+                            )
+                            
+                            # Linha vertical no zero
+                            fig_hist.add_vline(
+                                x=0, 
                                 line_dash="dash", 
-                                line_color="#FFB302",
-                                annotation_text=f"Margem: {threshold:.1f}%"
+                                line_color="#39E58C",
+                                line_width=1,
+                                annotation_text="0%",
+                                annotation_position="bottom right"
                             )
                             
                             fig_hist.update_layout(
-                                title=f"Distribuição de Retornos em {days_to_expiry} dias",
+                                title=f"Distribuição de Retornos em {days_to_expiry} dias ({total_periods} observações)",
                                 xaxis_title="Retorno (%)",
                                 yaxis_title="Frequência",
                                 template='brokeberg',
-                                barmode='overlay',
-                                height=350
+                                height=400,
+                                showlegend=False
                             )
                             
                             st.plotly_chart(fig_hist, use_container_width=True)
