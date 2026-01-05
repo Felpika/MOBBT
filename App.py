@@ -1332,20 +1332,23 @@ def obter_tickers_cvm_amplitude():
     # Tenta ano atual
     df = tentar_baixar(ano)
     
-    # Se falhar, tenta ano anterior e avisa
-    if df is None:
-        st.warning(f"Dados de {ano} não encontrados. Tentando ano anterior ({ano-1})...")
+    # Se falhar OU arquivo estiver vazio, tenta ano anterior e avisa
+    if df is None or df.empty:
+        st.warning(f"Dados de {ano} não encontrados ou vazios. Tentando ano anterior ({ano-1})...")
         df = tentar_baixar(ano - 1)
 
-    if df is not None:
+    if df is not None and not df.empty:
         try:
-            df_filtrado = df[(df['Valor_Mobiliario'].isin(['Ações Ordinárias', 'Ações Preferenciais'])) & (df['Mercado'] == 'Bolsa')]
+            # Usa str.contains para evitar problemas de encoding com caracteres acentuados
+            filtro_acoes = df['Valor_Mobiliario'].str.contains('Ordin|Preferenci', case=False, na=False, regex=True)
+            filtro_mercado = df['Mercado'] == 'Bolsa'
+            df_filtrado = df[filtro_acoes & filtro_mercado]
             return df_filtrado['Codigo_Negociacao'].dropna().unique().tolist()
         except Exception as e:
             st.error(f"Erro ao processar arquivo da CVM: {e}")
             return None
     else:
-        st.error(f"Erro ao obter tickers da CVM (Tentativas {ano} e {ano-1} falharam).")
+        st.error(f"Erro ao obter tickers da CVM (Tentativas {ano} e {ano-1} falharam ou arquivos estão vazios).")
         return None
 
 @st.cache_data(ttl=3600*8) # Cache de 8 horas
