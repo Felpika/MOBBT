@@ -3543,10 +3543,10 @@ elif pagina_selecionada == "Calculadora Put":
                             # Histograma dos retornos - versão simplificada
                             fig_hist = go.Figure()
                             
-                            # Histograma único com cor gradiente
+                            # Histograma único com intervalos de 2%
                             fig_hist.add_trace(go.Histogram(
                                 x=returns,
-                                nbinsx=50,
+                                xbins=dict(size=1),  # Intervalos de 1%
                                 name='Retornos',
                                 marker_color='#00D4FF',
                                 opacity=0.8
