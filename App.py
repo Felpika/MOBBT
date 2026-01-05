@@ -3367,12 +3367,13 @@ elif pagina_selecionada == "Calculadora Put":
     # Detecta mudança de ticker para resetar o strike automaticamente
     if 'putcalc_last_ticker' not in st.session_state:
         st.session_state.putcalc_last_ticker = asset_ticker
-        st.session_state.putcalc_auto_strike = suggested_strike
     
-    # Se o ticker mudou, atualiza o strike para o novo sugerido
+    # Se o ticker mudou, força atualização do strike e faz rerun
     if st.session_state.putcalc_last_ticker != asset_ticker:
         st.session_state.putcalc_last_ticker = asset_ticker
-        st.session_state.putcalc_auto_strike = suggested_strike
+        # Atualiza diretamente a key do widget de strike
+        st.session_state.putcalc_strike_input = suggested_strike
+        st.rerun()
     
     with col3:
         st.markdown("### Sugestão Automática")
@@ -3390,16 +3391,16 @@ elif pagina_selecionada == "Calculadora Put":
     c_op1, c_op2, c_op3 = st.columns(3)
     
     with c_op1:
-        # Usa o valor do session_state que é atualizado quando o ticker muda
+        # Inicializa com o suggested_strike se não existir
+        if 'putcalc_strike_input' not in st.session_state:
+            st.session_state.putcalc_strike_input = suggested_strike
+        
         selected_strike = st.number_input(
             "Strike Selecionado", 
-            value=st.session_state.putcalc_auto_strike, 
             step=0.5, 
             format="%.2f", 
             key="putcalc_strike_input"
         )
-        # Atualiza o session_state com o valor digitado pelo usuário
-        st.session_state.putcalc_auto_strike = selected_strike
     
     with c_op2:
         actual_ticker = generate_put_ticker(asset_ticker[:4], expiry, selected_strike) if selected_strike > 0 else ""
