@@ -2,6 +2,16 @@
 import pandas as pd
 import numpy as np
 
+def parse_pt_br_float(s):
+    try:
+        if isinstance(s, (int, float)):
+            return float(s)
+        if isinstance(s, str):
+            return float(s.replace('.', '').replace(',', '.'))
+        return 0.0
+    except:
+        return 0.0
+
 def calcular_juro_10a_br(df_tesouro):
     """
     Calcula a série histórica de juros reais de 10 anos (ou próximo disso)
