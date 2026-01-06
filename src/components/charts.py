@@ -3,7 +3,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 import numpy as np
-from datetime import timedelta
+from datetime import timedelta, datetime
+from plotly.subplots import make_subplots
 
 def gerar_grafico_historico_tesouro(df, tipo, vencimento, metrica='Taxa Compra Manha'):
     """
@@ -403,4 +404,45 @@ def plot_sector_indices_chart(results, index_meta):
         hovermode="x unified",
         template='brokeberg'
     )
+    return fig
+
+def colorir_negativo_positivo(val):
+    if pd.isna(val) or val == 0: return ''
+    return f"color: {'#4CAF50' if val > 0 else '#F44336'}"
+
+def gerar_dashboard_commodities(dados_preco_por_categoria):
+    all_commodity_names = [name for df in dados_preco_por_categoria.values() for name in df.columns]
+    total_subplots = len(all_commodity_names)
+    if total_subplots == 0: return go.Figure().update_layout(title_text="Nenhum dado de commodity disponível.")
+    num_cols, num_rows = 4, int(np.ceil(total_subplots / 4))
+    fig = make_subplots(rows=num_rows, cols=num_cols, subplot_titles=all_commodity_names)
+    idx = 0
+    for df_cat in dados_preco_por_categoria.values():
+        for commodity_name in df_cat.columns:
+            row, col = (idx // num_cols) + 1, (idx % num_cols) + 1
+            fig.add_trace(go.Scatter(x=df_cat.index, y=df_cat[commodity_name], mode='lines', name=commodity_name), row=row, col=col)
+            idx += 1
+    end_date = datetime.now(); buttons = []; 
+    periods = {'1M': 30, '3M': 91, '6M': 182, 'YTD': 'ytd', '1A': 365, '5A': 365*5, '10A': 3650, 'Máx': 'max'}
+    for label, days in periods.items():
+        if days == 'ytd': start_date = datetime(end_date.year, 1, 1)
+        elif days == 'max': start_date = min([df.index.min() for df in dados_preco_por_categoria.values() if not df.empty])
+        else: start_date = end_date - timedelta(days=days)
+        update_args = {}
+        for i in range(1, total_subplots + 1):
+            update_args[f'xaxis{i if i > 1 else ""}.range'], update_args[f'yaxis{i if i > 1 else ""}.autorange'] = [start_date, end_date], True
+        buttons.append(dict(method='relayout', label=label, args=[update_args]))
+    active_button_index = list(periods.keys()).index('1A') if '1A' in list(periods.keys()) else 4
+    fig.update_layout(title_text="Dashboard de Preços Históricos de Commodities", title_x=0, template="plotly_dark", height=250 * num_rows, showlegend=False,
+                        updatemenus=[dict(type="buttons", direction="right", showactive=True, x=1, xanchor="right", y=1.05, yanchor="bottom", buttons=buttons, active=active_button_index)])
+    start_date_1y = end_date - timedelta(days=365); idx = 0
+    for df_cat in dados_preco_por_categoria.values():
+        for i, commodity_name in enumerate(df_cat.columns, start=idx):
+            fig.layout[f'xaxis{i+1 if i+1 > 1 else ""}.range'] = [start_date_1y, end_date]
+            series = df_cat[commodity_name]; filtered_series = series[(series.index >= start_date_1y) & (series.index <= end_date)].dropna()
+            if not filtered_series.empty:
+                min_y, max_y = filtered_series.min(), filtered_series.max(); padding = (max_y - min_y) * 0.05
+                fig.layout[f'yaxis{i+1 if i+1 > 1 else ""}.range'] = [min_y - padding, max_y + padding]
+            else: fig.layout[f'yaxis{i+1 if i+1 > 1 else ""}.autorange'] = True
+        idx += len(df_cat.columns)
     return fig
