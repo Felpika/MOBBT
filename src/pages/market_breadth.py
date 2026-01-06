@@ -130,7 +130,13 @@ def render():
         valor_atual_ifr_media = ifr_media_series.iloc[-1]
         media_hist_ifr_media = ifr_media_series.mean()
         df_analise_ifr_media = df_analise_base.join(ifr_media_series).dropna()
-        resultados_ifr_media = analisar_retornos_por_faixa(df_analise_ifr_media, 'IFR_media_geral', 5, 0, 100, '')
+        # --- Cálculo Dinâmico de Faixas para Média IFR ---
+        passo_ifr_media = 5
+        min_ifr = int(np.floor(ifr_media_series.min() / passo_ifr_media)) * passo_ifr_media
+        max_ifr = int(np.ceil(ifr_media_series.max() / passo_ifr_media)) * passo_ifr_media
+        if max_ifr == min_ifr: max_ifr += passo_ifr_media
+        
+        resultados_ifr_media = analisar_retornos_por_faixa(df_analise_ifr_media, 'IFR_media_geral', passo_ifr_media, min_ifr, max_ifr, '')
         passo_ifr_media = 5
         faixa_atual_valor_ifr_media = int(valor_atual_ifr_media // passo_ifr_media) * passo_ifr_media
         faixa_atual_ifr_media = f'{faixa_atual_valor_ifr_media} a {faixa_atual_valor_ifr_media + passo_ifr_media}'
