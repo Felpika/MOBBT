@@ -3460,6 +3460,134 @@ elif pagina_selecionada == "Calculadora Put":
         r3.metric("Máx. Prejuízo Teórico", f"R$ {max_loss:,.2f}", help="Prejuízo se o ativo for a zero (improvável)")
         r4.metric("Colateral Usado", f"{(notional/collateral)*100:.1f}%", help="Percentual do colateral utilizado")
         
+        # === ANÁLISE DE GREGAS (BLACK-SCHOLES) ===
+        st.markdown("### 📐 Gregas (Black-Scholes)")
+        
+        # Calcula dias até o vencimento
+        from datetime import date
+        from scipy.stats import norm
+        days_to_expiry = (expiry - current_date).days
+        
+        # Parâmetros para Black-Scholes
+        S = asset_price  # Preço do ativo
+        K = selected_strike  # Strike
+        T = max(days_to_expiry / 365.0, 0.001)  # Tempo até vencimento em anos
+        r = selic_annual / 100  # Taxa livre de risco anual
+        
+        # Estima volatilidade implícita a partir do prêmio da opção
+        # Usa Newton-Raphson para encontrar a vol implícita
+        def black_scholes_put(S, K, T, r, sigma):
+            """Calcula preço teórico de PUT usando Black-Scholes"""
+            d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+            d2 = d1 - sigma * np.sqrt(T)
+            put_price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+            return put_price
+        
+        def implied_volatility(market_price, S, K, T, r, max_iter=100, tol=1e-5):
+            """Calcula volatilidade implícita usando Newton-Raphson"""
+            sigma = 0.3  # Chute inicial
+            for i in range(max_iter):
+                price = black_scholes_put(S, K, T, r, sigma)
+                d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+                vega = S * norm.pdf(d1) * np.sqrt(T)
+                
+                if vega < 1e-10:
+                    break
+                    
+                diff = market_price - price
+                if abs(diff) < tol:
+                    return sigma
+                sigma = sigma + diff / vega
+                sigma = max(0.01, min(sigma, 3.0))  # Limita entre 1% e 300%
+            return sigma
+        
+        # Calcula volatilidade implícita
+        try:
+            iv = implied_volatility(option_price, S, K, T, r)
+            
+            # Calcula d1 e d2 com a IV encontrada
+            d1 = (np.log(S / K) + (r + 0.5 * iv ** 2) * T) / (iv * np.sqrt(T))
+            d2 = d1 - iv * np.sqrt(T)
+            
+            # DELTA: derivada do preço em relação ao preço do ativo
+            # Para PUT, delta = N(d1) - 1 (sempre negativo)
+            delta_put = norm.cdf(d1) - 1
+            prob_exercise = abs(delta_put) * 100  # Aprox. probabilidade de exercício
+            
+            # THETA: decay temporal por dia
+            # Theta para PUT
+            theta_annual = (-(S * norm.pdf(d1) * iv) / (2 * np.sqrt(T)) 
+                           + r * K * np.exp(-r * T) * norm.cdf(-d2))
+            theta_daily = theta_annual / 365  # Theta por dia
+            
+            # GAMMA: sensibilidade do delta
+            gamma = norm.pdf(d1) / (S * iv * np.sqrt(T))
+            
+            # VEGA: sensibilidade à volatilidade (por 1% de mudança na vol)
+            vega = S * norm.pdf(d1) * np.sqrt(T) / 100
+            
+            # Exibe as gregas
+            g1, g2, g3, g4 = st.columns(4)
+            
+            g1.metric(
+                "Delta", 
+                f"{delta_put:.3f}",
+                help="Sensibilidade do prêmio ao preço do ativo. Para PUTs, varia de -1 a 0."
+            )
+            
+            g2.metric(
+                "Prob. de Exercício (|Δ|)", 
+                f"{prob_exercise:.1f}%",
+                help="Aproximação: o módulo do Delta indica a probabilidade de exercício"
+            )
+            
+            g3.metric(
+                "Theta ($/dia)", 
+                f"R$ {theta_daily:.3f}",
+                delta=f"R$ {theta_daily * qty_contracts:.2f}/dia total",
+                delta_color="normal",
+                help="Quanto você 'ganha' por dia com a passagem do tempo (time decay)"
+            )
+            
+            g4.metric(
+                "Volatilidade Implícita", 
+                f"{iv * 100:.1f}%",
+                help="Volatilidade implícita calculada a partir do prêmio da opção"
+            )
+            
+            # Segunda linha de gregas
+            g5, g6, g7, g8 = st.columns(4)
+            
+            g5.metric(
+                "Gamma", 
+                f"{gamma:.5f}",
+                help="Taxa de mudança do Delta. Maior perto do strike ATM."
+            )
+            
+            g6.metric(
+                "Vega ($/1% vol)", 
+                f"R$ {vega:.3f}",
+                help="Sensibilidade a 1% de mudança na volatilidade"
+            )
+            
+            # Ganho esperado com theta até vencimento
+            theta_total_gain = theta_daily * days_to_expiry * qty_contracts
+            g7.metric(
+                "Ganho Theta Total Est.", 
+                f"R$ {abs(theta_total_gain):.2f}",
+                help=f"Estimativa de ganho com time decay em {days_to_expiry} dias"
+            )
+            
+            g8.metric(
+                "Dias até Vencimento", 
+                f"{days_to_expiry}",
+                help="Período restante até o vencimento da opção"
+            )
+            
+        except Exception as e:
+            st.warning(f"Não foi possível calcular as gregas: {e}")
+        
+        
         # === ANÁLISE DE PROBABILIDADE HISTÓRICA ===
         st.markdown("### 📊 Probabilidade Histórica de Exercício")
         
