@@ -96,3 +96,59 @@ def calcular_variacao_curva(df_tesouro, dias_atras=5):
     df_diff = df_diff.dropna().round(1)
     
     return df_diff.sort_index(ascending=False)
+
+def calcular_breakeven_historico(df_tesouro):
+    """
+    Calcula o histórico do Breakeven de Inflação para prazos padronizados (ex: ~5 anos e ~10 anos).
+    Procura pares de NTN-F e NTN-B com vencimentos próximos em cada data base.
+    """
+    df_pre = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro Prefixado'].copy()
+    df_ipca = df_tesouro[df_tesouro['Tipo Titulo'] == 'Tesouro IPCA+'].copy()
+
+    if df_pre.empty or df_ipca.empty: return pd.DataFrame()
+
+    datas_comuns = sorted(list(set(df_pre['Data Base'].unique()) & set(df_ipca['Data Base'].unique())))
+    resultados = []
+    
+    # Definindo alvos aproximados em anos
+    alvos = [5, 10] 
+
+    for data in datas_comuns:
+        data_dt = pd.to_datetime(data)
+        df_pre_dia = df_pre[df_pre['Data Base'] == data]
+        df_ipca_dia = df_ipca[df_ipca['Data Base'] == data]
+
+        row = {'Data Base': data_dt}
+        
+        for alvo_anos in alvos:
+            target_date = data_dt + pd.DateOffset(years=alvo_anos)
+            
+            try:
+                # 1. Encontra os vencimentos mais próximos do ALVO (ex: 5 anos à frente)
+                venc_pre = min(df_pre_dia['Data Vencimento'], key=lambda x: abs(x - target_date))
+                venc_ipca = min(df_ipca_dia['Data Vencimento'], key=lambda x: abs(x - target_date))
+                
+                # 2. VALIDAÇÃO DE PRAZO: O título encontrado é realmente próximo do alvo?
+                dist_pre_target = abs((venc_pre - target_date).days)
+                dist_ipca_target = abs((venc_ipca - target_date).days)
+                
+                max_dist_dias = 550 # ~1.5 anos
+
+                if dist_pre_target > max_dist_dias or dist_ipca_target > max_dist_dias:
+                    row[f'Breakeven {alvo_anos}y'] = None
+                
+                # 3. CASAMENTO: Os dois títulos vencem perto um do outro?
+                elif abs((venc_pre - venc_ipca).days) < 450:
+                    taxa_pre = df_pre_dia[df_pre_dia['Data Vencimento'] == venc_pre]['Taxa Compra Manha'].iloc[0]
+                    taxa_ipca = df_ipca_dia[df_ipca_dia['Data Vencimento'] == venc_ipca]['Taxa Compra Manha'].iloc[0]
+                    
+                    breakeven = (((1 + taxa_pre/100) / (1 + taxa_ipca/100)) - 1) * 100
+                    row[f'Breakeven {alvo_anos}y'] = breakeven
+                else:
+                    row[f'Breakeven {alvo_anos}y'] = None
+            except ValueError:
+                pass 
+        
+        resultados.append(row)
+    
+    return pd.DataFrame(resultados).set_index('Data Base').sort_index()
