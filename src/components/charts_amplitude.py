@@ -106,6 +106,41 @@ def gerar_grafico_net_highs_lows(df_amplitude):
     fig.update_layout(title_text='Novas Máximas vs. Novas Mínimas (Saldo Líquido)', title_x=0, template='brokeberg', showlegend=True)
     return fig
 
+def gerar_grafico_cumulative_highs_lows(df_amplitude):
+    """Gera o gráfico acumulado de Net New Highs/Lows."""
+    series_cum = df_amplitude['cumulative_net_highs'].dropna()
+    
+    if series_cum.empty:
+        return go.Figure().update_layout(title_text="Sem dados para New Highs/Lows Acumulado", template='brokeberg')
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=series_cum.index,
+        y=series_cum,
+        name='Net Highs/Lows Acumulado',
+        mode='lines',
+        line=dict(color='#29B6F6', width=2),
+        fill='tozeroy',
+        fillcolor='rgba(41, 182, 246, 0.2)'
+    ))
+    
+    fig.update_layout(
+        title_text='Acumulado de Novas Máximas - Mínimas (Cumulative AD Line)',
+        title_x=0,
+        yaxis_title="Acumulado",
+        xaxis_title="Data",
+        template='brokeberg',
+        showlegend=False
+    )
+    
+    if len(series_cum) > 252*2:
+        end_date = series_cum.index.max()
+        start_date = end_date - pd.DateOffset(years=2)
+        fig.update_xaxes(range=[start_date, end_date])
+    
+    return fig
+
 def gerar_grafico_mcclellan(df_amplitude):
     s = df_amplitude['mcclellan'].dropna()
     if s.empty: return go.Figure().update_layout(title_text="Sem dados.")
@@ -129,4 +164,61 @@ def gerar_grafico_summation(df_amplitude):
     fig.add_trace(go.Scatter(x=s.index, y=s, name='Summation Index', line=dict(color='#AB47BC', width=2), fill='tozeroy', fillcolor='rgba(171, 71, 188, 0.2)'))
     fig.add_hline(y=0, line_dash="solid", line_color="white")
     fig.update_layout(title_text='McClellan Summation Index', title_x=0, template='brokeberg')
+    return fig
+
+def gerar_grafico_macd_breadth(df_amplitude):
+    """Gera o gráfico de MACD Breadth."""
+    s = df_amplitude['macd_breadth'].dropna()
+    if s.empty: return go.Figure().update_layout(title_text="Sem dados MACD Breadth.")
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=s.index, y=s,
+        name='% MACD Bullish',
+        mode='lines',
+        line=dict(color='#00E5FF', width=1.5),
+        fill='tozeroy',
+        fillcolor='rgba(0, 229, 255, 0.1)'
+    ))
+    
+    fig.update_layout(
+        title_text='MACD Breadth (% de Ações com MACD > Sinal)',
+        title_x=0, template='brokeberg',
+        yaxis_title="%", xaxis_title="Data",
+    )
+    fig.update_yaxes(range=[0, 100])
+    return fig
+
+def gerar_grafico_ifr_breadth(df_amplitude):
+    """Gera gráfico de IFR Breadth (Sobrecomprados vs Sobrevendidos)."""
+    df_jul = df_amplitude[['IFR_sobrecompradas', 'IFR_sobrevendidas', 'IFR_net']].dropna()
+    if df_jul.empty: return go.Figure().update_layout(title_text="Sem dados IFR Breadth.")
+
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=df_jul.index, y=df_jul['IFR_sobrecompradas'],
+        name='% Sobrecompradas (RSI>70)',
+        line=dict(color='#FF5252', width=1)
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=df_jul.index, y=df_jul['IFR_sobrevendidas'],
+        name='% Sobrevendidas (RSI<30)',
+        line=dict(color='#69F0AE', width=1)
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=df_jul.index, y=df_jul['IFR_net'],
+        name='Saldo Líquido (SC - SV)',
+        line=dict(color='#FFFF00', width=2),
+        visible='legendonly'
+    ))
+
+    fig.update_layout(
+        title_text='IFR Breadth (Sobrecompradas vs Sobrevendidas)',
+        title_x=0, template='brokeberg',
+        yaxis_title="%", xaxis_title="Data",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
     return fig

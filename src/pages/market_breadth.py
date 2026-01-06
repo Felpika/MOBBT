@@ -13,8 +13,11 @@ from src.components.charts_amplitude import (
     gerar_heatmap_amplitude,
     gerar_grafico_amplitude_mm_stacked,
     gerar_grafico_net_highs_lows,
+    gerar_grafico_cumulative_highs_lows,
     gerar_grafico_mcclellan,
-    gerar_grafico_summation
+    gerar_grafico_summation,
+    gerar_grafico_macd_breadth,
+    gerar_grafico_ifr_breadth
 )
 
 def render():
@@ -104,10 +107,20 @@ def render():
         
         # Seção 2: McClellan
         st.subheader("Oscilador McClellan e Summation Index")
-        st.plotly_chart(gerar_grafico_mcclellan(df_indicadores), use_container_width=True)
-        st.plotly_chart(gerar_grafico_summation(df_indicadores), use_container_width=True)
+        c1, c2 = st.columns(2)
+        c1.plotly_chart(gerar_grafico_mcclellan(df_indicadores), use_container_width=True)
+        c2.plotly_chart(gerar_grafico_summation(df_indicadores), use_container_width=True)
         st.markdown("---")
         
         # Seção 3: Net Highs/Lows
         st.subheader("Novas Máximas vs Mínimas (52 Semanas)")
-        st.plotly_chart(gerar_grafico_net_highs_lows(df_indicadores), use_container_width=True)
+        c1, c2 = st.columns(2)
+        c1.plotly_chart(gerar_grafico_net_highs_lows(df_indicadores), use_container_width=True)
+        c2.plotly_chart(gerar_grafico_cumulative_highs_lows(df_indicadores), use_container_width=True)
+        st.markdown("---")
+
+        # Seção 4: IFR e MACD Breadth (Recuperados)
+        st.subheader("Momentum de Amplitude (IFR & MACD Breadth)")
+        c1, c2 = st.columns(2)
+        c1.plotly_chart(gerar_grafico_ifr_breadth(df_indicadores), use_container_width=True)
+        c2.plotly_chart(gerar_grafico_macd_breadth(df_indicadores), use_container_width=True)
