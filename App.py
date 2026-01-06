@@ -3432,27 +3432,29 @@ elif pagina_selecionada == "Calculadora Put":
     
     with col2:
         asset_price = 0.0
+        
         if asset_ticker:
+            # Busca preço baseado no toggle
             if use_current_price:
-                # Modo: Preço atual (para input manual de opção)
-                with st.spinner(f"Buscando preço atual {asset_ticker}..."):
-                    fetched_price = get_asset_price_current(asset_ticker)
-                
-                if fetched_price > 0:
-                    asset_price = fetched_price
-                    st.success(f"Preço Atual: R$ {asset_price:.2f}")
-                else:
-                    asset_price = st.number_input("Preço do Ativo (Manual)", value=0.0, step=0.01, format="%.2f", key="putcalc_price_manual")
+                # ON: Preço atual (tempo real)
+                fetched_price = get_asset_price_current(asset_ticker)
+                price_label = "Preço Atual"
+                display_type = "success"
             else:
-                # Modo: Preço de ontem (consistente com B3 API)
-                with st.spinner(f"Buscando preço de ontem {asset_ticker}..."):
-                    fetched_price = get_asset_price_yesterday(asset_ticker)
-                
-                if fetched_price > 0:
-                    asset_price = fetched_price
-                    st.info(f"Preço Fech. Ontem: R$ {asset_price:.2f}")
+                # OFF: Preço de ontem (consistente com B3)
+                fetched_price = get_asset_price_yesterday(asset_ticker)
+                price_label = "Fechamento Ontem"
+                display_type = "info"
+            
+            if fetched_price > 0:
+                asset_price = fetched_price
+                if display_type == "success":
+                    st.success(f"{price_label}: R$ {asset_price:.2f}")
                 else:
-                    asset_price = st.number_input("Preço do Ativo (Manual)", value=0.0, step=0.01, format="%.2f", key="putcalc_price_manual2")
+                    st.info(f"{price_label}: R$ {asset_price:.2f}")
+            else:
+                st.warning("Não foi possível buscar preço automaticamente")
+                asset_price = st.number_input("Preço do Ativo (Manual)", value=0.0, step=0.01, format="%.2f", key="putcalc_price_fallback")
         else:
             asset_price = st.number_input("Preço do Ativo (R$)", value=0.0, step=0.01, format="%.2f", key="putcalc_price")
         
