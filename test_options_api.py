@@ -208,6 +208,84 @@ def test_b3_daily_file():
 
 
 # =============================================================================
+# MÉTODO 6: Opcoes.net.br (Sugerido pelo usuário)
+# =============================================================================
+
+def test_opcoes_net_br(ticker="BOVA11"):
+    """
+    Tenta buscar opções via opcoes.net.br
+    URL: https://opcoes.net.br/opcoes/bovespa/BOVA11
+    """
+    print(f"\n{'='*60}")
+    print(f"Testando opcoes.net.br para {ticker}")
+    print('='*60)
+    
+    try:
+        # URL da página de opções
+        url = f"https://opcoes.net.br/opcoes/bovespa/{ticker.upper()}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
+        
+        print(f"   URL: {url}")
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            print(f"✅ Conseguiu acessar opcoes.net.br")
+            print(f"   Status: {response.status_code}")
+            print(f"   Tamanho: {len(response.content)} bytes")
+            
+            # Tenta parsear tabelas HTML
+            try:
+                tables = pd.read_html(response.content, decimal=',', thousands='.')
+                if tables:
+                    print(f"\n   📊 Encontradas {len(tables)} tabelas!")
+                    for i, t in enumerate(tables):
+                        print(f"\n   === Tabela {i} ({t.shape[0]} linhas x {t.shape[1]} colunas) ===")
+                        print(f"   Colunas: {list(t.columns)}")
+                        if len(t) > 0:
+                            print(t.head(10).to_string())
+                    
+                    # Verifica se encontrou dados de opções (PUT)
+                    for i, t in enumerate(tables):
+                        cols = [str(c).lower() for c in t.columns]
+                        if any('strike' in c or 'prêmio' in c or 'premio' in c or 'exercício' in c for c in cols):
+                            print(f"\n   🎯 Tabela {i} parece conter dados de opções!")
+                            return True
+                    
+                    print("\n   ⚠️ Tabelas encontradas, mas estrutura não reconhecida como opções")
+                    return True  # Ainda retorna True pois acessou
+                else:
+                    print("   ⚠️ Nenhuma tabela HTML encontrada")
+                    return False
+                    
+            except Exception as parse_error:
+                print(f"   ⚠️ Erro ao parsear tabelas: {parse_error}")
+                
+                # Tenta verificar se há JSON na página
+                if 'application/json' in response.headers.get('Content-Type', ''):
+                    print("   📄 Resposta parece ser JSON")
+                    try:
+                        import json
+                        data = response.json()
+                        print(f"   JSON keys: {list(data.keys()) if isinstance(data, dict) else 'lista'}")
+                        return True
+                    except:
+                        pass
+                
+                return False
+        else:
+            print(f"❌ Status: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Erro: {e}")
+        return False
+
+
+# =============================================================================
 # MAIN - Executar todos os testes
 # =============================================================================
 
@@ -222,6 +300,7 @@ if __name__ == "__main__":
         "statusinvest": test_statusinvest_options("BOVA11"),
         "fundamentus": test_fundamentus_options(),
         "b3_daily": test_b3_daily_file(),
+        "opcoes_net_br": test_opcoes_net_br("BOVA11"),
     }
     
     print("\n" + "="*60)
