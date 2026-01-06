@@ -49,13 +49,13 @@ def get_sector_indices_chart():
     start_date = (datetime.now() - timedelta(days=365*2)).strftime('%Y-%m-%d')
     
     INDICES = {
-        'IMAT': {'name': 'Materiais Básicos'},
-        'ICON': {'name': 'Consumo'},
-        'IEEX': {'name': 'Energia Elétrica'},
-        'IMOB': {'name': 'Imobiliário'},
-        'IFNC': {'name': 'Financeiro'},
-        'UTIL': {'name': 'Utilidade Pública'},
-        'INDX': {'name': 'Industrial'}
+        'IMAT': {'name': 'Materiais Básicos', 'color': '#FF1744'}, # Red
+        'ICON': {'name': 'Consumo', 'color': '#FF9100'}, # Orange
+        'IEEX': {'name': 'Energia Elétrica', 'color': '#2979FF'}, # Blue
+        'IMOB': {'name': 'Imobiliário', 'color': '#D500F9'}, # Purple
+        'IFNC': {'name': 'Financeiro', 'color': '#00E676'}, # Green
+        'UTIL': {'name': 'Utilidade Pública', 'color': '#00E5FF'}, # Cyan
+        'INDX': {'name': 'Industrial', 'color': '#FFEA00'} # Yellow
     }
 
     # 2. Fetch Compositions
