@@ -3465,28 +3465,38 @@ elif pagina_selecionada == "Calculadora Put":
         actual_ticker = generate_put_ticker(asset_ticker[:4], expiry, selected_strike) if selected_strike > 0 else ""
         st.text_input("Código da Opção (Teórico)", value=actual_ticker, disabled=True)
         
-        # Botão para buscar preço da B3
-        if actual_ticker:
-            fetch_btn = st.button("🔍 Buscar Preço B3", key="fetch_b3_price", help="Busca o último preço negociado na B3")
-            if fetch_btn:
-                with st.spinner(f"Buscando {actual_ticker} na B3..."):
-                    b3_data = fetch_option_price_b3(actual_ticker)
-                    if b3_data:
-                        st.session_state['b3_fetched_price'] = b3_data['last_price']
-                        st.session_state['b3_data'] = b3_data
-                        st.success(f"Último: R$ {b3_data['last_price']:.2f}")
-                    else:
-                        st.warning("Sem negócios para esta opção")
+    # Busca automática do preço da B3 quando o ticker muda
+    if actual_ticker:
+        # Verifica se o ticker mudou ou se ainda não buscou
+        if st.session_state.get('last_option_ticker') != actual_ticker:
+            with st.spinner(f"Buscando {actual_ticker} na B3..."):
+                b3_data = fetch_option_price_b3(actual_ticker)
+                if b3_data:
+                    st.session_state['b3_fetched_price'] = b3_data['last_price']
+                    st.session_state['b3_data'] = b3_data
+                    st.session_state['last_option_ticker'] = actual_ticker
+                else:
+                    st.session_state['b3_fetched_price'] = 0.0
+                    st.session_state['b3_data'] = None
+                    st.session_state['last_option_ticker'] = actual_ticker
         
     with c_op3:
-        # Se buscou da B3, usa como valor inicial
-        default_premium = st.session_state.get('b3_fetched_price', 0.0)
-        option_price = st.number_input("Preço da Put (Prêmio)", value=default_premium, step=0.01, format="%.2f", key="putcalc_premium")
+        # Usa o preço buscado da B3 como valor
+        b3_price = st.session_state.get('b3_fetched_price', 0.0)
+        
+        # Exibe o preço da B3 como informação
+        if b3_price > 0:
+            st.metric("Prêmio B3 (Último)", f"R$ {b3_price:.2f}")
+        else:
+            st.warning("Sem dados B3")
+        
+        # Campo para sobrescrever manualmente se necessário
+        option_price = st.number_input("Prêmio Manual (opcional)", value=b3_price, step=0.01, format="%.2f", key="putcalc_premium")
         
         # Mostra info da B3 se disponível
-        if 'b3_data' in st.session_state and st.session_state.get('b3_data'):
+        if st.session_state.get('b3_data'):
             b3 = st.session_state['b3_data']
-            st.caption(f"📊 B3 ({b3['date']}): {b3['trades']} negócios, Vol: {b3['volume']:,.0f}")
+            st.caption(f"📊 {b3['date']}: {b3['trades']} negócios, Vol: {b3['volume']:,.0f}")
     
     # Cálculos
     if selected_strike > 0 and option_price > 0 and asset_price > 0:
