@@ -17,16 +17,53 @@ def get_selic_annual():
     except Exception as e:
         return 11.25 # Fallback
 
-def get_asset_price_putcalc(ticker):
-    """Fetches the latest closing price for the asset from yfinance."""
+@st.cache_data(ttl=600, show_spinner=False)
+def get_asset_price_current(ticker):
+    """Busca preço ATUAL do ativo via yfinance"""
     try:
         full_ticker = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
         stock = yf.Ticker(full_ticker)
-        hist = stock.history(period="1d")
-        if not hist.empty:
-            return hist['Close'].iloc[-1]
-        else:
+        data = stock.history(period="1d")
+        
+        if data.empty:
             return 0.0
+            
+        # Garante que não é MultiIndex
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+            
+        if not data.empty:
+            return float(data['Close'].iloc[-1])
+        return 0.0
+    except:
+        return 0.0
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_asset_price_yesterday(ticker):
+    """Busca preço de FECHAMENTO DE ONTEM do ativo (mesmo dia da B3 API)"""
+    try:
+        full_ticker = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
+        stock = yf.Ticker(full_ticker)
+        # Busca últimos 5 dias para garantir ter dados
+        data = stock.history(period="5d")
+        
+        if data.empty:
+            return 0.0
+            
+        # Garante que não é MultiIndex
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+        
+        # Remove linhas com NaN no Close
+        data = data.dropna(subset=['Close'])
+        
+        if len(data) >= 2:
+            # Retorna penúltimo fechamento (ontem)
+            return float(data['Close'].iloc[-2])
+        elif len(data) == 1:
+            # Se só tem 1 dia (ex: feriado recente), retorna o único disponível
+            return float(data['Close'].iloc[-1])
+        return 0.0
     except Exception as e:
         return 0.0
 

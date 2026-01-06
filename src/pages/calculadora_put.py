@@ -7,7 +7,8 @@ import numpy as np
 from datetime import date
 import plotly.graph_objects as go
 from src.models.put_utils import (
-    get_selic_annual, get_asset_price_putcalc, get_next_expiration, generate_put_ticker
+    get_selic_annual, get_next_expiration, generate_put_ticker,
+    get_asset_price_current, get_asset_price_yesterday
 )
 from src.data_loaders.b3_api import fetch_option_price_b3
 from src.models.black_scholes import black_scholes_put, implied_volatility, calculate_greeks
@@ -27,10 +28,38 @@ def render():
     with col1:
         st.markdown("### Ativo Objeto")
         asset_ticker = st.text_input("Ticker da Ação", "", help="Ex: VALE3, PETR4").upper().strip()
-        asset_price = get_asset_price_putcalc(asset_ticker)
         
+        # Toggle para modo de preço
+        use_current_price = st.toggle(
+            "Usar preço atual (tempo real)", 
+            value=False, 
+            help="ON = Preço atual do ativo (insira prêmio manualmente). OFF = Preço de ontem (mesmo dia dos dados B3)"
+        )
+        
+        asset_price = 0.0
         col_price, col_selic = st.columns(2)
-        col_price.metric("Preço Atual", f"R$ {asset_price:.2f}")
+        
+        if asset_ticker:
+            if use_current_price:
+                fetched_price = get_asset_price_current(asset_ticker)
+                price_label = "Preço Atual"
+                display_type = "success"
+            else:
+                fetched_price = get_asset_price_yesterday(asset_ticker)
+                price_label = "Fechamento Ontem"
+                display_type = "info"
+                
+            if fetched_price > 0:
+                asset_price = fetched_price
+                if display_type == "success":
+                   # st.success(f"{price_label}: R$ {asset_price:.2f}") # Avoid clutter, use metric color if possible or just metric
+                   col_price.metric(price_label, f"R$ {asset_price:.2f}")
+                else:
+                   col_price.metric(price_label, f"R$ {asset_price:.2f}", delta_color="off")
+            else:
+                col_price.warning("Preço não encontrado")
+        else:
+            col_price.metric("Preço Atual", "R$ 0.00")
         
         selic_annual = get_selic_annual()
         selic_monthly = ((1 + selic_annual/100)**(1/12) - 1) * 100
