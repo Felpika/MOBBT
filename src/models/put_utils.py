@@ -51,9 +51,8 @@ def get_put_ticker_letter(month):
 def generate_put_ticker(asset_code, expiry_date, strike):
     """Generates the theoretical B3 ticker for a PUT option."""
     month_letter = get_put_ticker_letter(expiry_date.month)
-    strike_str = f"{strike:.2f}".replace('.', '')
-    # Simplifcation: B3 tickers often dont follow exact strike price in name, but this is an approximation
-    # For exact tickers, a mapping service is needed.
-    # The original code likely used this approximation or had a better logic.
-    # Assuming valid logic from original file.
-    return f"{asset_code}{month_letter}{int(strike)}" # Simple approximation as found in original code context usually
+    # Updated to strict user requirement: int(41) -> 410
+    # Common legacy B3 format often multiplies by 10 or 100 relative to precision
+    # Assuming 'strike * 10' logic for now as requested (41 -> 410)
+    strike_val = int(strike * 10) if strike % 1 == 0 else int(strike * 10) # Generally just strike*10
+    return f"{asset_code}{month_letter}{strike_val}"
