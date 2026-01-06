@@ -172,6 +172,160 @@ def render():
         except Exception as e:
             st.warning(f"Erro ao calcular gregas: {e}")
 
+        st.markdown("---")
+        
+        # === ANÁLISE DE PROBABILIDADE HISTÓRICA (RECUPERADO) ===
+        st.markdown("### 📊 Probabilidade Histórica de Exercício")
+        
+        # Calcula dias até o vencimento
+        days_to_expiry_hist = (expiry - current_date).days
+        
+        # Busca dados históricos do ativo
+        with st.spinner(f"Analisando histórico de {asset_ticker}..."):
+            try:
+                full_ticker = asset_ticker if asset_ticker.endswith(".SA") else f"{asset_ticker}.SA"
+                # Use a larger period to get enough samples
+                hist_data = yf.download(full_ticker, period="10y", progress=False)
+                
+                if not hist_data.empty and len(hist_data) > days_to_expiry_hist:
+                    # Calcula retornos para o período igual ao tempo até vencimento
+                    if 'Adj Close' in hist_data.columns:
+                        close_col = 'Adj Close'
+                    elif 'Close' in hist_data.columns:
+                        close_col = 'Close'
+                    else:
+                        close_col = hist_data.columns[0] # Fallback
+                        
+                    hist_data['Forward_Return'] = (hist_data[close_col].shift(-days_to_expiry_hist) / hist_data[close_col] - 1) * 100
+                    
+                    # Remove NaNs (últimos N dias não terão retorno forward)
+                    returns = hist_data['Forward_Return'].dropna()
+                    
+                    # Conta quantas vezes caiu mais que a margem de segurança
+                    threshold = -break_even_pct  # Negativo porque é queda
+                    breaches = returns[returns < threshold]
+                    total_periods = len(returns)
+                    breach_count = len(breaches)
+                    
+                    if total_periods > 0:
+                        probability = (breach_count / total_periods) * 100
+                        
+                        # Exibe resultados
+                        p1, p2, p3, p4 = st.columns(4)
+                        
+                        # Cor da probabilidade baseada no risco
+                        if probability < 5:
+                            prob_color = "normal"
+                        elif probability < 15:
+                            prob_color = "off"
+                        else:
+                            prob_color = "inverse"
+                        
+                        p1.metric(
+                            "Prob. Histórica de Exercício", 
+                            f"{probability:.1f}%",
+                            delta=f"{breach_count} vezes em {total_periods}",
+                            delta_color=prob_color,
+                            help=f"Em {total_periods} períodos de {days_to_expiry_hist} dias, o ativo caiu mais de {break_even_pct:.1f}% em {breach_count} vezes"
+                        )
+                        
+                        p2.metric(
+                            "Dias até Vencimento",
+                            f"{days_to_expiry_hist}",
+                            help="Período utilizado para análise histórica"
+                        )
+                        
+                        # Pior queda histórica no período
+                        worst_drop = returns.min()
+                        p3.metric(
+                            "Pior Queda no Período",
+                            f"{worst_drop:.1f}%",
+                            help=f"Maior queda histórica em {days_to_expiry_hist} dias"
+                        )
+                        
+                        # Queda média quando há exercício
+                        if breach_count > 0:
+                            avg_breach = breaches.mean()
+                            p4.metric(
+                                "Queda Média (se exercido)",
+                                f"{avg_breach:.1f}%",
+                                help="Média das quedas quando ultrapassa o break-even"
+                            )
+                        else:
+                            p4.metric(
+                                "Queda Média (se exercido)",
+                                "N/A",
+                                help="Não houve exercício histórico com esses parâmetros"
+                            )
+                        
+                        # Expander com detalhes
+                        with st.expander("📈 Ver distribuição histórica de retornos"):
+                            # Histograma dos retornos - versão simplificada
+                            fig_hist = go.Figure()
+                            
+                            # Histograma único com intervalos de 1%
+                            fig_hist.add_trace(go.Histogram(
+                                x=returns,
+                                xbins=dict(size=1),
+                                name='Retornos',
+                                marker_color='#00D4FF',
+                                opacity=0.8
+                            ))
+                            
+                            # Adiciona área sombreada para zona de exercício (esquerda do threshold)
+                            # y_max estimation
+                            counts, _ = np.histogram(returns, bins='auto')
+                            y_max = counts.max() * 1.1 if len(counts) > 0 else 10
+
+                            fig_hist.add_vrect(
+                                x0=returns.min(),
+                                x1=threshold,
+                                fillcolor="rgba(255, 75, 75, 0.3)",
+                                layer="below",
+                                line_width=0,
+                                annotation_text="Zona de Exercício",
+                                annotation_position="top left",
+                                annotation_font_color="#FF4B4B"
+                            )
+                            
+                            # Linha vertical no threshold (break-even)
+                            fig_hist.add_vline(
+                                x=threshold, 
+                                line_dash="solid", 
+                                line_color="#FF4B4B",
+                                line_width=2,
+                                annotation_text=f"Break-Even: {threshold:.1f}%",
+                                annotation_position="top right",
+                                annotation_font_color="#FF4B4B"
+                            )
+                            
+                            # Linha vertical no zero
+                            fig_hist.add_vline(
+                                x=0, 
+                                line_dash="dash", 
+                                line_color="#39E58C",
+                                line_width=1,
+                                annotation_text="0%",
+                                annotation_position="bottom right"
+                            )
+                            
+                            fig_hist.update_layout(
+                                title=f"Distribuição de Retornos em {days_to_expiry_hist} dias ({total_periods} observações)",
+                                xaxis_title="Retorno (%)",
+                                yaxis_title="Frequência",
+                                template='brokeberg',
+                                height=400,
+                                showlegend=False
+                            )
+                            
+                            st.plotly_chart(fig_hist, use_container_width=True)
+                            
+                            st.caption(f"Análise baseada em {total_periods} períodos de {days_to_expiry_hist} dias nos últimos 10 anos de dados disponíveis.")
+                    else:
+                        st.warning("Dados históricos insuficientes para análise.")
+            except Exception as e:
+                st.error(f"Erro ao analisar histórico: {e}")
+
         # Payoff Chart
         st.markdown("### 📉 Gráfico de Payoff")
         price_range = np.linspace(selected_strike * 0.85, selected_strike * 1.15, 100)
