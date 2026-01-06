@@ -2,6 +2,7 @@
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
+import numpy as np
 
 def gerar_grafico_historico_amplitude(series_dados, titulo, valor_atual, media_hist):
     df_plot = series_dados.to_frame(name='valor').dropna()
@@ -9,7 +10,28 @@ def gerar_grafico_historico_amplitude(series_dados, titulo, valor_atual, media_h
     fig = px.line(df_plot, x=df_plot.index, y='valor', title=titulo, template='brokeberg')
     fig.add_hline(y=media_hist, line_dash="dash", line_color="gray", annotation_text="Média Hist.")
     fig.add_hline(y=valor_atual, line_dash="dot", line_color="yellow", annotation_text=f"Atual: {valor_atual:.2f}")
-    fig.update_layout(showlegend=False, title_x=0, yaxis_title="valor", xaxis_title="Data")
+    
+    fig.update_layout(
+        showlegend=False, title_x=0, yaxis_title="valor", xaxis_title="Data",
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=6, label="6M", step="month", stepmode="backward"),
+                    dict(count=1, label="1A", step="year", stepmode="backward"),
+                    dict(count=2, label="2A", step="year", stepmode="backward"),
+                    dict(count=5, label="5A", step="year", stepmode="backward"),
+                    dict(step="all", label="Tudo")
+                ]),
+                bgcolor="#333952", font=dict(color="white")
+            ),
+            type="date"
+        )
+    )
+    if not df_plot.empty:
+        end_date = df_plot.index.max()
+        start_date = end_date - pd.DateOffset(years=2)
+        fig.update_xaxes(range=[start_date, end_date])
+        
     return fig
 
 def gerar_histograma_amplitude(series_dados, titulo, valor_atual, media_hist, nbins=50):
@@ -20,12 +42,15 @@ def gerar_histograma_amplitude(series_dados, titulo, valor_atual, media_hist, nb
     return fig
 
 def gerar_heatmap_amplitude(tabela_media, faixa_atual, titulo):
+    # Fix: Format text to empty string if NaN, otherwise formatted percentage
+    text_values = tabela_media.map(lambda x: f'{x:.1f}%' if pd.notna(x) else '').values
+    
     fig = go.Figure(data=go.Heatmap(
         z=tabela_media.values,
         x=[col.replace('retorno_', '') for col in tabela_media.columns],
         y=tabela_media.index,
         hoverongaps=False, colorscale='RdYlGn',
-        text=tabela_media.map(lambda x: f'{x:.1f}%').values,
+        text=text_values,
         texttemplate="%{text}", showscale=False
     ))
     faixas_y = list(tabela_media.index)
@@ -103,7 +128,28 @@ def gerar_grafico_net_highs_lows(df_amplitude):
     fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['new_lows'], name='Novas Mínimas', line=dict(color='#E57373', dash='dot'), visible='legendonly'))
 
     fig.add_hline(y=0, line_dash="solid", line_color="white", line_width=0.5)
-    fig.update_layout(title_text='Novas Máximas vs. Novas Mínimas (Saldo Líquido)', title_x=0, template='brokeberg', showlegend=True)
+    fig.update_layout(
+        title_text='Novas Máximas vs. Novas Mínimas (Saldo Líquido)', 
+        title_x=0, template='brokeberg', showlegend=True,
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=6, label="6M", step="month", stepmode="backward"),
+                    dict(count=1, label="1A", step="year", stepmode="backward"),
+                    dict(count=2, label="2A", step="year", stepmode="backward"),
+                    dict(count=5, label="5A", step="year", stepmode="backward"),
+                    dict(step="all", label="Tudo")
+                ]),
+                bgcolor="#333952", font=dict(color="white")
+            ),
+            type="date"
+        )
+    )
+    if not df_plot.empty:
+        end_date = df_plot.index.max()
+        start_date = end_date - pd.DateOffset(years=2)
+        fig.update_xaxes(range=[start_date, end_date])
+
     return fig
 
 def gerar_grafico_cumulative_highs_lows(df_amplitude):
@@ -131,7 +177,20 @@ def gerar_grafico_cumulative_highs_lows(df_amplitude):
         yaxis_title="Acumulado",
         xaxis_title="Data",
         template='brokeberg',
-        showlegend=False
+        showlegend=False,
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=6, label="6M", step="month", stepmode="backward"),
+                    dict(count=1, label="1A", step="year", stepmode="backward"),
+                    dict(count=2, label="2A", step="year", stepmode="backward"),
+                    dict(count=5, label="5A", step="year", stepmode="backward"),
+                    dict(step="all", label="Tudo")
+                ]),
+                bgcolor="#333952", font=dict(color="white")
+            ),
+            type="date"
+        )
     )
     
     if len(series_cum) > 252*2:
@@ -153,7 +212,27 @@ def gerar_grafico_mcclellan(df_amplitude):
     fig.add_trace(go.Scatter(x=s.index, y=neg, name='Negativo', line=dict(color='#F44336', width=1), fill='tozeroy', fillcolor='rgba(244, 67, 54, 0.4)'))
     fig.add_hline(y=0, line_dash="solid", line_color="white")
     
-    fig.update_layout(title_text='Oscilador McClellan', title_x=0, template='brokeberg', showlegend=False)
+    fig.update_layout(
+        title_text='Oscilador McClellan', title_x=0, template='brokeberg', showlegend=False,
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=6, label="6M", step="month", stepmode="backward"),
+                    dict(count=1, label="1A", step="year", stepmode="backward"),
+                    dict(count=2, label="2A", step="year", stepmode="backward"),
+                    dict(count=5, label="5A", step="year", stepmode="backward"),
+                    dict(step="all", label="Tudo")
+                ]),
+                bgcolor="#333952", font=dict(color="white")
+            ),
+            type="date"
+        )
+    )
+    if not s.empty:
+        end_date = s.index.max()
+        start_date = end_date - pd.DateOffset(years=2)
+        fig.update_xaxes(range=[start_date, end_date])
+
     return fig
 
 def gerar_grafico_summation(df_amplitude):
@@ -163,7 +242,28 @@ def gerar_grafico_summation(df_amplitude):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=s.index, y=s, name='Summation Index', line=dict(color='#AB47BC', width=2), fill='tozeroy', fillcolor='rgba(171, 71, 188, 0.2)'))
     fig.add_hline(y=0, line_dash="solid", line_color="white")
-    fig.update_layout(title_text='McClellan Summation Index', title_x=0, template='brokeberg')
+    
+    fig.update_layout(
+        title_text='McClellan Summation Index', title_x=0, template='brokeberg',
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=6, label="6M", step="month", stepmode="backward"),
+                    dict(count=1, label="1A", step="year", stepmode="backward"),
+                    dict(count=2, label="2A", step="year", stepmode="backward"),
+                    dict(count=5, label="5A", step="year", stepmode="backward"),
+                    dict(step="all", label="Tudo")
+                ]),
+                bgcolor="#333952", font=dict(color="white")
+            ),
+            type="date"
+        )
+    )
+    if not s.empty:
+        end_date = s.index.max()
+        start_date = end_date - pd.DateOffset(years=2)
+        fig.update_xaxes(range=[start_date, end_date])
+        
     return fig
 
 def gerar_grafico_macd_breadth(df_amplitude):
@@ -185,8 +285,27 @@ def gerar_grafico_macd_breadth(df_amplitude):
         title_text='MACD Breadth (% de Ações com MACD > Sinal)',
         title_x=0, template='brokeberg',
         yaxis_title="%", xaxis_title="Data",
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=6, label="6M", step="month", stepmode="backward"),
+                    dict(count=1, label="1A", step="year", stepmode="backward"),
+                    dict(count=2, label="2A", step="year", stepmode="backward"),
+                    dict(count=5, label="5A", step="year", stepmode="backward"),
+                    dict(step="all", label="Tudo")
+                ]),
+                bgcolor="#333952", font=dict(color="white")
+            ),
+            type="date"
+        )
     )
     fig.update_yaxes(range=[0, 100])
+    
+    if not s.empty:
+        end_date = s.index.max()
+        start_date = end_date - pd.DateOffset(years=2)
+        fig.update_xaxes(range=[start_date, end_date])
+        
     return fig
 
 def gerar_grafico_ifr_breadth(df_amplitude):
@@ -219,6 +338,25 @@ def gerar_grafico_ifr_breadth(df_amplitude):
         title_text='IFR Breadth (Sobrecompradas vs Sobrevendidas)',
         title_x=0, template='brokeberg',
         yaxis_title="%", xaxis_title="Data",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=6, label="6M", step="month", stepmode="backward"),
+                    dict(count=1, label="1A", step="year", stepmode="backward"),
+                    dict(count=2, label="2A", step="year", stepmode="backward"),
+                    dict(count=5, label="5A", step="year", stepmode="backward"),
+                    dict(step="all", label="Tudo")
+                ]),
+                bgcolor="#333952", font=dict(color="white")
+            ),
+            type="date"
+        )
     )
+    
+    if not df_jul.empty:
+        end_date = df_jul.index.max()
+        start_date = end_date - pd.DateOffset(years=2)
+        fig.update_xaxes(range=[start_date, end_date])
+        
     return fig
