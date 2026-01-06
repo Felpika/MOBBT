@@ -2,6 +2,7 @@
 import requests
 import streamlit as st
 import yfinance as yf
+import pandas as pd
 from dateutil.relativedelta import relativedelta
 from datetime import date, timedelta
 import math
