@@ -176,10 +176,18 @@ def render():
         valor_atual_net_ifr = net_ifr_series.iloc[-1]
         media_hist_net_ifr = net_ifr_series.mean()
         df_analise_net_ifr = df_analise_base.join(net_ifr_series).dropna()
-        resultados_net_ifr = analisar_retornos_por_faixa(df_analise_net_ifr, 'IFR_net', 20, -100, 100, '%')
-
+        
+        # --- Cálculo Dinâmico de Faixas para Net IFR ---
         passo_net_ifr = 20
-        # Check to avoid division by zero or invalid invalid integer conversion if series is NaN
+        min_net_ifr = int(np.floor(net_ifr_series.min() / passo_net_ifr)) * passo_net_ifr
+        max_net_ifr = int(np.ceil(net_ifr_series.max() / passo_net_ifr)) * passo_net_ifr
+        # Garante pelo menos um range razoável se os dados forem planos
+        if max_net_ifr == min_net_ifr:
+             min_net_ifr -= passo_net_ifr
+             max_net_ifr += passo_net_ifr
+             
+        resultados_net_ifr = analisar_retornos_por_faixa(df_analise_net_ifr, 'IFR_net', passo_net_ifr, min_net_ifr, max_net_ifr, '%')
+
         if not np.isnan(valor_atual_net_ifr):
             faixa_atual_valor_net_ifr = int(valor_atual_net_ifr // passo_net_ifr) * passo_net_ifr
             faixa_atual_net_ifr = f'{faixa_atual_valor_net_ifr} a {faixa_atual_valor_net_ifr + passo_net_ifr}%'
@@ -216,7 +224,7 @@ def render():
 
         st.markdown("---")
 
-        # --- SEÇÃO 4: MACD Breadth (SEM HISTOGRAMA/HEATMAP) ---
+        # --- SEÇÃO 4: MACD Breadth ---
         st.subheader("MACD Breadth")
         st.info("Mede a porcentagem de ações com tendência de alta (MACD > Sinal). Útil para confirmar a força da tendência do índice.")
         macd_series = df_indicadores['macd_breadth']
@@ -241,7 +249,7 @@ def render():
         
         st.markdown("---")
 
-        # --- SEÇÃO 5: Oscilador McClellan e Summation Index (SEM HISTOGRAMA/HEATMAP) ---
+        # --- SEÇÃO 5: Oscilador McClellan e Summation Index ---
         st.subheader("Oscilador McClellan e Summation Index")
         st.info("Oscilador McClellan: Momentum de curto prazo. Summation Index: Tendência de médio/longo prazo.")
         
@@ -271,7 +279,7 @@ def render():
         
         st.markdown("---")
         
-        # --- SEÇÃO 6: Novas Máximas vs Mínimas (ADICIONADO HISTOGRAMA/HEATMAP, REMOVIDO ACUMULADO) ---
+        # --- SEÇÃO 6: Novas Máximas vs Mínimas ---
         st.subheader("Novas Máximas vs Mínimas (52 Semanas)")
         st.info("Saldo líquido de ações atingindo novas máximas de 52 semanas menos novas mínimas. Valores positivos indicam força ampla e tendência de alta.")
 
@@ -286,8 +294,16 @@ def render():
         media_hist_nh = nh_nl_series_recent.mean()
         df_analise_nh = df_analise_base.join(nh_nl_series).dropna()
         
-        resultados_nh = analisar_retornos_por_faixa(df_analise_nh, 'net_highs_lows', 20, -200, 200, '')
+        # --- Cálculo Dinâmico de Faixas para Highs/Lows ---
         passo_nh = 20
+        min_nh = int(np.floor(nh_nl_series_recent.min() / passo_nh)) * passo_nh
+        max_nh = int(np.ceil(nh_nl_series_recent.max() / passo_nh)) * passo_nh
+        
+        if max_nh == min_nh:
+             min_nh -= passo_nh
+             max_nh += passo_nh
+
+        resultados_nh = analisar_retornos_por_faixa(df_analise_nh, 'net_highs_lows', passo_nh, min_nh, max_nh, '')
         
         if not np.isnan(valor_atual_nh):
             faixa_atual_valor_nh = int(np.floor(valor_atual_nh / passo_nh)) * passo_nh
@@ -306,7 +322,8 @@ def render():
 
         col_hist, col_heat = st.columns([1, 2])
         with col_hist:
-            st.plotly_chart(gerar_histograma_amplitude(nh_nl_series_recent, "Distribuição (Saldo)", valor_atual_nh, media_hist_nh, nbins=80), use_container_width=True)
+            # AUMENTADO nbins para 150 conforme pedido
+            st.plotly_chart(gerar_histograma_amplitude(nh_nl_series_recent, "Distribuição (Saldo)", valor_atual_nh, media_hist_nh, nbins=150), use_container_width=True)
         with col_heat:
              for ativo in ATIVOS_ANALISE:
                  ativo_clean = ativo.replace('.SA', '')
@@ -344,8 +361,14 @@ def render():
 
             df_analise_vx = df_analise_base.join(vxewz_series, how='inner').dropna()
             
+            # --- Cálculo Dinâmico de Faixas para VXEWZ ---
             passo_vx = 5
-            resultados_vx = analisar_retornos_por_faixa(df_analise_vx, 'VXEWZCLS', passo_vx, 10, 100, '') 
+            min_vx = int(np.floor(vxewz_series_recent.min() / passo_vx)) * passo_vx
+            max_vx = int(np.ceil(vxewz_series_recent.max() / passo_vx)) * passo_vx
+            
+            if max_vx == min_vx: max_vx += passo_vx
+
+            resultados_vx = analisar_retornos_por_faixa(df_analise_vx, 'VXEWZCLS', passo_vx, min_vx, max_vx, '') 
             
             faixa_atual_val_vx = int(valor_atual_vx // passo_vx) * passo_vx
             faixa_atual_vx = f'{faixa_atual_val_vx} a {faixa_atual_val_vx + passo_vx}'
