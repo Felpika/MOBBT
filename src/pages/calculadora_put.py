@@ -1,5 +1,6 @@
 
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import math
 import numpy as np
@@ -162,7 +163,7 @@ def render():
             iv = implied_volatility(option_price, S, K, T, r)
             greeks = calculate_greeks(S, K, T, r, iv, option_type="put")
             
-            theta_daily = greeks['theta'] / 365
+            theta_daily = greeks['theta_daily']
             
             g1, g2, g3, g4 = st.columns(4)
             g1.metric("Delta", f"{greeks['delta']:.3f}")
