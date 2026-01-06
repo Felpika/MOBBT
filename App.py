@@ -3415,14 +3415,30 @@ elif pagina_selecionada == "Calculadora Put":
         return expirations[0] if expirations else current_date + timedelta(days=45)
     
     def generate_put_ticker(base_ticker, expiry_date, strike):
-        """Gera código da opção PUT"""
+        """Gera código da opção PUT (padrão B3 comum)"""
         put_month_letters = {
             1: 'M', 2: 'N', 3: 'O', 4: 'P', 5: 'Q', 6: 'R',
             7: 'S', 8: 'T', 9: 'U', 10: 'V', 11: 'W', 12: 'X'
         }
         month_letter = put_month_letters.get(expiry_date.month, 'A')
-        strike_int = int(round(strike))
-        return f"{base_ticker}{month_letter}{strike_int}"
+        
+        # Lógica de formatação de strike da B3 (padrão aproximado)
+        # Strikes inteiros ganham um 0 no final (ex: 41.00 -> 410)
+        # Strikes quebrados usam 2 casas decimais sem ponto (ex: 15.42 -> 1542, 12.5 -> 125)
+        # Caso especial comum: strike terminado em .50 vira 3 digitos (125) e .00 vira 3 digitos (120) 
+        # Mas para ativos > 100 as vezes vira 4 digitos.
+        # REGRA SIMPLIFICADA QUE COBRE A MAIORIA: 
+        # Strike * 10 se for inteiro ou .50, Strike * 100 se for centavos quebrados.
+        # Ajuste no pedido do usuário: 41.00 -> 410
+        
+        if strike.is_integer():
+             strike_str = f"{int(strike * 10)}" # 41.0 -> 410
+        elif (strike * 10).is_integer(): # caso 41.5 -> 415
+             strike_str = f"{int(strike * 10)}"
+        else:
+             strike_str = f"{int(strike * 100)}" # 41.25 -> 4125
+             
+        return f"{base_ticker}{month_letter}{strike_str}"
     
     # Busca Selic automaticamente (agora com cache)
     selic_annual = get_selic_annual()
