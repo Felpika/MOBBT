@@ -108,7 +108,7 @@ def render():
             for ativo in ATIVOS_ANALISE:
                  ativo_clean = ativo.replace('.SA', '')
                  sufixo = f" ({ativo_clean})"
-                 st.markdown(f"**{ativo}**") # Título por ativo
+                 st.markdown(f"**{ativo}**")
                  cols_ativo = [c for c in resultados_mb['Retorno Médio'].columns if ativo_clean in c]
                  if cols_ativo:
                      df_ret = resultados_mb['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
@@ -119,24 +119,104 @@ def render():
                      cb.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_mb, f"Taxa de Acerto"), use_container_width=True)
 
         st.markdown("---")
+
+        # --- SEÇÃO 2: MÉDIA GERAL DO IFR ---
+        st.subheader("Análise da Média Geral do IFR")
+        ifr_media_series = df_indicadores['IFR_media_geral']
+        if not ifr_media_series.empty:
+            cutoff_ifr = ifr_media_series.index.max() - pd.DateOffset(years=5)
+            ifr_media_series = ifr_media_series[ifr_media_series.index >= cutoff_ifr]
+
+        valor_atual_ifr_media = ifr_media_series.iloc[-1]
+        media_hist_ifr_media = ifr_media_series.mean()
+        df_analise_ifr_media = df_analise_base.join(ifr_media_series).dropna()
+        resultados_ifr_media = analisar_retornos_por_faixa(df_analise_ifr_media, 'IFR_media_geral', 5, 0, 100, '')
+        passo_ifr_media = 5
+        faixa_atual_valor_ifr_media = int(valor_atual_ifr_media // passo_ifr_media) * passo_ifr_media
+        faixa_atual_ifr_media = f'{faixa_atual_valor_ifr_media} a {faixa_atual_valor_ifr_media + passo_ifr_media}'
+
+        col1, col2 = st.columns([1,2])
+        with col1:
+            st.metric("Valor Atual", f"{valor_atual_ifr_media:.2f}")
+            st.metric("Média Histórica", f"{media_hist_ifr_media:.2f}")
+            z_score_ifr_media = (valor_atual_ifr_media - media_hist_ifr_media) / ifr_media_series.std()
+            st.metric("Z-Score (Desvios Padrão)", f"{z_score_ifr_media:.2f}")
+            percentil_ifr_media = stats.percentileofscore(ifr_media_series, valor_atual_ifr_media)
+            st.metric("Percentil Histórico", f"{percentil_ifr_media:.2f}%")
+        with col2:
+            st.plotly_chart(gerar_grafico_historico_amplitude(ifr_media_series, "Histórico da Média Geral do IFR (5 Anos)", valor_atual_ifr_media, media_hist_ifr_media), use_container_width=True)
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.plotly_chart(gerar_histograma_amplitude(ifr_media_series, "Distribuição Histórica da Média do IFR", valor_atual_ifr_media, media_hist_ifr_media), use_container_width=True)
+        with col2:
+             for ativo in ATIVOS_ANALISE:
+                 ativo_clean = ativo.replace('.SA', '')
+                 sufixo = f" ({ativo_clean})"
+                 st.markdown(f"**{ativo}**")
+                 cols_ativo = [c for c in resultados_ifr_media['Retorno Médio'].columns if ativo_clean in c]
+                 
+                 if cols_ativo:
+                     df_ret = resultados_ifr_media['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
+                     df_hit = resultados_ifr_media['Taxa de Acerto'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
+                     
+                     c1, c2 = st.columns(2)
+                     c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_ifr_media, "Retorno Médio"), use_container_width=True)
+                     c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_ifr_media, "Taxa de Acerto"), use_container_width=True)
         
-        # --- SEÇÃO ADICIONADA: Análise da Média Geral do IFR ---
-        st.subheader("Análise da Média Geral do IFR e Net IFR")
+        st.markdown("---")
+
+        # --- SEÇÃO 3: ANÁLISE DE NET IFR ---
+        st.subheader("Análise de Net IFR (% Sobrecomprados - % Sobrevendidos)")
+        st.info("O **Net IFR** mede a diferença percentual entre ações sobrecompradas (IFR > 70) e ações sobrevendidas (IFR < 30). Valores positivos indicam euforia, negativos indicam pânico.")
+        net_ifr_series = df_indicadores['IFR_net']
+        if not net_ifr_series.empty:
+            cutoff_net_ifr = net_ifr_series.index.max() - pd.DateOffset(years=5)
+            net_ifr_series = net_ifr_series[net_ifr_series.index >= cutoff_net_ifr]
+
+        valor_atual_net_ifr = net_ifr_series.iloc[-1]
+        media_hist_net_ifr = net_ifr_series.mean()
+        df_analise_net_ifr = df_analise_base.join(net_ifr_series).dropna()
+        resultados_net_ifr = analisar_retornos_por_faixa(df_analise_net_ifr, 'IFR_net', 20, -100, 100, '%')
+
+        passo_net_ifr = 20
+        # Check to avoid division by zero or invalid invalid integer conversion if series is NaN
+        if not np.isnan(valor_atual_net_ifr):
+            faixa_atual_valor_net_ifr = int(valor_atual_net_ifr // passo_net_ifr) * passo_net_ifr
+            faixa_atual_net_ifr = f'{faixa_atual_valor_net_ifr} a {faixa_atual_valor_net_ifr + passo_net_ifr}%'
+        else:
+            faixa_atual_net_ifr = "N/A"
         
-        c1, c2 = st.columns(2)
-        c1.plotly_chart(gerar_grafico_ifr_breadth(df_indicadores), use_container_width=True)
-        
-        # Análise detalhada (Histograma/Heatmap) para IFR? O usuário só disse "Faltaram os gráficos do IFR".
-        # Vou assumir que ele quer os gráficos de linha (Breadth) e talvez a análise estatística se houver espaço,
-        # mas como ele pediu para REMOVER hist/heat de outros, vou manter simples aqui, só o gráfico de linha por enquanto
-        # para não poluir, ou seguir o padrão da Seção 1 se ele quiser consistência. 
-        # A pedido "Faltaram os gráficos do IFR" sugere plural.
-        # No backup tinha "Análise da Média Geral do IFR" com heatmaps. Vou restaurar se for o caso.
-        # Mas para ser seguro e não poluir, vou colocar o gráfico de Net IFR também.
+        col1, col2 = st.columns([1,2])
+        with col1:
+            st.metric("Valor Atual", f"{valor_atual_net_ifr:.2f}%")
+            st.metric("Média Histórica", f"{media_hist_net_ifr:.2f}%")
+            z_score_net_ifr = (valor_atual_net_ifr - media_hist_net_ifr) / net_ifr_series.std()
+            st.metric("Z-Score (Desvios Padrão)", f"{z_score_net_ifr:.2f}")
+            percentil_net_ifr = stats.percentileofscore(net_ifr_series, valor_atual_net_ifr)
+            st.metric("Percentil Histórico", f"{percentil_net_ifr:.2f}%")
+        with col2:
+            st.plotly_chart(gerar_grafico_historico_amplitude(net_ifr_series, "Histórico do Net IFR (5 Anos)", valor_atual_net_ifr, media_hist_net_ifr), use_container_width=True)
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.plotly_chart(gerar_histograma_amplitude(net_ifr_series, "Distribuição Histórica do Net IFR", valor_atual_net_ifr, media_hist_net_ifr, nbins=100), use_container_width=True)
+        with col2:
+             for ativo in ATIVOS_ANALISE:
+                 ativo_clean = ativo.replace('.SA', '')
+                 sufixo = f" ({ativo_clean})"
+                 st.markdown(f"**{ativo}**")
+                 cols_ativo = [c for c in resultados_net_ifr['Retorno Médio'].columns if ativo_clean in c]
+                 
+                 if cols_ativo:
+                     df_ret = resultados_net_ifr['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
+                     df_hit = resultados_net_ifr['Taxa de Acerto'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
+                     
+                     c1, c2 = st.columns(2)
+                     c1.plotly_chart(gerar_heatmap_amplitude(df_ret, faixa_atual_net_ifr, "Retorno Médio"), use_container_width=True)
+                     c2.plotly_chart(gerar_heatmap_amplitude(df_hit, faixa_atual_net_ifr, "Taxa de Acerto"), use_container_width=True)
 
         st.markdown("---")
 
-        # --- SEÇÃO 2: MACD Breadth (SEM HISTOGRAMA/HEATMAP) ---
+        # --- SEÇÃO 4: MACD Breadth (SEM HISTOGRAMA/HEATMAP) ---
         st.subheader("MACD Breadth")
         st.info("Mede a porcentagem de ações com tendência de alta (MACD > Sinal). Útil para confirmar a força da tendência do índice.")
         macd_series = df_indicadores['macd_breadth']
@@ -158,12 +238,10 @@ def render():
             st.metric("Percentil Histórico", f"{percentil_macd:.2f}%")
         with col2:
             st.plotly_chart(gerar_grafico_historico_amplitude(macd_series, "Histórico MACD Breadth (% Papéis com MACD > Sinal)", valor_atual_macd, media_hist_macd), use_container_width=True)
-            
-        # -- REMOVIDO HISTOGRAMA E HEATMAP DO MACD A PEDIDO --
-
+        
         st.markdown("---")
 
-        # --- SEÇÃO 3: Oscilador McClellan e Summation Index (SEM HISTOGRAMA/HEATMAP) ---
+        # --- SEÇÃO 5: Oscilador McClellan e Summation Index (SEM HISTOGRAMA/HEATMAP) ---
         st.subheader("Oscilador McClellan e Summation Index")
         st.info("Oscilador McClellan: Momentum de curto prazo. Summation Index: Tendência de médio/longo prazo.")
         
@@ -190,12 +268,10 @@ def render():
             c_graph1, c_graph2 = st.columns(2)
             c_graph1.plotly_chart(gerar_grafico_mcclellan(df_indicadores), use_container_width=True)
             c_graph2.plotly_chart(gerar_grafico_summation(df_indicadores), use_container_width=True)
-            
-        # -- REMOVIDO HISTOGRAMA E HEATMAP DO MCCLELLAN A PEDIDO --
-
+        
         st.markdown("---")
         
-        # --- SEÇÃO 4: Novas Máximas vs Mínimas (ADICIONADO HISTOGRAMA/HEATMAP, REMOVIDO ACUMULADO) ---
+        # --- SEÇÃO 6: Novas Máximas vs Mínimas (ADICIONADO HISTOGRAMA/HEATMAP, REMOVIDO ACUMULADO) ---
         st.subheader("Novas Máximas vs Mínimas (52 Semanas)")
         st.info("Saldo líquido de ações atingindo novas máximas de 52 semanas menos novas mínimas. Valores positivos indicam força ampla e tendência de alta.")
 
@@ -212,7 +288,7 @@ def render():
         
         resultados_nh = analisar_retornos_por_faixa(df_analise_nh, 'net_highs_lows', 20, -200, 200, '')
         passo_nh = 20
-        # Fix for range calculation to avoid errors with huge numbers
+        
         if not np.isnan(valor_atual_nh):
             faixa_atual_valor_nh = int(np.floor(valor_atual_nh / passo_nh)) * passo_nh
             faixa_atual_nh = f'{faixa_atual_valor_nh} a {faixa_atual_valor_nh + passo_nh}'
@@ -226,10 +302,8 @@ def render():
              z_score_nh = (valor_atual_nh - media_hist_nh) / nh_nl_series_recent.std()
              st.metric("Z-Score", f"{z_score_nh:.2f}")
         with col2:
-             # Mostra apenas o gráfico de barras/área do Net Highs/Lows, sem o acumulado
              st.plotly_chart(gerar_grafico_net_highs_lows(df_indicadores), use_container_width=True)
 
-        # Adiciona Histograma e Heatmap para Net Highs/Lows
         col_hist, col_heat = st.columns([1, 2])
         with col_hist:
             st.plotly_chart(gerar_histograma_amplitude(nh_nl_series_recent, "Distribuição (Saldo)", valor_atual_nh, media_hist_nh, nbins=80), use_container_width=True)
@@ -250,7 +324,7 @@ def render():
 
         st.markdown("---")
 
-        # --- SEÇÃO 5: VXEWZ ---
+        # --- SEÇÃO 7: VXEWZ ---
         st.subheader("Volatilidade Implícita Brasil (VXEWZ)")
         st.info("O índice VXEWZ mede a volatilidade implícita das opções do ETF EWZ. Valores altos indicam stress.")
 
@@ -268,7 +342,6 @@ def render():
             valor_atual_vx = vxewz_series.iloc[-1]
             media_hist_vx = vxewz_series_recent.mean()
 
-            # Merge com base para retornos
             df_analise_vx = df_analise_base.join(vxewz_series, how='inner').dropna()
             
             passo_vx = 5
