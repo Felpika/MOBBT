@@ -3325,13 +3325,31 @@ elif pagina_selecionada == "Calculadora Put":
     
     # === FUNÇÕES HELPER COM CACHE ===
     @st.cache_data(ttl=600, show_spinner=False)  # Cache de 10 minutos
-    def get_asset_price_putcalc(ticker):
-        """Busca preço do ativo via yfinance com timeout"""
+    def get_asset_price_current(ticker):
+        """Busca preço ATUAL do ativo via yfinance"""
         try:
             full_ticker = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
             stock = yf.Ticker(full_ticker)
             data = stock.history(period="1d")
             if not data.empty:
+                return float(data['Close'].iloc[-1])
+            return 0.0
+        except:
+            return 0.0
+    
+    @st.cache_data(ttl=600, show_spinner=False)  # Cache de 10 minutos
+    def get_asset_price_yesterday(ticker):
+        """Busca preço de FECHAMENTO DE ONTEM do ativo (mesmo dia da B3 API)"""
+        try:
+            from datetime import date, timedelta
+            full_ticker = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
+            stock = yf.Ticker(full_ticker)
+            # Busca últimos 5 dias para garantir ter dados
+            data = stock.history(period="5d")
+            if not data.empty and len(data) >= 2:
+                # Retorna penúltimo fechamento (ontem)
+                return float(data['Close'].iloc[-2])
+            elif not data.empty:
                 return float(data['Close'].iloc[-1])
             return 0.0
         except:
@@ -3348,8 +3366,8 @@ elif pagina_selecionada == "Calculadora Put":
             return 13.25  # Fallback
     
     @st.cache_data(ttl=86400, show_spinner=False)  # Cache de 24h
-    def get_next_expiration(current_date):
-        """Calcula próxima data de vencimento (3ª sexta-feira do mês)"""
+    def get_available_expirations(current_date, num_months=4):
+        """Retorna lista de datas de vencimento disponíveis (3ª sexta-feira de cada mês)"""
         from datetime import date
         from dateutil.relativedelta import relativedelta
         
@@ -3358,11 +3376,24 @@ elif pagina_selecionada == "Calculadora Put":
             first_friday = first_day + timedelta(days=(4 - first_day.weekday()) % 7)
             return first_friday + timedelta(weeks=2)
         
-        expiry = third_friday(current_date.year, current_date.month)
-        if expiry <= current_date:
-            next_month = current_date + relativedelta(months=1)
-            expiry = third_friday(next_month.year, next_month.month)
-        return expiry
+        expirations = []
+        check_date = current_date
+        
+        for i in range(num_months + 2):  # Check extra months
+            expiry = third_friday(check_date.year, check_date.month)
+            # Só adiciona se for pelo menos 30 dias no futuro
+            if expiry > current_date + timedelta(days=30):
+                expirations.append(expiry)
+                if len(expirations) >= num_months:
+                    break
+            check_date = check_date + relativedelta(months=1)
+        
+        return expirations
+    
+    def get_next_expiration(current_date):
+        """Retorna próxima data de vencimento com pelo menos 30 dias"""
+        expirations = get_available_expirations(current_date, num_months=1)
+        return expirations[0] if expirations else current_date + timedelta(days=45)
     
     def generate_put_ticker(base_ticker, expiry_date, strike):
         """Gera código da opção PUT"""
@@ -3391,26 +3422,69 @@ elif pagina_selecionada == "Calculadora Put":
         asset_ticker = st.text_input("Ativo Objeto", value="BOVA11", key="putcalc_ticker").upper()
         from datetime import date
         current_date = st.date_input("Data Base", value=date.today(), key="putcalc_date")
+        
+        # Toggle para modo de preço
+        use_current_price = st.toggle(
+            "Usar preço atual (tempo real)", 
+            value=False, 
+            help="ON = Preço atual do ativo (insira prêmio manualmente). OFF = Preço de ontem (mesmo dia dos dados B3)"
+        )
     
     with col2:
-        # Auto-fetch do preço
         asset_price = 0.0
         if asset_ticker:
-            with st.spinner(f"Buscando preço {asset_ticker}..."):
-                fetched_price = get_asset_price_putcalc(asset_ticker)
-            
-            if fetched_price > 0:
-                asset_price = fetched_price
-                st.success(f"Preço Atual: R$ {asset_price:.2f}")
+            if use_current_price:
+                # Modo: Preço atual (para input manual de opção)
+                with st.spinner(f"Buscando preço atual {asset_ticker}..."):
+                    fetched_price = get_asset_price_current(asset_ticker)
+                
+                if fetched_price > 0:
+                    asset_price = fetched_price
+                    st.success(f"Preço Atual: R$ {asset_price:.2f}")
+                else:
+                    asset_price = st.number_input("Preço do Ativo (Manual)", value=0.0, step=0.01, format="%.2f", key="putcalc_price_manual")
             else:
-                asset_price = st.number_input("Preço do Ativo (Manual - Falha na Busca)", value=0.0, step=0.01, format="%.2f", key="putcalc_price_manual")
+                # Modo: Preço de ontem (consistente com B3 API)
+                with st.spinner(f"Buscando preço de ontem {asset_ticker}..."):
+                    fetched_price = get_asset_price_yesterday(asset_ticker)
+                
+                if fetched_price > 0:
+                    asset_price = fetched_price
+                    st.info(f"Preço Fech. Ontem: R$ {asset_price:.2f}")
+                else:
+                    asset_price = st.number_input("Preço do Ativo (Manual)", value=0.0, step=0.01, format="%.2f", key="putcalc_price_manual2")
         else:
             asset_price = st.number_input("Preço do Ativo (R$)", value=0.0, step=0.01, format="%.2f", key="putcalc_price")
         
         collateral = st.number_input("Colateral Disponível (R$)", value=31018.00, step=100.0, format="%.2f", key="putcalc_collateral")
     
-    # Lógica de sugestão
-    expiry = get_next_expiration(current_date)
+    # Lógica de sugestão - obtém vencimentos disponíveis
+    available_expirations = get_available_expirations(current_date, num_months=4)
+    
+    # Seletor de vencimento
+    with col3:
+        st.markdown("### Vencimento")
+        if available_expirations:
+            # Formata opções para o selectbox
+            expiry_options = {
+                f"{exp.strftime('%d/%m/%Y')} ({(exp - current_date).days} dias)": exp 
+                for exp in available_expirations
+            }
+            selected_expiry_label = st.selectbox(
+                "Selecione o Vencimento",
+                options=list(expiry_options.keys()),
+                key="putcalc_expiry_select"
+            )
+            expiry = expiry_options[selected_expiry_label]
+        else:
+            from dateutil.relativedelta import relativedelta
+            expiry = current_date + relativedelta(months=2)
+            st.warning("Usando vencimento estimado")
+        
+        days_to_exp = (expiry - current_date).days
+        st.metric("Dias até Vencimento", f"{days_to_exp} dias")
+    
+    # Sugestões baseadas no vencimento selecionado
     suggested_strike = round(asset_price, 0) if asset_price > 0 else 0.0
     suggested_ticker = generate_put_ticker(asset_ticker[:4], expiry, suggested_strike) if asset_price > 0 else ""
     
@@ -3418,21 +3492,15 @@ elif pagina_selecionada == "Calculadora Put":
     if 'putcalc_last_ticker' not in st.session_state:
         st.session_state.putcalc_last_ticker = asset_ticker
     
-    # Se o ticker mudou, força atualização do strike e faz rerun
+    # Se o ticker mudou, força atualização do strike
     if st.session_state.putcalc_last_ticker != asset_ticker:
         st.session_state.putcalc_last_ticker = asset_ticker
-        # Atualiza diretamente a key do widget de strike
         st.session_state.putcalc_strike_input = suggested_strike
+        # Limpa cache de preço B3
+        st.session_state.pop('last_option_ticker', None)
+        st.session_state.pop('b3_fetched_price', None)
+        st.session_state.pop('b3_data', None)
         st.rerun()
-    
-    with col3:
-        st.markdown("### Sugestão Automática")
-        if asset_price > 0:
-            st.info(f"Vencimento: **{expiry.strftime('%d/%m/%Y')}**")
-            st.info(f"Strike ATM: **R$ {suggested_strike:.2f}**")
-            st.info(f"Ticker: **{suggested_ticker}**")
-        else:
-            st.warning("Aguardando preço do ativo...")
     
     st.markdown("---")
     
@@ -3941,56 +4009,71 @@ elif pagina_selecionada == "Calculadora Put":
         
         # === TABELA COMPARATIVA DE STRIKES ===
         st.markdown("### 🎯 Comparativo de Strikes")
-        st.caption("Simulação de diferentes strikes para o mesmo ativo e colateral")
+        st.caption("Preços reais buscados da B3 (último dia útil)")
         
-        # Gera strikes: ATM, OTM 2.5%, 5%, 7.5%, 10%
+        # Gera strikes: ATM e OTM em incrementos inteiros
+        base_strike = int(round(asset_price))
         strikes_compare = [
-            ("ATM", round(asset_price, 0)),
-            ("OTM 2.5%", round(asset_price * 0.975, 0)),
-            ("OTM 5%", round(asset_price * 0.95, 0)),
-            ("OTM 7.5%", round(asset_price * 0.925, 0)),
-            ("OTM 10%", round(asset_price * 0.90, 0)),
+            ("ATM", base_strike),
+            ("OTM -1", base_strike - 1),
+            ("OTM -2", base_strike - 2),
+            ("OTM -3", base_strike - 3),
+            ("OTM -4", base_strike - 4),
+            ("OTM -5", base_strike - 5),
         ]
         
-        # Estima prêmios (simplificado - assume decay linear do prêmio)
-        # Na prática, prêmios OTM são menores proporcionalmente
-        base_premium = option_price
-        premium_decay = 0.25  # 25% de redução do prêmio a cada 2.5% OTM
-        
         comparison_data = []
-        for label, stk in strikes_compare:
-            otm_level = (asset_price - stk) / asset_price * 100
-            
-            # Estima prêmio baseado no nível OTM (simplificado)
-            if stk == round(asset_price, 0):
-                est_premium = base_premium
-            else:
-                otm_steps = abs(otm_level) / 2.5
-                est_premium = base_premium * (1 - premium_decay) ** otm_steps
-            
-            # Calcula métricas para este strike
-            raw_q = math.floor(collateral / stk)
-            q = (raw_q // 100) * 100
-            y = (est_premium / asset_price) * 100
-            be = stk - est_premium
-            margin = ((asset_price - be) / asset_price) * 100
-            credit = q * est_premium
-            
-            comparison_data.append({
-                "Strike": label,
-                "Preço Strike": f"R$ {stk:.0f}",
-                "Prêmio Est.": f"R$ {est_premium:.2f}",
-                "Yield": f"{y:.2f}%",
-                "Qtd": f"{q}",
-                "Crédito": f"R$ {credit:,.0f}",
-                "Break-Even": f"R$ {be:.2f}",
-                "Margem Seg.": f"{margin:.1f}%"
-            })
+        
+        with st.spinner("Buscando preços reais da B3..."):
+            for label, stk in strikes_compare:
+                # Gera ticker para este strike
+                opt_ticker = generate_put_ticker(asset_ticker[:4], expiry, stk)
+                
+                # Busca preço real da B3
+                b3_price_data = fetch_option_price_b3(opt_ticker)
+                
+                if b3_price_data and b3_price_data.get('last_price', 0) > 0:
+                    real_premium = b3_price_data['last_price']
+                    trades = b3_price_data['trades']
+                    
+                    # Calcula métricas
+                    raw_q = math.floor(collateral / stk)
+                    q = (raw_q // 100) * 100
+                    y = (real_premium / asset_price) * 100 if asset_price > 0 else 0
+                    be = stk - real_premium
+                    margin = ((asset_price - be) / asset_price) * 100 if asset_price > 0 else 0
+                    credit = q * real_premium
+                    
+                    comparison_data.append({
+                        "Strike": label,
+                        "Ticker": opt_ticker,
+                        "Preço Strike": f"R$ {stk}",
+                        "Prêmio B3": f"R$ {real_premium:.2f}",
+                        "Negócios": f"{trades}",
+                        "Yield": f"{y:.2f}%",
+                        "Qtd": f"{q}",
+                        "Crédito": f"R$ {credit:,.0f}",
+                        "Break-Even": f"R$ {be:.2f}",
+                        "Margem": f"{margin:.1f}%"
+                    })
+                else:
+                    comparison_data.append({
+                        "Strike": label,
+                        "Ticker": opt_ticker,
+                        "Preço Strike": f"R$ {stk}",
+                        "Prêmio B3": "N/A",
+                        "Negócios": "-",
+                        "Yield": "-",
+                        "Qtd": "-",
+                        "Crédito": "-",
+                        "Break-Even": "-",
+                        "Margem": "-"
+                    })
         
         df_compare = pd.DataFrame(comparison_data)
         st.dataframe(df_compare, use_container_width=True, hide_index=True)
         
-        st.caption("⚠️ Prêmios estimados são aproximações. Consulte o book de ofertas para valores reais.")
+        st.caption(f"📊 Dados da B3 do último dia útil. Vencimento: {expiry.strftime('%d/%m/%Y')}")
         
         st.markdown("---")
         
