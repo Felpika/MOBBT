@@ -3323,9 +3323,59 @@ elif pagina_selecionada == "Calculadora Put":
     )
     st.markdown("---")
     
-    # Busca Selic automaticamente
-    with st.spinner("Buscando Taxa Selic..."):
-        selic_annual = get_selic_annual()
+    # === FUNÇÕES HELPER COM CACHE ===
+    @st.cache_data(ttl=600, show_spinner=False)  # Cache de 10 minutos
+    def get_asset_price_putcalc(ticker):
+        """Busca preço do ativo via yfinance com timeout"""
+        try:
+            full_ticker = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
+            stock = yf.Ticker(full_ticker)
+            data = stock.history(period="1d")
+            if not data.empty:
+                return float(data['Close'].iloc[-1])
+            return 0.0
+        except:
+            return 0.0
+    
+    @st.cache_data(ttl=3600, show_spinner=False)  # Cache de 1 hora
+    def get_selic_annual():
+        """Busca taxa Selic anual"""
+        try:
+            from bcb import sgs
+            selic = sgs.get({'selic': 432}, last=1)
+            return float(selic['selic'].iloc[-1])
+        except:
+            return 13.25  # Fallback
+    
+    @st.cache_data(ttl=86400, show_spinner=False)  # Cache de 24h
+    def get_next_expiration(current_date):
+        """Calcula próxima data de vencimento (3ª sexta-feira do mês)"""
+        from datetime import date
+        from dateutil.relativedelta import relativedelta
+        
+        def third_friday(year, month):
+            first_day = date(year, month, 1)
+            first_friday = first_day + timedelta(days=(4 - first_day.weekday()) % 7)
+            return first_friday + timedelta(weeks=2)
+        
+        expiry = third_friday(current_date.year, current_date.month)
+        if expiry <= current_date:
+            next_month = current_date + relativedelta(months=1)
+            expiry = third_friday(next_month.year, next_month.month)
+        return expiry
+    
+    def generate_put_ticker(base_ticker, expiry_date, strike):
+        """Gera código da opção PUT"""
+        put_month_letters = {
+            1: 'M', 2: 'N', 3: 'O', 4: 'P', 5: 'Q', 6: 'R',
+            7: 'S', 8: 'T', 9: 'U', 10: 'V', 11: 'W', 12: 'X'
+        }
+        month_letter = put_month_letters.get(expiry_date.month, 'A')
+        strike_int = int(round(strike))
+        return f"{base_ticker}{month_letter}{strike_int}"
+    
+    # Busca Selic automaticamente (agora com cache)
+    selic_annual = get_selic_annual()
     selic_monthly = (pow(1 + selic_annual/100, 1/12) - 1) * 100
     
     # Exibe Selic na sidebar para esta página
