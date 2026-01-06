@@ -3331,6 +3331,14 @@ elif pagina_selecionada == "Calculadora Put":
             full_ticker = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
             stock = yf.Ticker(full_ticker)
             data = stock.history(period="1d")
+            
+            if data.empty:
+                return 0.0
+                
+            # Garante que não é MultiIndex
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+                
             if not data.empty:
                 return float(data['Close'].iloc[-1])
             return 0.0
@@ -3341,18 +3349,29 @@ elif pagina_selecionada == "Calculadora Put":
     def get_asset_price_yesterday(ticker):
         """Busca preço de FECHAMENTO DE ONTEM do ativo (mesmo dia da B3 API)"""
         try:
-            from datetime import date, timedelta
             full_ticker = ticker if ticker.endswith(".SA") else f"{ticker}.SA"
             stock = yf.Ticker(full_ticker)
             # Busca últimos 5 dias para garantir ter dados
             data = stock.history(period="5d")
-            if not data.empty and len(data) >= 2:
+            
+            if data.empty:
+                return 0.0
+                
+            # Garante que não é MultiIndex
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+            
+            # Remove linhas com NaN no Close
+            data = data.dropna(subset=['Close'])
+            
+            if len(data) >= 2:
                 # Retorna penúltimo fechamento (ontem)
                 return float(data['Close'].iloc[-2])
-            elif not data.empty:
+            elif len(data) == 1:
+                # Se só tem 1 dia (ex: feriado recente), retorna o único disponível
                 return float(data['Close'].iloc[-1])
             return 0.0
-        except:
+        except Exception as e:
             return 0.0
     
     @st.cache_data(ttl=3600, show_spinner=False)  # Cache de 1 hora
