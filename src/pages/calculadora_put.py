@@ -25,7 +25,7 @@ def render():
     
     with col1:
         st.markdown("### Ativo Objeto")
-        asset_ticker = st.text_input("Ticker da Ação", "VALE3", help="Ex: VALE3, PETR4").upper().strip()
+        asset_ticker = st.text_input("Ticker da Ação", "", help="Ex: VALE3, PETR4").upper().strip()
         asset_price = get_asset_price_putcalc(asset_ticker)
         
         col_price, col_selic = st.columns(2)
