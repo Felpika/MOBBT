@@ -20,7 +20,8 @@ from src.pages import (
     dashboard_internacional,
     acoes_br,
     radar_insiders,
-    calculadora_put
+    calculadora_put,
+    exportador_dfp
 )
 
 # --- Sidebar Nuvegação ---
@@ -41,6 +42,7 @@ with st.sidebar:
             "Ações BR",
             "Radar de Insiders",
             "Calculadora Put",
+            "Exportador DFP",
         ],
         icons=[
             "house",
@@ -53,6 +55,7 @@ with st.sidebar:
             "kanban-fill",
             "person-check-fill",
             "calculator",
+            "file-earmark-spreadsheet",
         ],
         menu_icon="speedometer2",
         default_index=0,
@@ -81,6 +84,7 @@ if pagina_selecionada == "Início":
     * **Ações BR:** Análise de Ratio (Long & Short).
     * **Radar de Insiders:** Monitoramento CVM.
     * **Calculadora Put:** Estruturação de venda de opções.
+    * **Exportador DFP:** Exporte demonstrativos financeiros de empresas listadas.
     """)
 
 elif pagina_selecionada == "Juros Brasil":
@@ -109,3 +113,6 @@ elif pagina_selecionada == "Radar de Insiders":
 
 elif pagina_selecionada == "Calculadora Put":
     calculadora_put.render()
+
+elif pagina_selecionada == "Exportador DFP":
+    exportador_dfp.render()
