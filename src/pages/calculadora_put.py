@@ -12,6 +12,11 @@ from src.models.put_utils import (
 )
 from src.data_loaders.b3_api import fetch_option_price_b3
 from src.models.black_scholes import black_scholes_put, implied_volatility, calculate_greeks
+from src.models.fractal_analytics import (
+    calculate_hurst_exponent, get_hurst_interpretation,
+    prob_exercise_bs, prob_exercise_fractal, calculate_historical_volatility,
+    run_monte_carlo_fbm, check_trend_filters, get_recommendation
+)
 
 def render():
     st.header("Calculadora de Venda de PUT (Cash-Secured Put)")
@@ -202,6 +207,143 @@ def render():
         except Exception as e:
             st.warning(f"Erro ao calcular gregas: {e}")
 
+        st.markdown("---")
+        
+        # === ANÁLISE FRACTAL ===
+        st.markdown("### 📈 Análise Fractal (Hurst + fBm)")
+        
+        with st.spinner("Calculando Hurst e probabilidades fractais..."):
+            try:
+                # Busca histórico para análise fractal
+                full_ticker = asset_ticker if asset_ticker.endswith(".SA") else f"{asset_ticker}.SA"
+                from datetime import timedelta
+                end_date_fractal = date.today()
+                start_date_fractal = end_date_fractal - timedelta(days=int(252 * 1.5))
+                
+                fractal_hist = yf.download(full_ticker, start=start_date_fractal.strftime('%Y-%m-%d'), 
+                                          end=end_date_fractal.strftime('%Y-%m-%d'), progress=False)
+                
+                if not fractal_hist.empty and len(fractal_hist) >= 50:
+                    # Extrai preços de fechamento
+                    if 'Adj Close' in fractal_hist.columns:
+                        close_prices = fractal_hist['Adj Close'].tail(252)
+                    elif 'Close' in fractal_hist.columns:
+                        close_prices = fractal_hist['Close'].tail(252)
+                    else:
+                        close_prices = fractal_hist.iloc[:, 0].tail(252)
+                    
+                    # Se vier como DataFrame, converter para Series
+                    if isinstance(close_prices, pd.DataFrame):
+                        close_prices = close_prices.squeeze()
+                    
+                    # Calcula Hurst e volatilidade
+                    hurst = calculate_hurst_exponent(close_prices)
+                    hist_vol = calculate_historical_volatility(close_prices)
+                    
+                    # Retorno recente para interpretação
+                    recent_return = (close_prices.iloc[-1] / close_prices.iloc[-20] - 1) * 100 if len(close_prices) >= 20 else 0
+                    interpretation, trend_dir, hurst_color = get_hurst_interpretation(hurst, recent_return)
+                    
+                    # Parâmetros para cálculo de probabilidades
+                    S_frac = asset_price
+                    K_frac = selected_strike
+                    T_frac = max(days_to_exp / 365.0, 0.001)
+                    r_frac = selic_annual / 100
+                    sigma_frac = iv if iv > 0 else hist_vol  # Usa IV se disponível
+                    
+                    # Probabilidades
+                    prob_bs = prob_exercise_bs(S_frac, K_frac, T_frac, r_frac, sigma_frac)
+                    prob_frac = prob_exercise_fractal(S_frac, K_frac, T_frac, r_frac, sigma_frac, hurst)
+                    
+                    # Monte Carlo fBm
+                    mc_results = run_monte_carlo_fbm(S_frac, K_frac, r_frac, sigma_frac, hurst, T_frac, n_paths=3000)
+                    
+                    # Exibe Hurst e interpretação
+                    h1, h2, h3, h4 = st.columns(4)
+                    h1.metric("Expoente de Hurst", f"{hurst:.3f}", delta=interpretation, delta_color="off")
+                    h2.metric("Direção", trend_dir)
+                    h3.metric("Vol. Histórica", f"{hist_vol * 100:.1f}%")
+                    h4.metric("Ret. 20d", f"{recent_return:+.1f}%")
+                    
+                    # Comparativo de Probabilidades
+                    st.markdown("**Probabilidade de Exercício (PUT ITM no Vencimento)**")
+                    prob1, prob2, prob3, prob4 = st.columns(4)
+                    
+                    prob1.metric("BS N(-d2)", f"{prob_bs * 100:.1f}%", help="Modelo Black-Scholes tradicional")
+                    prob2.metric("Fractal (T^H)", f"{prob_frac * 100:.1f}%", help="Ajustado pelo expoente de Hurst")
+                    prob3.metric("Monte Carlo fBm", f"{mc_results['prob_exercise'] * 100:.1f}%", 
+                                help=f"Simulação com {mc_results['n_paths']} paths")
+                    
+                    # GAP entre modelos
+                    gap_pct = (prob_bs - prob_frac) * 100
+                    gap_label = "BS > Fractal" if gap_pct > 0 else "Fractal > BS"
+                    gap_color = "normal" if gap_pct > 0 else "inverse"
+                    prob4.metric("GAP", f"{gap_pct:+.1f} p.p.", delta=gap_label, delta_color=gap_color)
+                    
+                    # ============ FILTROS DE TENDÊNCIA ============
+                    st.markdown("### 🎯 Filtros de Tendência")
+                    filters = check_trend_filters(close_prices)
+                    
+                    f1, f2, f3, f4 = st.columns(4)
+                    
+                    f1.metric("Preço > SMA21", 
+                             "✅ SIM" if filters['filter_a'] else "❌ NÃO",
+                             delta=f"SMA21: R$ {filters['sma_21']:.2f}", delta_color="off")
+                    
+                    f2.metric("Momentum 30d > 0", 
+                             "✅ SIM" if filters['filter_b'] else "❌ NÃO",
+                             delta=f"{filters['momentum_30']:+.1f}%", delta_color="off")
+                    
+                    f3.metric("Slope > 0", 
+                             "✅ SIM" if filters['filter_c'] else "❌ NÃO",
+                             delta=f"R²: {filters['r_squared']:.2f}", delta_color="off")
+                    
+                    all_bull_text = "✅ TODOS BULLISH" if filters['all_bullish'] else "⚠️ MISTO"
+                    all_bull_color = "normal" if filters['all_bullish'] else "inverse"
+                    f4.metric("Status Geral", all_bull_text)
+                    
+                    # ============ RECOMENDAÇÃO DE VENDA ============
+                    st.markdown("### 💡 Recomendação de Venda")
+                    classification, rec_text, risk_level, rec_color = get_recommendation(hurst, filters, asset_price)
+                    
+                    # Container com destaque visual
+                    rec_col1, rec_col2 = st.columns([1, 3])
+                    
+                    with rec_col1:
+                        # Badge de classificação
+                        st.markdown(f"""
+                        <div style="background-color: {rec_color}; padding: 20px; border-radius: 10px; text-align: center;">
+                            <h2 style="color: white; margin: 0;">{classification}</h2>
+                            <p style="color: white; margin: 5px 0 0 0; font-size: 14px;">Risco: {risk_level}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with rec_col2:
+                        st.info(f"**Análise:** {rec_text}")
+                        
+                        if gap_pct > 0:
+                            st.success("→ Mercado SUPERESTIMA o risco de exercício (vantagem para vendedor)")
+                        elif gap_pct < 0:
+                            st.warning("→ Mercado SUBESTIMA o risco de exercício (desvantagem para vendedor)")
+                    
+                    # Expander com detalhes do Monte Carlo
+                    with st.expander("📊 Detalhes da Simulação Monte Carlo fBm"):
+                        mc1, mc2, mc3, mc4 = st.columns(4)
+                        mc1.metric("Paths Simulados", f"{mc_results['n_paths']:,}")
+                        mc2.metric("Horizonte", f"{mc_results['n_days']} dias")
+                        mc3.metric("Preço Final Médio", f"R$ {mc_results['avg_final']:.2f}")
+                        mc4.metric("Desvio Padrão", f"R$ {mc_results['std_final']:.2f}")
+                        
+                        mc5, mc6, mc7, mc8 = st.columns(4)
+                        mc5.metric("Percentil 5%", f"R$ {mc_results['percentile_5']:.2f}")
+                        mc6.metric("Percentil 95%", f"R$ {mc_results['percentile_95']:.2f}")
+                        mc7.metric("Nível de Ruína", f"R$ {mc_results['ruin_level']:.2f}", help="10% abaixo do strike")
+                        mc8.metric("Prob. Toque Ruína", f"{mc_results['prob_ruin'] * 100:.1f}%", 
+                                  help="Probabilidade de tocar o nível de ruína em algum momento")
+                        
+            except Exception as e:
+                st.warning(f"Erro na análise fractal: {e}")
+        
         st.markdown("---")
         
         # === ANÁLISE DE PROBABILIDADE HISTÓRICA (RECUPERADO) ===
