@@ -25,7 +25,8 @@ def gerar_grafico_historico_amplitude(series_dados, titulo, valor_atual, media_h
                 bgcolor="#333952", font=dict(color="white")
             ),
             type="date"
-        )
+        ),
+        yaxis=dict(autorange=True, fixedrange=False)
     )
     if not df_plot.empty:
         end_date = df_plot.index.max()

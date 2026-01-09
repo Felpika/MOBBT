@@ -389,7 +389,7 @@ def render():
                 st.metric("Percentil Histórico", f"{percentil_vx:.2f}%")
             
             with col2:
-                fig_vxewz = gerar_grafico_historico_amplitude(vxewz_series, "Histórico VXEWZ", valor_atual_vx, media_hist_vx)
+                fig_vxewz = gerar_grafico_historico_amplitude(vxewz_series_recent, "Histórico VXEWZ", valor_atual_vx, media_hist_vx)
                 st.plotly_chart(fig_vxewz, use_container_width=True)
 
             col_hist, col_heat = st.columns([1, 2])
@@ -397,9 +397,10 @@ def render():
                 st.plotly_chart(gerar_histograma_amplitude(vxewz_series_recent, "Distribuição (VXEWZ)", valor_atual_vx, media_hist_vx, nbins=50), use_container_width=True)
             with col_heat:
                  for ativo in ATIVOS_ANALISE:
-                     sufixo = f" ({ativo})"
+                     ativo_clean = ativo.replace('.SA', '')
+                     sufixo = f" ({ativo_clean})"
                      st.markdown(f"**{ativo}**")
-                     cols_ativo = [c for c in resultados_vx['Retorno Médio'].columns if ativo in c]
+                     cols_ativo = [c for c in resultados_vx['Retorno Médio'].columns if ativo_clean in c]
                      
                      if cols_ativo:
                          df_ret = resultados_vx['Retorno Médio'][cols_ativo].rename(columns=lambda x: x.replace(sufixo, ''))
