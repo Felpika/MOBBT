@@ -15,7 +15,8 @@ from src.models.black_scholes import black_scholes_put, implied_volatility, calc
 from src.models.fractal_analytics import (
     calculate_hurst_exponent, get_hurst_interpretation,
     prob_exercise_bs, prob_exercise_fractal, calculate_historical_volatility,
-    run_monte_carlo_fbm, check_trend_filters, get_recommendation
+    run_monte_carlo_fbm, check_trend_filters, get_recommendation,
+    calculate_iv_rank
 )
 
 def render():
@@ -279,6 +280,67 @@ def render():
                     gap_label = "BS > Fractal" if gap_pct > 0 else "Fractal > BS"
                     gap_color = "normal" if gap_pct > 0 else "inverse"
                     prob4.metric("GAP", f"{gap_pct:+.1f} p.p.", delta=gap_label, delta_color=gap_color)
+                    
+                    # ============ IV RANK (VOLATILITY CONE) ============
+                    st.markdown("### 📊 IV Rank (Volatility Cone)")
+                    
+                    # Calcula IV Rank
+                    iv_rank_data = calculate_iv_rank(sigma_frac, close_prices)
+                    
+                    iv1, iv2, iv3, iv4 = st.columns(4)
+                    
+                    # IV Rank com cor
+                    iv1.metric(
+                        "IV Rank", 
+                        f"{iv_rank_data['iv_rank']:.0f}%",
+                        delta=iv_rank_data['interpretation'],
+                        delta_color="off",
+                        help="Posição da IV atual no range histórico (0%=mínimo, 100%=máximo)"
+                    )
+                    
+                    # Sinal para venda
+                    sell_colors = {
+                        "Excelente": "normal",
+                        "Bom": "normal", 
+                        "Neutro": "off",
+                        "Cautela": "inverse",
+                        "Evitar": "inverse"
+                    }
+                    iv2.metric(
+                        "Sinal p/ Venda",
+                        iv_rank_data['sell_signal'],
+                        delta="Prêmio atrativo" if iv_rank_data['iv_rank'] >= 60 else "Prêmio baixo",
+                        delta_color=sell_colors.get(iv_rank_data['sell_signal'], "off")
+                    )
+                    
+                    # Range do cone
+                    iv3.metric(
+                        "HV Mínima (1a)",
+                        f"{iv_rank_data['hv_min']:.1f}%",
+                        help="Volatilidade histórica mínima no último ano"
+                    )
+                    iv4.metric(
+                        "HV Máxima (1a)",
+                        f"{iv_rank_data['hv_max']:.1f}%",
+                        help="Volatilidade histórica máxima no último ano"
+                    )
+                    
+                    # Barra visual do IV Rank
+                    iv_rank_val = iv_rank_data['iv_rank']
+                    bar_color = iv_rank_data['color']
+                    st.markdown(f"""
+                    <div style="background-color: #1E1E1E; border-radius: 10px; padding: 10px; margin: 10px 0;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span style="color: #888;">0% (Barato)</span>
+                            <span style="color: #888;">IV Rank: {iv_rank_val:.0f}%</span>
+                            <span style="color: #888;">100% (Caro)</span>
+                        </div>
+                        <div style="background-color: #333; border-radius: 5px; height: 20px; position: relative;">
+                            <div style="background-color: {bar_color}; width: {iv_rank_val}%; height: 100%; border-radius: 5px;"></div>
+                            <div style="position: absolute; left: 50%; top: 0; height: 100%; width: 2px; background-color: #666;"></div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     # ============ FILTROS DE TENDÊNCIA ============
                     st.markdown("### 🎯 Filtros de Tendência")

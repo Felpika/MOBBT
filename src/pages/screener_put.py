@@ -21,7 +21,7 @@ from src.models.black_scholes import implied_volatility, calculate_greeks
 from src.models.fractal_analytics import (
     calculate_hurst_exponent, get_hurst_interpretation,
     prob_exercise_bs, prob_exercise_fractal, calculate_historical_volatility,
-    check_trend_filters, get_recommendation
+    check_trend_filters, get_recommendation, calculate_iv_rank
 )
 
 
@@ -130,6 +130,11 @@ def scan_single_ticker(ticker: str, expiry: date, selic_annual: float) -> dict:
         # 12. Recomendação
         classification, rec_text, risk_level, rec_color = get_recommendation(hurst, filters, spot)
         
+        # 13. IV Rank
+        iv_rank_data = calculate_iv_rank(iv, close_prices)
+        iv_rank = iv_rank_data['iv_rank']
+        iv_signal = iv_rank_data['sell_signal']
+        
         return {
             'Ticker': ticker,
             'Opção': option_ticker,
@@ -152,6 +157,8 @@ def scan_single_ticker(ticker: str, expiry: date, selic_annual: float) -> dict:
             'Risco': risk_level,
             '_rec_color': rec_color,
             'Vol': round(b3_data.get('volume', 0), 0),
+            'IV Rank': round(iv_rank, 0),
+            'IV Sinal': iv_signal,
         }
         
     except Exception as e:
@@ -326,7 +333,7 @@ def render():
         # Colunas para exibição
         display_cols = [
             'Ticker', 'Opção', 'Spot', 'Strike', 'Prêmio', 'Moneyness',
-            'Yield %', '% CDI', 'Hurst', 'Tipo', 'Direção',
+            'Yield %', '% CDI', 'IV Rank', 'IV Sinal', 'Hurst', 'Tipo', 'Direção',
             'SMA21', 'Mom 30d', 'Slope', 'Prob BS', 'Prob Frac', 'Recomendação'
         ]
         
@@ -344,6 +351,7 @@ def render():
             'Moneyness': '{:.1f}%',
             'Yield %': '{:.2f}%',
             '% CDI': '{:.0f}%',
+            'IV Rank': '{:.0f}%',
             'Hurst': '{:.3f}',
             'Prob BS': '{:.1f}%',
             'Prob Frac': '{:.1f}%',

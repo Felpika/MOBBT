@@ -151,6 +151,152 @@ def calculate_historical_volatility(prices: pd.Series) -> float:
 
 
 # =============================================================================
+# IV RANK - VOLATILITY CONE
+# =============================================================================
+
+def build_volatility_cone(prices: pd.Series, windows: list = None) -> dict:
+    """
+    Constrói o Volatility Cone calculando HV para múltiplas janelas.
+    
+    Args:
+        prices: Série de preços (idealmente 252+ dias)
+        windows: Lista de janelas em dias [10, 20, 30, 60, 90, 252]
+    
+    Returns:
+        dict com estatísticas do cone para cada janela
+    """
+    if windows is None:
+        windows = [10, 20, 30, 60, 90, 180, 252]
+    
+    log_returns = np.log(prices / prices.shift(1)).dropna()
+    
+    cone = {}
+    all_hvs = []
+    
+    for window in windows:
+        if len(log_returns) < window:
+            continue
+        
+        # Calcula HV rolling para esta janela
+        rolling_hv = log_returns.rolling(window).std() * np.sqrt(252)
+        rolling_hv = rolling_hv.dropna()
+        
+        if len(rolling_hv) == 0:
+            continue
+        
+        hvs = rolling_hv.values
+        all_hvs.extend(hvs)
+        
+        cone[window] = {
+            'min': float(np.min(hvs)),
+            'p25': float(np.percentile(hvs, 25)),
+            'median': float(np.median(hvs)),
+            'p75': float(np.percentile(hvs, 75)),
+            'max': float(np.max(hvs)),
+            'current': float(hvs[-1]) if len(hvs) > 0 else 0
+        }
+    
+    # Estatísticas globais do cone
+    if all_hvs:
+        cone['global'] = {
+            'min': float(np.min(all_hvs)),
+            'max': float(np.max(all_hvs)),
+            'median': float(np.median(all_hvs))
+        }
+    
+    return cone
+
+
+def calculate_iv_rank(current_iv: float, prices: pd.Series, lookback: int = 252) -> dict:
+    """
+    Calcula IV Rank comparando IV atual com o Volatility Cone histórico.
+    
+    Args:
+        current_iv: Volatilidade implícita atual (decimal, ex: 0.45 para 45%)
+        prices: Série de preços para calcular HV histórica
+        lookback: Período de lookback em dias
+    
+    Returns:
+        dict com iv_rank, interpretação e dados do cone
+    """
+    cone = build_volatility_cone(prices)
+    
+    if 'global' not in cone:
+        return {
+            'iv_rank': 50,
+            'interpretation': 'NEUTRO',
+            'color': '#636EFA',
+            'cone': cone,
+            'hv_min': 0,
+            'hv_max': 0
+        }
+    
+    hv_min = cone['global']['min']
+    hv_max = cone['global']['max']
+    
+    # Evita divisão por zero
+    if hv_max == hv_min:
+        iv_rank = 50
+    else:
+        iv_rank = (current_iv - hv_min) / (hv_max - hv_min) * 100
+        iv_rank = max(0, min(100, iv_rank))
+    
+    # Interpretação
+    if iv_rank >= 80:
+        interpretation = "MUITO ALTA"
+        color = "#39E58C"  # Verde - excelente para venda
+        sell_signal = "Excelente"
+    elif iv_rank >= 60:
+        interpretation = "ALTA"
+        color = "#00D4FF"  # Azul claro - bom para venda
+        sell_signal = "Bom"
+    elif iv_rank >= 40:
+        interpretation = "NORMAL"
+        color = "#636EFA"  # Azul - neutro
+        sell_signal = "Neutro"
+    elif iv_rank >= 20:
+        interpretation = "BAIXA"
+        color = "#FFB302"  # Amarelo - cautela
+        sell_signal = "Cautela"
+    else:
+        interpretation = "MUITO BAIXA"
+        color = "#FF4B4B"  # Vermelho - evitar
+        sell_signal = "Evitar"
+    
+    return {
+        'iv_rank': round(iv_rank, 1),
+        'interpretation': interpretation,
+        'color': color,
+        'sell_signal': sell_signal,
+        'cone': cone,
+        'hv_min': round(hv_min * 100, 1),
+        'hv_max': round(hv_max * 100, 1),
+        'current_iv': round(current_iv * 100, 1)
+    }
+
+
+def calculate_iv_percentile(current_iv: float, prices: pd.Series, lookback: int = 252) -> float:
+    """
+    Calcula IV Percentile: % de dias que IV foi MENOR que a atual.
+    
+    Alternativa ao IV Rank, mais robusta a outliers.
+    """
+    log_returns = np.log(prices / prices.shift(1)).dropna()
+    
+    # Calcula HV diária (usando janela de 20 dias como proxy)
+    rolling_hv = log_returns.rolling(20).std() * np.sqrt(252)
+    rolling_hv = rolling_hv.dropna().tail(lookback)
+    
+    if len(rolling_hv) == 0:
+        return 50.0
+    
+    days_below = (rolling_hv < current_iv).sum()
+    percentile = (days_below / len(rolling_hv)) * 100
+    
+    return round(percentile, 1)
+
+
+# =============================================================================
 # FRACTIONAL BROWNIAN MOTION MONTE CARLO
 # =============================================================================
 
