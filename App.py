@@ -21,6 +21,7 @@ from src.pages import (
     acoes_br,
     radar_insiders,
     calculadora_put,
+    screener_put,
     exportador_dfp
 )
 
@@ -42,6 +43,7 @@ with st.sidebar:
             "Ações BR",
             "Radar de Insiders",
             "Calculadora Put",
+            "Screener Put",
             "Exportador DFP",
         ],
         icons=[
@@ -55,6 +57,7 @@ with st.sidebar:
             "kanban-fill",
             "person-check-fill",
             "calculator",
+            "search",
             "file-earmark-spreadsheet",
         ],
         menu_icon="speedometer2",
@@ -113,6 +116,9 @@ elif pagina_selecionada == "Radar de Insiders":
 
 elif pagina_selecionada == "Calculadora Put":
     calculadora_put.render()
+
+elif pagina_selecionada == "Screener Put":
+    screener_put.render()
 
 elif pagina_selecionada == "Exportador DFP":
     exportador_dfp.render()
